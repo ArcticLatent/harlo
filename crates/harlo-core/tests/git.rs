@@ -92,11 +92,13 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("runtime")
 }
 
-fn state(path: &str, staged: bool, unstaged: bool) -> FileState {
+fn state(path: &str, staged: bool, unstaged: bool, code: char) -> FileState {
     FileState {
         path: path.to_owned(),
         staged,
         unstaged,
+        code,
+        from: None,
     }
 }
 
@@ -123,11 +125,14 @@ fn status_reads_branch_counts_and_each_kind_of_entry() {
     assert_eq!(
         status.files,
         vec![
-            state("staged.rs", true, false),
-            state("with space.md", false, true),
-            state("new name.rs", true, true),
-            state("both.rs", true, true),
-            state("untracked.txt", false, true),
+            state("staged.rs", true, false, 'M'),
+            state("with space.md", false, true, 'M'),
+            FileState {
+                from: Some("old name.rs".to_owned()),
+                ..state("new name.rs", true, true, 'M')
+            },
+            state("both.rs", true, true, 'U'),
+            state("untracked.txt", false, true, '?'),
         ]
     );
 }
@@ -155,8 +160,14 @@ fn stage_commit_and_push_in_a_real_repository() {
     rt.block_on(repo.stage(&["a.txt".to_owned()]))
         .expect("stage");
     let status = rt.block_on(repo.status()).expect("status");
-    assert_eq!(status.file("a.txt"), Some(&state("a.txt", true, false)));
-    assert_eq!(status.file("b.txt"), Some(&state("b.txt", false, true)));
+    assert_eq!(
+        status.file("a.txt"),
+        Some(&state("a.txt", true, false, 'A'))
+    );
+    assert_eq!(
+        status.file("b.txt"),
+        Some(&state("b.txt", false, true, '?'))
+    );
 
     // Before the first commit, unstaging still works.
     rt.block_on(repo.unstage(&["a.txt".to_owned()]))
@@ -168,7 +179,7 @@ fn stage_commit_and_push_in_a_real_repository() {
     let summary = rt.block_on(repo.commit("Add a")).expect("commit");
     assert!(summary.ends_with(" Add a"), "{summary}");
     let status = rt.block_on(repo.status()).expect("status");
-    assert_eq!(status.files, vec![state("b.txt", false, true)]);
+    assert_eq!(status.files, vec![state("b.txt", false, true, '?')]);
 
     let remote = scratch.remote.to_str().expect("utf-8 path");
     scratch.run(&scratch.work, &["remote", "add", "origin", remote]);
@@ -289,9 +300,12 @@ fn a_subfolder_stages_by_paths_from_the_root() {
     let status = rt.block_on(repo.status()).expect("status");
     assert_eq!(
         status.file("app/[x].txt"),
-        Some(&state("app/[x].txt", true, false))
+        Some(&state("app/[x].txt", true, false, 'A'))
     );
-    assert_eq!(status.file("top.txt"), Some(&state("top.txt", true, false)));
+    assert_eq!(
+        status.file("top.txt"),
+        Some(&state("top.txt", true, false, 'A'))
+    );
 }
 
 #[test]
@@ -384,4 +398,41 @@ async fn the_global_name_and_email_are_read_set_and_removed() {
 async fn without_git_nothing_is_set_up() {
     let global = Global::new().env("PATH", "/nonexistent");
     assert_eq!(global.setup().await, harlo_core::git::Setup::default());
+}
+
+#[test]
+fn branches_are_listed_switched_and_a_files_diff_read() {
+    let scratch = Scratch::new();
+    let repo = scratch.repo();
+    let rt = runtime();
+    scratch.write("a.txt", "one\n");
+    rt.block_on(repo.stage(&["a.txt".to_owned()]))
+        .expect("stage");
+    rt.block_on(repo.commit("Add a")).expect("commit");
+    scratch.run(&scratch.work, &["branch", "fix"]);
+
+    let branches = rt.block_on(repo.branches()).expect("branches");
+    assert_eq!(branches.current.as_deref(), Some("main"));
+    let mut names: Vec<&str> = branches.local.iter().map(|b| b.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["fix", "main"]);
+    assert!(branches.local.iter().all(|b| b.date > 0));
+
+    // A changed file's diff, from the root, whatever the folder.
+    scratch.write("a.txt", "two\n");
+    let patch = rt.block_on(repo.diff_file("a.txt")).expect("diff");
+    assert!(patch.contains("-one") && patch.contains("+two"), "{patch}");
+    let status = rt.block_on(repo.status()).expect("status");
+    assert_eq!(status.file("a.txt").map(|f| f.code), Some('M'));
+
+    // Switching with the change stashed first.
+    let said = rt
+        .block_on(repo.switch("fix", false, true))
+        .expect("switched");
+    assert!(said.contains("fix"), "{said}");
+    let branches = rt.block_on(repo.branches()).expect("branches");
+    assert_eq!(branches.current.as_deref(), Some("fix"));
+    assert!(rt.block_on(repo.status()).expect("status").files.is_empty());
+    rt.block_on(repo.switch("-x", false, false))
+        .expect_err("not a branch");
 }

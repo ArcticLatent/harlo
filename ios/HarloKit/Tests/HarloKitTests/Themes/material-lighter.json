@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#cceae7",
+      "userMessageBackground": "#e7eaec"
+    },
+    "markdown": {
+      "inlineCode": "#91b859",
+      "inlineCodeBackground": "#e7eaec",
+      "link": "#6182b8"
+    },
+    "primary": {
+      "base": "#6182b8"
+    },
+    "status": {
+      "error": "#ff5370",
+      "info": "#39adb5",
+      "success": "#91b859",
+      "warning": "#ffb62c"
+    },
+    "surface": {
+      "background": "#fafafa",
+      "elevated": "#e7eaec",
+      "foreground": "#316c67",
+      "muted": "#fefefe",
+      "mutedForeground": "#316c67",
+      "subtle": "#e7eaec"
+    },
+    "syntax": {
+      "base": {
+        "background": "#e7eaec",
+        "comment": "#316c67",
+        "function": "#6182b8",
+        "keyword": "#7c4dff",
+        "number": "#f76d47",
+        "operator": "#80cbc4",
+        "string": "#91b859",
+        "type": "#ffb62c",
+        "variable": "#ff5370"
+      },
+      "highlights": {
+        "diffAdded": "#91b859",
+        "diffModified": "#ffb62c",
+        "diffRemoved": "#ff5370"
+      }
+    }
+  },
+  "light": true,
+  "name": "Material Lighter"
+}

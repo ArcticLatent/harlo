@@ -20,7 +20,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 /// A file with changes, and how much of them is staged.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileState {
     /// Path relative to the repository's root.
     pub path: String,
@@ -28,6 +28,36 @@ pub struct FileState {
     pub staged: bool,
     /// Some of its changes aren't staged.
     pub unstaged: bool,
+    /// Git's letter for the change: `M` modified, `A` added, `D` deleted,
+    /// `R` renamed, `C` copied, `T` type changed, `U` in conflict, `?`
+    /// untracked. The unstaged change's when there is one.
+    pub code: char,
+    /// The path it was renamed or copied from, relative to the root.
+    pub from: Option<String>,
+}
+
+/// A branch, as [`Repo::branches`] lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Branch {
+    /// Its short name, such as `main` or `origin/main`.
+    pub name: String,
+    /// The branch it pushes to, such as `origin/main`; empty when none.
+    pub upstream: String,
+    /// Commits on it that its upstream doesn't have.
+    pub ahead: u32,
+    /// When its last commit was made, in seconds since the Unix epoch.
+    pub date: i64,
+}
+
+/// A repository's branches, the most recently committed to first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Branches {
+    /// The branch checked out; `None` when `HEAD` is detached.
+    pub current: Option<String>,
+    /// The local branches.
+    pub local: Vec<Branch>,
+    /// The remote-tracking branches, such as `origin/main`.
+    pub remote: Vec<Branch>,
 }
 
 /// A repository's branch and changed files.
@@ -270,8 +300,127 @@ impl Repo {
             .collect())
     }
 
+    /// Lists the repository's local and remote-tracking branches.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the folder isn't in a Git repository or `git` can't run.
+    pub async fn branches(&self) -> Result<Branches, Error> {
+        let out = self
+            .git(&[
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--format=%(refname)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)",
+                "refs/heads",
+                "refs/remotes",
+            ])
+            .await?;
+        let current = self.git(&["branch", "--show-current"]).await?;
+        let mut branches = Branches {
+            current: Some(current.trim().to_owned()).filter(|c| !c.is_empty()),
+            ..Branches::default()
+        };
+        for line in out.lines() {
+            let mut fields = line.split('\0');
+            let (Some(full), Some(name)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            let upstream = fields.next().unwrap_or_default().to_owned();
+            let ahead = fields
+                .next()
+                .unwrap_or_default()
+                .split(", ")
+                .find_map(|part| part.strip_prefix("ahead "))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_default();
+            let date = fields
+                .next()
+                .and_then(|d| d.trim().parse().ok())
+                .unwrap_or_default();
+            let branch = Branch {
+                name: name.to_owned(),
+                upstream,
+                ahead,
+                date,
+            };
+            if full.starts_with("refs/heads/") {
+                branches.local.push(branch);
+            } else if !full.ends_with("/HEAD") {
+                branches.remote.push(branch);
+            }
+        }
+        Ok(branches)
+    }
+
+    /// Switches to branch `name`, and says what Git did.
+    ///
+    /// With `remote`, `name` is a remote-tracking branch such as
+    /// `origin/fix`, and a local branch tracking it is made (`fix`). With
+    /// `stash`, uncommitted changes, untracked files among them, are
+    /// stashed first.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the name is empty or starts with `-`, the stash or the
+    /// switch fails, or `git` can't run.
+    pub async fn switch(&self, name: &str, remote: bool, stash: bool) -> Result<String, Error> {
+        if name.is_empty() || name.starts_with('-') {
+            return Err(Error {
+                message: format!("“{name}” isn't a branch."),
+            });
+        }
+        let mut said = Vec::new();
+        if stash {
+            let note = format!("Harlo: before switching to {name}");
+            let (out, err) = self
+                .run(&["stash", "push", "--include-untracked", "-m", &note])
+                .await?;
+            said.push(format!("{}{}", out.trim(), err.trim()));
+        }
+        let (out, err) = if remote {
+            self.run(&["switch", "--track", name]).await?
+        } else {
+            self.run(&["switch", name]).await?
+        };
+        said.push(format!("{}{}", out.trim(), err.trim()));
+        Ok(said
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
+    /// Returns the unified diff of `path` (relative to the repository's
+    /// root) against the last commit, staged and unstaged changes
+    /// together; empty when it has none.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the folder isn't in a Git repository or `git` can't run.
+    pub async fn diff_file(&self, path: &str) -> Result<String, Error> {
+        let spec = format!(":(top,literal){path}");
+        self.git(&["diff", "HEAD", "--no-color", "--no-ext-diff", "--", &spec])
+            .await
+    }
+
+    /// Returns the repository's root folder.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the folder isn't in a Git repository or `git` can't run.
+    pub async fn root(&self) -> Result<PathBuf, Error> {
+        let out = self.git(&["rev-parse", "--show-toplevel"]).await?;
+        Ok(PathBuf::from(out.trim_end_matches(['\n', '\r'])))
+    }
+
     /// Runs `git` with `args` and returns what it printed.
     async fn git(&self, args: &[&str]) -> Result<String, Error> {
+        self.run(args).await.map(|(out, _)| out)
+    }
+
+    /// Runs `git` with `args` and returns what it printed to its output and
+    /// to its errors, which some commands use for what they did.
+    async fn run(&self, args: &[&str]) -> Result<(String, String), Error> {
         let output = Command::new("git")
             .args(args)
             .current_dir(&self.dir)
@@ -284,7 +433,10 @@ impl Repo {
                 message: format!("Couldn't run git: {e}"),
             })?;
         if output.status.success() {
-            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+            return Ok((
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
         }
         let said = String::from_utf8_lossy(&output.stderr);
         let message = match said.trim() {
@@ -306,15 +458,21 @@ pub fn parse_status(out: &str) -> Status {
             "#" => branch_header(&mut status, rest),
             "1" => status.files.push(changed(rest, ORDINARY_FIELDS)),
             "2" => {
-                status.files.push(changed(rest, RENAMED_FIELDS));
+                let mut file = changed(rest, RENAMED_FIELDS);
                 // A rename's original path follows as its own record.
-                let _ = records.next();
+                file.from = records.next().map(str::to_owned);
+                status.files.push(file);
             }
-            "u" => status.files.push(changed(rest, UNMERGED_FIELDS)),
+            "u" => status.files.push(FileState {
+                code: 'U',
+                ..changed(rest, UNMERGED_FIELDS)
+            }),
             "?" => status.files.push(FileState {
                 path: rest.to_owned(),
                 staged: false,
                 unstaged: true,
+                code: '?',
+                from: None,
             }),
             _ => {}
         }
@@ -368,6 +526,8 @@ fn changed(rest: &str, fields: usize) -> FileState {
         path,
         staged: index != '.',
         unstaged: tree != '.',
+        code: if tree == '.' { index } else { tree },
+        from: None,
     }
 }
 

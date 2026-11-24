@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#b8c5db",
+      "userMessageBackground": "#c2d0e7"
+    },
+    "markdown": {
+      "inlineCode": "#4f894c",
+      "inlineCodeBackground": "#c2d0e7",
+      "link": "#3b6ea8"
+    },
+    "primary": {
+      "base": "#3b6ea8"
+    },
+    "status": {
+      "error": "#99324b",
+      "info": "#398eac",
+      "success": "#4f894c",
+      "warning": "#9a7500"
+    },
+    "surface": {
+      "background": "#e5e9f0",
+      "elevated": "#c2d0e7",
+      "foreground": "#2e3440",
+      "muted": "#fafbfc",
+      "mutedForeground": "#424d5e",
+      "subtle": "#c2d0e7"
+    },
+    "syntax": {
+      "base": {
+        "background": "#c2d0e7",
+        "comment": "#4d586a",
+        "function": "#3b6ea8",
+        "keyword": "#97365b",
+        "number": "#ac4426",
+        "operator": "#2e3440",
+        "string": "#4f894c",
+        "type": "#9a7500",
+        "variable": "#99324b"
+      },
+      "highlights": {
+        "diffAdded": "#4f894c",
+        "diffModified": "#9a7500",
+        "diffRemoved": "#99324b"
+      }
+    }
+  },
+  "light": true,
+  "name": "Nord Light"
+}

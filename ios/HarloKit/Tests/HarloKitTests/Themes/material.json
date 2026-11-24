@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#314549",
+      "userMessageBackground": "#2e3c43"
+    },
+    "markdown": {
+      "inlineCode": "#c3e88d",
+      "inlineCodeBackground": "#2e3c43",
+      "link": "#82aaff"
+    },
+    "primary": {
+      "base": "#82aaff"
+    },
+    "status": {
+      "error": "#f07178",
+      "info": "#89ddff",
+      "success": "#c3e88d",
+      "warning": "#ffcb6b"
+    },
+    "surface": {
+      "background": "#263238",
+      "elevated": "#2e3c43",
+      "foreground": "#eeffff",
+      "muted": "#222d32",
+      "mutedForeground": "#b2ccd6",
+      "subtle": "#2e3c43"
+    },
+    "syntax": {
+      "base": {
+        "background": "#2e3c43",
+        "comment": "#96b0ba",
+        "function": "#82aaff",
+        "keyword": "#c792ea",
+        "number": "#f78c6c",
+        "operator": "#eeffff",
+        "string": "#c3e88d",
+        "type": "#ffcb6b",
+        "variable": "#f07178"
+      },
+      "highlights": {
+        "diffAdded": "#c3e88d",
+        "diffModified": "#ffcb6b",
+        "diffRemoved": "#f07178"
+      }
+    }
+  },
+  "light": false,
+  "name": "Material"
+}

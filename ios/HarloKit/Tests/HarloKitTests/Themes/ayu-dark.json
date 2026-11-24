@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#202229",
+      "userMessageBackground": "#131721"
+    },
+    "markdown": {
+      "inlineCode": "#aad94c",
+      "inlineCodeBackground": "#131721",
+      "link": "#59c2ff"
+    },
+    "primary": {
+      "base": "#59c2ff"
+    },
+    "status": {
+      "error": "#f07178",
+      "info": "#95e6cb",
+      "success": "#aad94c",
+      "warning": "#ffb454"
+    },
+    "surface": {
+      "background": "#0b0e14",
+      "elevated": "#131721",
+      "foreground": "#e6e1cf",
+      "muted": "#0a0d12",
+      "mutedForeground": "#bfbdb6",
+      "subtle": "#131721"
+    },
+    "syntax": {
+      "base": {
+        "background": "#131721",
+        "comment": "#7f8488",
+        "function": "#59c2ff",
+        "keyword": "#d2a6ff",
+        "number": "#ff8f40",
+        "operator": "#e6e1cf",
+        "string": "#aad94c",
+        "type": "#ffb454",
+        "variable": "#f07178"
+      },
+      "highlights": {
+        "diffAdded": "#aad94c",
+        "diffModified": "#ffb454",
+        "diffRemoved": "#f07178"
+      }
+    }
+  },
+  "light": false,
+  "name": "Ayu Dark"
+}

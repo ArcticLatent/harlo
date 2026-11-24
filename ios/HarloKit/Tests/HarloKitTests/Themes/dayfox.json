@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#d3c7bb",
+      "userMessageBackground": "#dbd1dd"
+    },
+    "markdown": {
+      "inlineCode": "#396847",
+      "inlineCodeBackground": "#dbd1dd",
+      "link": "#2848a9"
+    },
+    "primary": {
+      "base": "#2848a9"
+    },
+    "status": {
+      "error": "#a5222f",
+      "info": "#287980",
+      "success": "#396847",
+      "warning": "#ac5402"
+    },
+    "surface": {
+      "background": "#f6f2ee",
+      "elevated": "#dbd1dd",
+      "foreground": "#3d2b5a",
+      "muted": "#fdfcfc",
+      "mutedForeground": "#74465b",
+      "subtle": "#dbd1dd"
+    },
+    "syntax": {
+      "base": {
+        "background": "#dbd1dd",
+        "comment": "#534c45",
+        "function": "#2848a9",
+        "keyword": "#6e33ce",
+        "number": "#955f61",
+        "operator": "#3d2b5a",
+        "string": "#396847",
+        "type": "#ac5402",
+        "variable": "#a5222f"
+      },
+      "highlights": {
+        "diffAdded": "#396847",
+        "diffModified": "#ac5402",
+        "diffRemoved": "#a5222f"
+      }
+    }
+  },
+  "light": true,
+  "name": "Dayfox"
+}

@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#49483e",
+      "userMessageBackground": "#383830"
+    },
+    "markdown": {
+      "inlineCode": "#a6e22e",
+      "inlineCodeBackground": "#383830",
+      "link": "#66d9ef"
+    },
+    "primary": {
+      "base": "#66d9ef"
+    },
+    "status": {
+      "error": "#f92672",
+      "info": "#a1efe4",
+      "success": "#a6e22e",
+      "warning": "#f4bf75"
+    },
+    "surface": {
+      "background": "#272822",
+      "elevated": "#383830",
+      "foreground": "#f8f8f2",
+      "muted": "#23241f",
+      "mutedForeground": "#bebaa6",
+      "subtle": "#383830"
+    },
+    "syntax": {
+      "base": {
+        "background": "#383830",
+        "comment": "#a8a490",
+        "function": "#66d9ef",
+        "keyword": "#ae81ff",
+        "number": "#fd971f",
+        "operator": "#f8f8f2",
+        "string": "#a6e22e",
+        "type": "#f4bf75",
+        "variable": "#f92672"
+      },
+      "highlights": {
+        "diffAdded": "#a6e22e",
+        "diffModified": "#f4bf75",
+        "diffRemoved": "#f92672"
+      }
+    }
+  },
+  "light": false,
+  "name": "Monokai"
+}

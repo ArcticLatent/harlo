@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use harlo_client::{PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
+use harlo_client::{AvatarPick, PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
 use harlo_core::phone::{self, Phone, Relay, RelayStatus, Settings};
 use harlo_core::server::Location;
 use tokio::sync::watch;
@@ -88,6 +88,7 @@ impl PhoneHost {
                 relay: PhoneRelay::Off,
                 devices: Vec::new(),
                 connected: Vec::new(),
+                avatar_pick: None,
             }),
         })
     }
@@ -160,6 +161,7 @@ impl PhoneHost {
         }
         if let Some(running) = inner.running.clone() {
             running.set_paused(wanted.paused);
+            running.set_theme(wanted.theme.clone());
             if wanted.relay && inner.relay.is_none() {
                 match running.relay(&phone::relay_url()) {
                     Ok(relay) => inner.relay = Some(relay),
@@ -193,6 +195,7 @@ impl PhoneHost {
             hidden: wanted.hidden.clone(),
             listen: SocketAddr::from(([0, 0, 0, 0], wanted.port)),
             paused: wanted.paused,
+            theme: wanted.theme.clone(),
         })
         .await
         .map_err(|e| format!("Couldn't listen for phones: {e}"))?;
@@ -228,6 +231,11 @@ impl PhoneHost {
     /// Rebuilds the state from what runs, and bumps its version.
     async fn refresh(&self) {
         let inner = self.inner.lock().await;
+        let avatar_pick = inner
+            .running
+            .as_ref()
+            .and_then(|p| p.avatar_pick())
+            .map(|(serial, name)| AvatarPick { serial, name });
         let (port, devices, connected) = match &inner.running {
             Some(p) => (Some(p.address().port()), p.devices(), p.connected()),
             None => (
@@ -266,6 +274,7 @@ impl PhoneHost {
                 })
                 .collect(),
             connected,
+            avatar_pick,
         };
     }
 

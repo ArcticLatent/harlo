@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#393836",
+      "userMessageBackground": "#282727"
+    },
+    "markdown": {
+      "inlineCode": "#8a9a7b",
+      "inlineCodeBackground": "#282727",
+      "link": "#8ba4b0"
+    },
+    "primary": {
+      "base": "#8ba4b0"
+    },
+    "status": {
+      "error": "#c4746e",
+      "info": "#8ea4a2",
+      "success": "#8a9a7b",
+      "warning": "#c4b28a"
+    },
+    "surface": {
+      "background": "#181616",
+      "elevated": "#282727",
+      "foreground": "#c5c9c5",
+      "muted": "#161414",
+      "mutedForeground": "#9ca39c",
+      "subtle": "#282727"
+    },
+    "syntax": {
+      "base": {
+        "background": "#282727",
+        "comment": "#90958f",
+        "function": "#8ba4b0",
+        "keyword": "#a292a3",
+        "number": "#b6927b",
+        "operator": "#c5c9c5",
+        "string": "#8a9a7b",
+        "type": "#c4b28a",
+        "variable": "#c4746e"
+      },
+      "highlights": {
+        "diffAdded": "#8a9a7b",
+        "diffModified": "#c4b28a",
+        "diffRemoved": "#c4746e"
+      }
+    }
+  },
+  "light": false,
+  "name": "Kanagawa Dragon"
+}

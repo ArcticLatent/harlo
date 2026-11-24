@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#2f3742",
+      "userMessageBackground": "#151b23"
+    },
+    "markdown": {
+      "inlineCode": "#57ab5a",
+      "inlineCodeBackground": "#151b23",
+      "link": "#539bf5"
+    },
+    "primary": {
+      "base": "#539bf5"
+    },
+    "status": {
+      "error": "#f47067",
+      "info": "#39c5cf",
+      "success": "#57ab5a",
+      "warning": "#c69026"
+    },
+    "surface": {
+      "background": "#0d1117",
+      "elevated": "#151b23",
+      "foreground": "#d1d7e0",
+      "muted": "#0c0f15",
+      "mutedForeground": "#9ea5ae",
+      "subtle": "#151b23"
+    },
+    "syntax": {
+      "base": {
+        "background": "#151b23",
+        "comment": "#7c838c",
+        "function": "#539bf5",
+        "keyword": "#b083f0",
+        "number": "#f69d50",
+        "operator": "#d1d7e0",
+        "string": "#57ab5a",
+        "type": "#c69026",
+        "variable": "#f47067"
+      },
+      "highlights": {
+        "diffAdded": "#57ab5a",
+        "diffModified": "#c69026",
+        "diffRemoved": "#f47067"
+      }
+    }
+  },
+  "light": false,
+  "name": "GitHub Dark Dimmed"
+}

@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#393552",
+      "userMessageBackground": "#2a273f"
+    },
+    "markdown": {
+      "inlineCode": "#3e8fb0",
+      "inlineCodeBackground": "#2a273f",
+      "link": "#c4a7e7"
+    },
+    "primary": {
+      "base": "#c4a7e7"
+    },
+    "status": {
+      "error": "#eb6f92",
+      "info": "#9ccfd8",
+      "success": "#3e8fb0",
+      "warning": "#ea9a97"
+    },
+    "surface": {
+      "background": "#232136",
+      "elevated": "#2a273f",
+      "foreground": "#e0def4",
+      "muted": "#201e31",
+      "mutedForeground": "#a8a5c0",
+      "subtle": "#2a273f"
+    },
+    "syntax": {
+      "base": {
+        "background": "#2a273f",
+        "comment": "#918da9",
+        "function": "#c4a7e7",
+        "keyword": "#f6c177",
+        "number": "#f6c177",
+        "operator": "#e0def4",
+        "string": "#3e8fb0",
+        "type": "#ea9a97",
+        "variable": "#eb6f92"
+      },
+      "highlights": {
+        "diffAdded": "#3e8fb0",
+        "diffModified": "#ea9a97",
+        "diffRemoved": "#eb6f92"
+      }
+    }
+  },
+  "light": false,
+  "name": "Rosé Pine Moon"
+}

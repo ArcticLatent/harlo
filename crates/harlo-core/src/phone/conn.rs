@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use super::requests;
 use super::rows::{self, Rows};
+use super::work;
 use super::{Hub, Sealed, Server, key_bytes, lock, now_secs, random_id};
 use crate::workspace::{Event, EventKind, Message};
 
@@ -260,7 +261,7 @@ fn projects(server: &Server) -> Vec<crate::sessions::Project> {
 }
 
 /// Every session as the phone's list shows it (the phone's `SessionSummary`).
-fn summaries(server: &Server) -> Vec<Value> {
+fn summaries(hub: &Hub, server: &Server) -> Vec<Value> {
     let projects = projects(server);
     let mut out = Vec::new();
     for project in &projects {
@@ -290,6 +291,7 @@ fn summaries(server: &Server) -> Vec<Value> {
                 "modified": modified,
                 "where": tilde(&directory),
                 "requests": waiting(server, &summary.id),
+                "pinned": hub.pinned(&summary.id),
                 "modelName": model.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
                 "maker": model.map(|m| m.provider_id).unwrap_or_default(),
             }));
@@ -424,7 +426,7 @@ impl Conn {
         if self.sessions_dirty && self.wants_sessions {
             self.sessions_dirty = false;
             if let Some(server) = self.hub.current() {
-                out.push(json!({ "ev": "sessions", "sessions": summaries(&server) }));
+                out.push(json!({ "ev": "sessions", "sessions": summaries(&self.hub, &server) }));
             }
         }
         if let Some(open) = &mut self.open
@@ -545,9 +547,20 @@ impl Conn {
         let id = message["id"].clone();
         let op = message["op"].as_str().unwrap_or_default();
         let (mut reply, after) = match self.hub.current() {
+            // The theme is the desktop's, so it's there without the server.
+            _ if op == "theme" => (self.hub.theme(), Vec::new()),
+            _ if op == "setAvatar" => {
+                let picked = self
+                    .hub
+                    .pick_avatar(message["avatar"].as_str().unwrap_or_default());
+                (
+                    picked.unwrap_or_else(|| error("Harlo has no such avatar.")),
+                    Vec::new(),
+                )
+            }
             None if op == "ping" => (json!({ "pong": true }), Vec::new()),
             None => (
-                error("Harlo isn't connected to OpenCode right now."),
+                error("Harlo isn't connected to its server right now."),
                 Vec::new(),
             ),
             Some(server) => self.answer(op, message, &server).await,
@@ -572,7 +585,7 @@ impl Conn {
             "sessions" => {
                 self.wants_sessions = true;
                 self.sessions_dirty = false;
-                json!({ "sessions": summaries(server) })
+                json!({ "sessions": summaries(&self.hub, server) })
             }
             "open" => return self.open(key, server).await,
             "send" => {
@@ -619,6 +632,21 @@ impl Conn {
                     None => error("The session has no model yet."),
                 }
             }
+            "activity" => {
+                let token = m["token"].as_str().unwrap_or_default();
+                let sandbox = m["sandbox"].as_bool() == Some(true);
+                match super::activity::register(&self.hub, &self.device, key, token, sandbox) {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(why) => error(why),
+                }
+            }
+            "pin" => match self.hub.pin(key, m["pinned"].as_bool().unwrap_or(true)) {
+                Ok(()) => {
+                    self.sessions_dirty = true;
+                    json!({ "ok": true })
+                }
+                Err(e) => error(format!("Couldn't keep the pin: {e}")),
+            },
             "push" => {
                 if lock(&self.hub.devices).set_push(&self.device.id, m) {
                     self.hub.bump_devices();
@@ -627,7 +655,9 @@ impl Conn {
                     error("That isn't a push token.")
                 }
             }
-            other => error(format!("Harlo doesn't do `{other}` from a phone.")),
+            other => work::answer(other, server, key, m)
+                .await
+                .unwrap_or_else(|| error(format!("Harlo doesn't do `{other}` from a phone."))),
         };
         (reply, Vec::new())
     }

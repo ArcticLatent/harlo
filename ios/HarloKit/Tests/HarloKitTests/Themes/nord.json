@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#434c5e",
+      "userMessageBackground": "#3b4252"
+    },
+    "markdown": {
+      "inlineCode": "#a3be8c",
+      "inlineCodeBackground": "#3b4252",
+      "link": "#81a1c1"
+    },
+    "primary": {
+      "base": "#81a1c1"
+    },
+    "status": {
+      "error": "#bf616a",
+      "info": "#88c0d0",
+      "success": "#a3be8c",
+      "warning": "#ebcb8b"
+    },
+    "surface": {
+      "background": "#2e3440",
+      "elevated": "#3b4252",
+      "foreground": "#e5e9f0",
+      "muted": "#292f3a",
+      "mutedForeground": "#d8dee9",
+      "subtle": "#3b4252"
+    },
+    "syntax": {
+      "base": {
+        "background": "#3b4252",
+        "comment": "#aeb5c3",
+        "function": "#81a1c1",
+        "keyword": "#b48ead",
+        "number": "#d08770",
+        "operator": "#e5e9f0",
+        "string": "#a3be8c",
+        "type": "#ebcb8b",
+        "variable": "#bf616a"
+      },
+      "highlights": {
+        "diffAdded": "#a3be8c",
+        "diffModified": "#ebcb8b",
+        "diffRemoved": "#bf616a"
+      }
+    }
+  },
+  "light": false,
+  "name": "Nord"
+}

@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#223249",
+      "userMessageBackground": "#16161d"
+    },
+    "markdown": {
+      "inlineCode": "#76946a",
+      "inlineCodeBackground": "#16161d",
+      "link": "#7e9cd8"
+    },
+    "primary": {
+      "base": "#7e9cd8"
+    },
+    "status": {
+      "error": "#c34043",
+      "info": "#6a9589",
+      "success": "#76946a",
+      "warning": "#c0a36e"
+    },
+    "surface": {
+      "background": "#1f1f28",
+      "elevated": "#16161d",
+      "foreground": "#dcd7ba",
+      "muted": "#1c1c24",
+      "mutedForeground": "#9c9a89",
+      "subtle": "#16161d"
+    },
+    "syntax": {
+      "base": {
+        "background": "#16161d",
+        "comment": "#878581",
+        "function": "#7e9cd8",
+        "keyword": "#957fb8",
+        "number": "#ffa066",
+        "operator": "#dcd7ba",
+        "string": "#76946a",
+        "type": "#c0a36e",
+        "variable": "#c34043"
+      },
+      "highlights": {
+        "diffAdded": "#76946a",
+        "diffModified": "#c0a36e",
+        "diffRemoved": "#c34043"
+      }
+    }
+  },
+  "light": false,
+  "name": "Kanagawa"
+}

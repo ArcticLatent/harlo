@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#d2d4d8",
+      "userMessageBackground": "#edeff1"
+    },
+    "markdown": {
+      "inlineCode": "#6cbf49",
+      "inlineCodeBackground": "#edeff1",
+      "link": "#399ee6"
+    },
+    "primary": {
+      "base": "#399ee6"
+    },
+    "status": {
+      "error": "#f07171",
+      "info": "#4cbf99",
+      "success": "#6cbf49",
+      "warning": "#f2ae49"
+    },
+    "surface": {
+      "background": "#f8f9fa",
+      "elevated": "#edeff1",
+      "foreground": "#585d62",
+      "muted": "#fefefe",
+      "mutedForeground": "#585d62",
+      "subtle": "#edeff1"
+    },
+    "syntax": {
+      "base": {
+        "background": "#edeff1",
+        "comment": "#666b70",
+        "function": "#399ee6",
+        "keyword": "#a37acc",
+        "number": "#fa8d3e",
+        "operator": "#5c6166",
+        "string": "#6cbf49",
+        "type": "#f2ae49",
+        "variable": "#f07171"
+      },
+      "highlights": {
+        "diffAdded": "#6cbf49",
+        "diffModified": "#f2ae49",
+        "diffRemoved": "#f07171"
+      }
+    }
+  },
+  "light": true,
+  "name": "Ayu Light"
+}

@@ -19,8 +19,16 @@ use futures_util::stream;
 use harlo_core::phone::{self, Phone, Relay, RelayStatus, Settings};
 use harlo_core::server::{Client, Location, PhoneRelay, PhoneWanted, ServerPhone};
 
-use super::{App, Message};
+use harlo_core::layout::Appearance;
+use harlo_core::theme::{Look, Mode};
+
+use super::{AVATARS, App, Message};
 use crate::task::{Handle, Task};
+
+/// What the theme phones are given is made from: the dark and light themes'
+/// IDs, the look, which shows, and the avatar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ThemeFrom(String, String, Look, Appearance, String);
 
 /// Something that happened to phone access.
 #[derive(Debug, Clone)]
@@ -46,7 +54,7 @@ pub enum PhoneEvent {
     /// Whether the server hosts phone access itself.
     Hosted(bool),
     /// The server's phone access as it stands, or why it couldn't be read.
-    Server(Result<ServerPhone, String>),
+    Server(Result<Box<ServerPhone>, String>),
     /// A pairing link from the server, or why there's none.
     ServerPaired(Result<String, String>),
 }
@@ -120,6 +128,10 @@ pub struct PhoneState {
     pub server: Option<ServerPhone>,
     /// What was last asked of the server.
     sent: Option<PhoneWanted>,
+    /// The theme phones were last given, and what it was made from.
+    theme: Option<(ThemeFrom, phone::theme::Theme)>,
+    /// The avatar pick from a phone last taken.
+    avatar_taken: Option<(u64, String)>,
     /// Follows the server's phone access while it runs it.
     polling: Option<Handle>,
 }
@@ -173,6 +185,8 @@ impl Default for PhoneState {
             server: None,
             sent: None,
             polling: None,
+            theme: None,
+            avatar_taken: None,
         }
     }
 }
@@ -191,6 +205,48 @@ fn watching<T: Clone + Send + Sync + 'static>(
 }
 
 impl App {
+    /// The theme phones draw in: the desktop's, as the phone app reads it.
+    /// Made again only when what it's made from changes.
+    fn phone_theme(&mut self) -> phone::theme::Theme {
+        let look = Look {
+            contrast: self.preferences.contrast,
+            diff: self.preferences.diff_colors,
+        };
+        let (dark, light) = (self.theme_for(Mode::Dark), self.theme_for(Mode::Light));
+        let from = ThemeFrom(
+            dark.id.clone(),
+            light.id.clone(),
+            look,
+            self.preferences.appearance,
+            self.preferences.avatar.clone(),
+        );
+        if let Some((made_from, theme)) = &self.phone.theme
+            && *made_from == from
+        {
+            return theme.clone();
+        }
+        let appearance = match self.preferences.appearance {
+            Appearance::System => "system",
+            Appearance::Light => "light",
+            Appearance::Dark => "dark",
+        };
+        let theme = phone::theme::theme(dark, light, look, appearance, &self.preferences.avatar);
+        self.phone.theme = Some((from, theme.clone()));
+        theme
+    }
+
+    /// Takes avatar `pick` made on a phone, once.
+    fn take_avatar_pick(&mut self, pick: Option<(u64, String)>) -> Task<Message> {
+        if pick.is_none() || pick == self.phone.avatar_taken {
+            return Task::none();
+        }
+        self.phone.avatar_taken.clone_from(&pick);
+        match pick.and_then(|(_, name)| AVATARS.iter().position(|a| *a == name)) {
+            Some(index) => self.pick_avatar(index),
+            None => Task::none(),
+        }
+    }
+
     /// Starts or stops phone access and the relay as the preferences say,
     /// and keeps it following the window's server.
     pub(super) fn follow_phone(&mut self) -> Task<Message> {
@@ -204,6 +260,11 @@ impl App {
             }
             Host::Unknown | Host::Window => {}
         }
+        let theme = if self.preferences.phone {
+            self.phone_theme()
+        } else {
+            phone::theme::Theme::Null
+        };
         let state = &mut self.phone;
         if !self.preferences.phone {
             if state.running.is_some() || state.relay.is_some() {
@@ -234,6 +295,7 @@ impl App {
                 hidden: self.workspace.hidden().to_vec(),
                 listen: std::net::SocketAddr::from(([0, 0, 0, 0], state.port)),
                 paused: self.preferences.phone_paused,
+                theme,
             };
             return Task::perform(
                 async move {
@@ -246,6 +308,7 @@ impl App {
                 |result| Message::Phone(PhoneEvent::Started(result)),
             );
         };
+        running.set_theme(theme);
         let mut tasks = Vec::new();
         if state.following.as_ref() != Some(&self.location) {
             state.following = Some(self.location.clone());
@@ -284,15 +347,16 @@ impl App {
         let Some(client) = self.client.clone() else {
             return Task::none();
         };
-        let state = &mut self.phone;
         let wanted = PhoneWanted {
             on: self.preferences.phone,
             relay: self.preferences.phone_relay,
             paused: self.preferences.phone_paused,
-            port: state.port,
+            port: self.phone.port,
             name: computer_name(),
             hidden: self.workspace.hidden().to_vec(),
+            theme: self.phone_theme(),
         };
+        let state = &mut self.phone;
         let mut tasks = Vec::new();
         if state.sent.as_ref() != Some(&wanted) {
             state.sent = Some(wanted.clone());
@@ -302,7 +366,7 @@ impl App {
             let client = client.clone();
             tasks.push(Task::perform(
                 async move { client.want_phone(&wanted).await.map_err(|e| e.to_string()) },
-                |r| Message::Phone(PhoneEvent::Server(r)),
+                |r| Message::Phone(PhoneEvent::Server(r.map(Box::new))),
             ));
         }
         if state.polling.is_none() {
@@ -324,7 +388,7 @@ impl App {
                 }
             });
             let (task, handle) = Task::stream(futures_util::StreamExt::map(changes, |r| {
-                Message::Phone(PhoneEvent::Server(r))
+                Message::Phone(PhoneEvent::Server(r.map(Box::new)))
             }))
             .abortable();
             state.polling = Some(handle.abort_on_drop());
@@ -333,8 +397,13 @@ impl App {
         Task::batch(tasks)
     }
 
-    /// Shows what the server reports of its phone access.
-    fn show_server_phone(&mut self, phone: ServerPhone) {
+    /// Shows what the server reports of its phone access, and takes an
+    /// avatar picked on a phone.
+    fn show_server_phone(&mut self, phone: ServerPhone) -> Task<Message> {
+        let pick = phone
+            .avatar_pick
+            .as_ref()
+            .map(|p| (p.serial, p.name.clone()));
         let state = &mut self.phone;
         let before = state.devices.len();
         state.devices = phone
@@ -362,13 +431,14 @@ impl App {
             state.shown = None;
         }
         state.server = Some(phone);
+        self.take_avatar_pick(pick)
     }
 
     /// Handles something the server-hosted phone access did.
     fn server_phone_event(&mut self, event: PhoneEvent) -> Task<Message> {
         let client = self.client.clone();
         match event {
-            PhoneEvent::Server(Ok(phone)) => self.show_server_phone(phone),
+            PhoneEvent::Server(Ok(phone)) => return self.show_server_phone(*phone),
             PhoneEvent::Server(Err(why)) | PhoneEvent::ServerPaired(Err(why)) => {
                 self.phone.error = Some(why);
             }
@@ -389,7 +459,7 @@ impl App {
                             client.remove_phone(&id).await.map_err(|e| e.to_string())?;
                             client.phone_state(None).await.map_err(|e| e.to_string())
                         },
-                        |r| Message::Phone(PhoneEvent::Server(r)),
+                        |r| Message::Phone(PhoneEvent::Server(r.map(Box::new))),
                     );
                 }
             }
@@ -413,25 +483,31 @@ impl App {
         Task::none()
     }
 
+    /// Learns whether the server hosts phone access; when it does, this
+    /// window's stops.
+    fn phone_hosted(&mut self, hosted: bool) {
+        let state = &mut self.phone;
+        state.host = if hosted { Host::Server } else { Host::Window };
+        state.sent = None;
+        state.polling = None;
+        state.server = None;
+        if hosted {
+            // The server runs it now: this window's stops.
+            state.running = None;
+            state.relay = None;
+            state.relay_status = None;
+            state.watches.clear();
+            state.shown = None;
+            state.connected.clear();
+            state.following = None;
+            state.error = None;
+        }
+    }
+
     /// Handles something that happened to phone access.
     pub(super) fn phone_event(&mut self, event: PhoneEvent) -> Task<Message> {
         if let PhoneEvent::Hosted(hosted) = event {
-            let state = &mut self.phone;
-            state.host = if hosted { Host::Server } else { Host::Window };
-            state.sent = None;
-            state.polling = None;
-            state.server = None;
-            if hosted {
-                // The server runs it now: this window's stops.
-                state.running = None;
-                state.relay = None;
-                state.relay_status = None;
-                state.watches.clear();
-                state.shown = None;
-                state.connected.clear();
-                state.following = None;
-                state.error = None;
-            }
+            self.phone_hosted(hosted);
             return Task::none();
         }
         if self.phone.host == Host::Server {
@@ -482,7 +558,11 @@ impl App {
                     state.relay_status = Some(status);
                 }
             }
-            PhoneEvent::Changed => self.refresh_phones(),
+            PhoneEvent::Changed => {
+                let pick = state.running.as_ref().and_then(|p| p.avatar_pick());
+                self.refresh_phones();
+                return self.take_avatar_pick(pick);
+            }
             PhoneEvent::Pair => {
                 if let Some(running) = &state.running {
                     state.shown = Some(Shown {

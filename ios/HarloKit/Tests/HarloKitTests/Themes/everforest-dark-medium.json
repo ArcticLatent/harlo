@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#3d484d",
+      "userMessageBackground": "#343f44"
+    },
+    "markdown": {
+      "inlineCode": "#a7c080",
+      "inlineCodeBackground": "#343f44",
+      "link": "#7fbbb3"
+    },
+    "primary": {
+      "base": "#7fbbb3"
+    },
+    "status": {
+      "error": "#e67e80",
+      "info": "#83c092",
+      "success": "#a7c080",
+      "warning": "#dbbc7f"
+    },
+    "surface": {
+      "background": "#2d353b",
+      "elevated": "#343f44",
+      "foreground": "#acb6af",
+      "muted": "#293035",
+      "mutedForeground": "#acb6af",
+      "subtle": "#343f44"
+    },
+    "syntax": {
+      "base": {
+        "background": "#343f44",
+        "comment": "#a2aca6",
+        "function": "#7fbbb3",
+        "keyword": "#d699b6",
+        "number": "#e69875",
+        "operator": "#859289",
+        "string": "#a7c080",
+        "type": "#dbbc7f",
+        "variable": "#e67e80"
+      },
+      "highlights": {
+        "diffAdded": "#a7c080",
+        "diffModified": "#dbbc7f",
+        "diffRemoved": "#e67e80"
+      }
+    }
+  },
+  "light": false,
+  "name": "Everforest Dark"
+}

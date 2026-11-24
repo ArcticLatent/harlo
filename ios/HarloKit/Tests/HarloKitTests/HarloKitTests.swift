@@ -294,13 +294,15 @@ final class ModelPartsTests: XCTestCase {
     /// Your message's text reads on its bubble (4.5:1) in every theme harlo
     /// ships, dark and light.
     func testSentBubblesReadInEveryTheme() throws {
-        let themes = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../../../crates/harlo-app/themes").standardized
+        // Written by harlo-core's phone_themes test from the desktop's themes.
+        let themes = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Themes")
         let files = try FileManager.default.contentsOfDirectory(atPath: themes.path).filter { $0.hasSuffix(".json") }
         XCTAssertGreaterThan(files.count, 20)
         for f in files {
             let json = try JSON.parse(Data(contentsOf: themes.appendingPathComponent(f)))
-            guard let p = Palette(json["colors"], light: f.contains("-light")) else { continue }
+            let p = Palette(json["colors"], light: json["light"].bool ?? false)
+            XCTAssertNotNil(p, f)
+            guard let p else { continue }
             let (fill, ink) = p.sentBubble
             XCTAssertGreaterThanOrEqual(ink.contrast(with: fill), 4.5, f)
         }

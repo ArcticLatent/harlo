@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#323844",
+      "userMessageBackground": "#242936"
+    },
+    "markdown": {
+      "inlineCode": "#d5ff80",
+      "inlineCodeBackground": "#242936",
+      "link": "#73d0ff"
+    },
+    "primary": {
+      "base": "#73d0ff"
+    },
+    "status": {
+      "error": "#f28779",
+      "info": "#95e6cb",
+      "success": "#d5ff80",
+      "warning": "#ffd173"
+    },
+    "surface": {
+      "background": "#1f2430",
+      "elevated": "#242936",
+      "foreground": "#cccac2",
+      "muted": "#1c202b",
+      "mutedForeground": "#9ea2a7",
+      "subtle": "#242936"
+    },
+    "syntax": {
+      "base": {
+        "background": "#242936",
+        "comment": "#8d9297",
+        "function": "#73d0ff",
+        "keyword": "#d4bfff",
+        "number": "#ffad66",
+        "operator": "#cccac2",
+        "string": "#d5ff80",
+        "type": "#ffd173",
+        "variable": "#f28779"
+      },
+      "highlights": {
+        "diffAdded": "#d5ff80",
+        "diffModified": "#ffd173",
+        "diffRemoved": "#f28779"
+      }
+    }
+  },
+  "light": false,
+  "name": "Ayu Mirage"
+}

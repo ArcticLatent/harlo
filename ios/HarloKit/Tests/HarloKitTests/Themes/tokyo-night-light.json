@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#dfe0e5",
+      "userMessageBackground": "#cbccd1"
+    },
+    "markdown": {
+      "inlineCode": "#485e30",
+      "inlineCodeBackground": "#cbccd1",
+      "link": "#34548a"
+    },
+    "primary": {
+      "base": "#34548a"
+    },
+    "status": {
+      "error": "#343b58",
+      "info": "#3e6968",
+      "success": "#485e30",
+      "warning": "#166775"
+    },
+    "surface": {
+      "background": "#d5d6db",
+      "elevated": "#cbccd1",
+      "foreground": "#343b59",
+      "muted": "#f7f7f8",
+      "mutedForeground": "#4c505e",
+      "subtle": "#cbccd1"
+    },
+    "syntax": {
+      "base": {
+        "background": "#cbccd1",
+        "comment": "#4c505e",
+        "function": "#34548a",
+        "keyword": "#5a4a78",
+        "number": "#965027",
+        "operator": "#343b59",
+        "string": "#485e30",
+        "type": "#166775",
+        "variable": "#343b58"
+      },
+      "highlights": {
+        "diffAdded": "#485e30",
+        "diffModified": "#166775",
+        "diffRemoved": "#343b58"
+      }
+    }
+  },
+  "light": true,
+  "name": "Tokyo Night Light"
+}

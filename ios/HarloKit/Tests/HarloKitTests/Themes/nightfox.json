@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#29394f",
+      "userMessageBackground": "#212e3f"
+    },
+    "markdown": {
+      "inlineCode": "#81b29a",
+      "inlineCodeBackground": "#212e3f",
+      "link": "#719cd6"
+    },
+    "primary": {
+      "base": "#719cd6"
+    },
+    "status": {
+      "error": "#c94f6d",
+      "info": "#63cdcf",
+      "success": "#81b29a",
+      "warning": "#dbc074"
+    },
+    "surface": {
+      "background": "#192330",
+      "elevated": "#212e3f",
+      "foreground": "#cdcecf",
+      "muted": "#17202b",
+      "mutedForeground": "#9fa9b5",
+      "subtle": "#212e3f"
+    },
+    "syntax": {
+      "base": {
+        "background": "#212e3f",
+        "comment": "#9198a4",
+        "function": "#719cd6",
+        "keyword": "#9d79d6",
+        "number": "#f4a261",
+        "operator": "#cdcecf",
+        "string": "#81b29a",
+        "type": "#dbc074",
+        "variable": "#c94f6d"
+      },
+      "highlights": {
+        "diffAdded": "#81b29a",
+        "diffModified": "#dbc074",
+        "diffRemoved": "#c94f6d"
+      }
+    }
+  },
+  "light": false,
+  "name": "Nightfox"
+}

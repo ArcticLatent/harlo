@@ -111,14 +111,7 @@ const TICK: Duration = Duration::from_secs(30);
 
 /// The avatars the user can pick, by name, in the order the picker shows
 /// them; the rail's `Avatars` list holds the pictures in the same order.
-pub const AVATARS: [&str; 6] = [
-    "classic",
-    "beanie",
-    "glasses",
-    "headphones",
-    "jacket",
-    "scarf",
-];
+pub const AVATARS: [&str; 6] = harlo_core::phone::theme::AVATARS;
 
 impl App {
     /// The user's avatar, as its place in [`AVATARS`]; the first when the

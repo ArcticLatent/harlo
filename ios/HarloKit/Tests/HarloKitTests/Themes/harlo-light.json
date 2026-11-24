@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#dcdde1",
+      "userMessageBackground": "#eeeff1"
+    },
+    "markdown": {
+      "inlineCode": "#1d7a45",
+      "inlineCodeBackground": "#eeeff1",
+      "link": "#2d63c8"
+    },
+    "primary": {
+      "base": "#2d63c8"
+    },
+    "status": {
+      "error": "#b4232f",
+      "info": "#0e6f84",
+      "success": "#1d7a45",
+      "warning": "#8a6414"
+    },
+    "surface": {
+      "background": "#f7f7f8",
+      "elevated": "#eeeff1",
+      "foreground": "#34363b",
+      "muted": "#fdfdfe",
+      "mutedForeground": "#55585e",
+      "subtle": "#eeeff1"
+    },
+    "syntax": {
+      "base": {
+        "background": "#eeeff1",
+        "comment": "#696c72",
+        "function": "#2d63c8",
+        "keyword": "#7149c9",
+        "number": "#9a5512",
+        "operator": "#34363b",
+        "string": "#1d7a45",
+        "type": "#8a6414",
+        "variable": "#b4232f"
+      },
+      "highlights": {
+        "diffAdded": "#1d7a45",
+        "diffModified": "#8a6414",
+        "diffRemoved": "#b4232f"
+      }
+    }
+  },
+  "light": true,
+  "name": "Harlo Light"
+}

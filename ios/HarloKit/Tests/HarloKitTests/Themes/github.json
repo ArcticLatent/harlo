@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#d1d9e0",
+      "userMessageBackground": "#f6f8fa"
+    },
+    "markdown": {
+      "inlineCode": "#116329",
+      "inlineCodeBackground": "#f6f8fa",
+      "link": "#0969da"
+    },
+    "primary": {
+      "base": "#0969da"
+    },
+    "status": {
+      "error": "#cf222e",
+      "info": "#1b7c83",
+      "success": "#116329",
+      "warning": "#9a6700"
+    },
+    "surface": {
+      "background": "#ffffff",
+      "elevated": "#f6f8fa",
+      "foreground": "#454c54",
+      "muted": "#ffffff",
+      "mutedForeground": "#555e69",
+      "subtle": "#f6f8fa"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f6f8fa",
+        "comment": "#67707c",
+        "function": "#0969da",
+        "keyword": "#8250df",
+        "number": "#953800",
+        "operator": "#454c54",
+        "string": "#116329",
+        "type": "#9a6700",
+        "variable": "#cf222e"
+      },
+      "highlights": {
+        "diffAdded": "#116329",
+        "diffModified": "#9a6700",
+        "diffRemoved": "#cf222e"
+      }
+    }
+  },
+  "light": true,
+  "name": "GitHub Light"
+}

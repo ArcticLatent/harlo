@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#504945",
+      "userMessageBackground": "#3c3836"
+    },
+    "markdown": {
+      "inlineCode": "#b8bb26",
+      "inlineCodeBackground": "#3c3836",
+      "link": "#83a598"
+    },
+    "primary": {
+      "base": "#83a598"
+    },
+    "status": {
+      "error": "#fb4934",
+      "info": "#8ec07c",
+      "success": "#b8bb26",
+      "warning": "#fabd2f"
+    },
+    "surface": {
+      "background": "#282828",
+      "elevated": "#3c3836",
+      "foreground": "#d5c4a1",
+      "muted": "#242424",
+      "mutedForeground": "#c9b99a",
+      "subtle": "#3c3836"
+    },
+    "syntax": {
+      "base": {
+        "background": "#3c3836",
+        "comment": "#b5a68c",
+        "function": "#83a598",
+        "keyword": "#d3869b",
+        "number": "#fe8019",
+        "operator": "#d5c4a1",
+        "string": "#b8bb26",
+        "type": "#fabd2f",
+        "variable": "#fb4934"
+      },
+      "highlights": {
+        "diffAdded": "#b8bb26",
+        "diffModified": "#fabd2f",
+        "diffRemoved": "#fb4934"
+      }
+    }
+  },
+  "light": false,
+  "name": "Gruvbox Dark"
+}

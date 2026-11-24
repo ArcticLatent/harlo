@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#282726",
+      "userMessageBackground": "#1c1b1a"
+    },
+    "markdown": {
+      "inlineCode": "#879a39",
+      "inlineCodeBackground": "#1c1b1a",
+      "link": "#4385be"
+    },
+    "primary": {
+      "base": "#4385be"
+    },
+    "status": {
+      "error": "#d14d41",
+      "info": "#3aa99f",
+      "success": "#879a39",
+      "warning": "#d0a215"
+    },
+    "surface": {
+      "background": "#100f0f",
+      "elevated": "#1c1b1a",
+      "foreground": "#cecdc3",
+      "muted": "#0e0e0e",
+      "mutedForeground": "#95938d",
+      "subtle": "#1c1b1a"
+    },
+    "syntax": {
+      "base": {
+        "background": "#1c1b1a",
+        "comment": "#898782",
+        "function": "#4385be",
+        "keyword": "#8b7ec8",
+        "number": "#da702c",
+        "operator": "#cecdc3",
+        "string": "#879a39",
+        "type": "#d0a215",
+        "variable": "#d14d41"
+      },
+      "highlights": {
+        "diffAdded": "#879a39",
+        "diffModified": "#d0a215",
+        "diffRemoved": "#d14d41"
+      }
+    }
+  },
+  "light": false,
+  "name": "Flexoki Dark"
+}

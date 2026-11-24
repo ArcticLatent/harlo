@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#2d3f76",
+      "userMessageBackground": "#1e2030"
+    },
+    "markdown": {
+      "inlineCode": "#c3e88d",
+      "inlineCodeBackground": "#1e2030",
+      "link": "#82aaff"
+    },
+    "primary": {
+      "base": "#82aaff"
+    },
+    "status": {
+      "error": "#ff757f",
+      "info": "#86e1fc",
+      "success": "#c3e88d",
+      "warning": "#ffdf77"
+    },
+    "surface": {
+      "background": "#222436",
+      "elevated": "#1e2030",
+      "foreground": "#aab0cf",
+      "muted": "#1f2031",
+      "mutedForeground": "#aab0cf",
+      "subtle": "#1e2030"
+    },
+    "syntax": {
+      "base": {
+        "background": "#1e2030",
+        "comment": "#888fae",
+        "function": "#82aaff",
+        "keyword": "#fca7ea",
+        "number": "#ffc777",
+        "operator": "#828bb8",
+        "string": "#c3e88d",
+        "type": "#ffdf77",
+        "variable": "#ff757f"
+      },
+      "highlights": {
+        "diffAdded": "#c3e88d",
+        "diffModified": "#ffdf77",
+        "diffRemoved": "#ff757f"
+      }
+    }
+  },
+  "light": false,
+  "name": "Tokyo Night Moon"
+}

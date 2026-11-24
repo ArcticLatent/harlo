@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#3e4451",
+      "userMessageBackground": "#353b45"
+    },
+    "markdown": {
+      "inlineCode": "#98c379",
+      "inlineCodeBackground": "#353b45",
+      "link": "#61afef"
+    },
+    "primary": {
+      "base": "#61afef"
+    },
+    "status": {
+      "error": "#e06c75",
+      "info": "#56b6c2",
+      "success": "#98c379",
+      "warning": "#e5c07b"
+    },
+    "surface": {
+      "background": "#282c34",
+      "elevated": "#353b45",
+      "foreground": "#abb2bf",
+      "muted": "#24282f",
+      "mutedForeground": "#abb2bf",
+      "subtle": "#353b45"
+    },
+    "syntax": {
+      "base": {
+        "background": "#353b45",
+        "comment": "#a2a9b6",
+        "function": "#61afef",
+        "keyword": "#c678dd",
+        "number": "#d19a66",
+        "operator": "#abb2bf",
+        "string": "#98c379",
+        "type": "#e5c07b",
+        "variable": "#e06c75"
+      },
+      "highlights": {
+        "diffAdded": "#98c379",
+        "diffModified": "#e5c07b",
+        "diffRemoved": "#e06c75"
+      }
+    }
+  },
+  "light": false,
+  "name": "One Dark"
+}

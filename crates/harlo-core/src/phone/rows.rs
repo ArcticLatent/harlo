@@ -88,6 +88,12 @@ impl Rows {
         reload
     }
 
+    /// Returns the session's timeline.
+    #[must_use]
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
     /// Returns the latest [`PHONE_ROWS`] rows as the phone reads them, and
     /// how many earlier ones it doesn't get.
     #[must_use]

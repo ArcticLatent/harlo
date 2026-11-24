@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#e6e2cc",
+      "userMessageBackground": "#f4f0d9"
+    },
+    "markdown": {
+      "inlineCode": "#8da101",
+      "inlineCodeBackground": "#f4f0d9",
+      "link": "#3a94c5"
+    },
+    "primary": {
+      "base": "#3a94c5"
+    },
+    "status": {
+      "error": "#f85552",
+      "info": "#35a77c",
+      "success": "#8da101",
+      "warning": "#dfa000"
+    },
+    "surface": {
+      "background": "#fdf6e3",
+      "elevated": "#f4f0d9",
+      "foreground": "#58656d",
+      "muted": "#fffdf9",
+      "mutedForeground": "#58656d",
+      "subtle": "#f4f0d9"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f4f0d9",
+        "comment": "#5e6b70",
+        "function": "#3a94c5",
+        "keyword": "#df69ba",
+        "number": "#f57d26",
+        "operator": "#5c6a72",
+        "string": "#8da101",
+        "type": "#dfa000",
+        "variable": "#f85552"
+      },
+      "highlights": {
+        "diffAdded": "#8da101",
+        "diffModified": "#dfa000",
+        "diffRemoved": "#f85552"
+      }
+    }
+  },
+  "light": true,
+  "name": "Everforest Light"
+}

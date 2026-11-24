@@ -17,6 +17,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod activity;
 mod conn;
 mod crypto;
 mod devices;
@@ -24,6 +25,8 @@ mod push;
 mod relay;
 mod requests;
 mod rows;
+pub mod theme;
+mod work;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -123,6 +126,10 @@ pub fn local_endpoints(port: u16) -> Vec<String> {
 }
 
 /// Locks a mutex, carrying on with the data when another thread panicked.
+/// The file in phone access's folder that holds the sessions pinned on
+/// phones.
+const PINS: &str = "pins.json";
+
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -149,6 +156,9 @@ pub struct Settings {
     pub listen: SocketAddr,
     /// Whether notifications start held back; see [`Phone::set_paused`].
     pub paused: bool,
+    /// The theme phones draw in, as [`theme::theme`] makes it; null for
+    /// Harlo's own.
+    pub theme: serde_json::Value,
 }
 
 /// The server phones see, once connected.
@@ -175,6 +185,14 @@ pub(crate) struct Hub {
     /// Whether notifications are held back for now; test ones still go.
     paused: AtomicBool,
     hidden: Vec<String>,
+    /// The theme phones draw in; see [`Settings::theme`].
+    theme: Mutex<serde_json::Value>,
+    /// The avatar last picked on a phone, numbered from 1, if one was.
+    avatar_pick: Mutex<Option<(u64, String)>>,
+    /// The sessions followed for Live Activities.
+    activities: activity::Activities,
+    /// The sessions pinned on phones, kept in `pins.json`.
+    pins: Mutex<std::collections::BTreeSet<String>>,
     pub(crate) server: watch::Sender<Option<Arc<Server>>>,
     pub(crate) events: broadcast::Sender<Arc<Event>>,
     /// Bumped when the session list may have changed.
@@ -218,6 +236,51 @@ impl Hub {
 
     pub(crate) fn current(&self) -> Option<Arc<Server>> {
         self.server.borrow().clone()
+    }
+
+    /// The theme phones draw in.
+    pub(crate) fn theme(&self) -> serde_json::Value {
+        let theme = lock(&self.theme).clone();
+        if theme.is_null() {
+            theme::harlo()
+        } else {
+            theme
+        }
+    }
+
+    /// Takes avatar `name` picked on a phone: the theme with it, or `None`
+    /// when it isn't one of [`theme::AVATARS`].
+    pub(crate) fn pick_avatar(&self, name: &str) -> Option<serde_json::Value> {
+        if !theme::AVATARS.contains(&name) {
+            return None;
+        }
+        let picked = theme::with_avatar(self.theme(), name);
+        *lock(&self.theme) = picked.clone();
+        let mut pick = lock(&self.avatar_pick);
+        let serial = pick.as_ref().map_or(0, |(n, _)| *n) + 1;
+        *pick = Some((serial, name.to_owned()));
+        drop(pick);
+        self.bump_devices();
+        Some(picked)
+    }
+
+    /// Pins session `key` on phones, or unpins it, and keeps that.
+    pub(crate) fn pin(&self, key: &str, pinned: bool) -> std::io::Result<()> {
+        let mut pins = lock(&self.pins);
+        let changed = if pinned {
+            pins.insert(key.to_owned())
+        } else {
+            pins.remove(key)
+        };
+        if changed {
+            std::fs::write(self.folder.join(PINS), serde_json::to_string(&*pins)?)?;
+        }
+        Ok(())
+    }
+
+    /// Whether session `key` is pinned on phones.
+    pub(crate) fn pinned(&self, key: &str) -> bool {
+        lock(&self.pins).contains(key)
     }
 
     pub(crate) fn hidden(&self) -> &[String] {
@@ -280,6 +343,10 @@ impl Phone {
     pub async fn start(settings: Settings) -> std::io::Result<Self> {
         let identity = Identity::load_or_create(&settings.folder.join("identity.json"))?;
         let devices = Devices::load(&settings.folder.join("devices.json"));
+        let pins = std::fs::read_to_string(settings.folder.join(PINS))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
         let hub = Arc::new(Hub {
             folder: settings.folder,
             identity,
@@ -292,6 +359,10 @@ impl Phone {
             push: Mutex::new(None),
             paused: AtomicBool::new(settings.paused),
             hidden: settings.hidden,
+            theme: Mutex::new(settings.theme),
+            avatar_pick: Mutex::new(None),
+            pins: Mutex::new(pins),
+            activities: activity::Activities::default(),
             server: watch::Sender::new(None),
             events: broadcast::Sender::new(EVENT_BACKLOG),
             sessions: watch::Sender::new(0),
@@ -379,7 +450,9 @@ impl Phone {
         let secret = relay_secret(&self.hub.folder.join("relay.json"))
             .map_err(|e| format!("Couldn't save the relay's secret: {e}"))?;
         *lock(&self.hub.relay) = Some((ws.clone(), relay_id(&secret)));
-        *lock(&self.hub.push) = Some(http);
+        *lock(&self.hub.push) = Some(http.clone());
+        // Live Activities Harlo left running when it last stopped end now.
+        tokio::spawn(activity::end_left(Arc::clone(&self.hub), http));
         Ok(relay::start(Arc::clone(&self.hub), ws, secret))
     }
 
@@ -421,6 +494,32 @@ impl Phone {
             badge: 0,
         };
         push::deliver(&self.hub, &base, &alert, true).await
+    }
+
+    /// Sets the theme phones draw in (see [`Settings::theme`]); phones
+    /// take it when they next connect.
+    ///
+    /// A theme with the avatar last picked on a phone means that pick was
+    /// taken, and [`Phone::avatar_pick`] forgets it.
+    pub fn set_theme(&self, theme: serde_json::Value) {
+        let mut pick = lock(&self.hub.avatar_pick);
+        if pick
+            .as_ref()
+            .is_some_and(|(_, name)| theme["avatar"] == name.as_str())
+        {
+            *pick = None;
+        }
+        drop(pick);
+        *lock(&self.hub.theme) = theme;
+    }
+
+    /// The avatar last picked on a phone and not yet taken (see
+    /// [`Phone::set_theme`]), numbered from 1 so each pick is taken once.
+    ///
+    /// A pick bumps [`Phone::watch`].
+    #[must_use]
+    pub fn avatar_pick(&self) -> Option<(u64, String)> {
+        lock(&self.hub.avatar_pick).clone()
     }
 
     /// Returns the paired phones.

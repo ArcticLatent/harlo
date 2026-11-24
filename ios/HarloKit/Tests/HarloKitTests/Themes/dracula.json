@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#44475a",
+      "userMessageBackground": "#21222c"
+    },
+    "markdown": {
+      "inlineCode": "#50fa7b",
+      "inlineCodeBackground": "#21222c",
+      "link": "#bd93f9"
+    },
+    "primary": {
+      "base": "#bd93f9"
+    },
+    "status": {
+      "error": "#ff5555",
+      "info": "#8be9fd",
+      "success": "#50fa7b",
+      "warning": "#f1fa8c"
+    },
+    "surface": {
+      "background": "#282a36",
+      "elevated": "#21222c",
+      "foreground": "#f8f8f2",
+      "muted": "#242631",
+      "mutedForeground": "#b0b8d0",
+      "subtle": "#21222c"
+    },
+    "syntax": {
+      "base": {
+        "background": "#21222c",
+        "comment": "#818eb5",
+        "function": "#bd93f9",
+        "keyword": "#ff79c6",
+        "number": "#ffb86c",
+        "operator": "#f8f8f2",
+        "string": "#50fa7b",
+        "type": "#f1fa8c",
+        "variable": "#ff5555"
+      },
+      "highlights": {
+        "diffAdded": "#50fa7b",
+        "diffModified": "#f1fa8c",
+        "diffRemoved": "#ff5555"
+      }
+    }
+  },
+  "light": false,
+  "name": "Dracula"
+}

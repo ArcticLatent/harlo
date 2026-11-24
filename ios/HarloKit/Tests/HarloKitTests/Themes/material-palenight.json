@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#32374d",
+      "userMessageBackground": "#444267"
+    },
+    "markdown": {
+      "inlineCode": "#c3e88d",
+      "inlineCodeBackground": "#444267",
+      "link": "#82aaff"
+    },
+    "primary": {
+      "base": "#82aaff"
+    },
+    "status": {
+      "error": "#f07178",
+      "info": "#89ddff",
+      "success": "#c3e88d",
+      "warning": "#ffcb6b"
+    },
+    "surface": {
+      "background": "#292d3e",
+      "elevated": "#444267",
+      "foreground": "#abb2d6",
+      "muted": "#252938",
+      "mutedForeground": "#abb2d6",
+      "subtle": "#444267"
+    },
+    "syntax": {
+      "base": {
+        "background": "#444267",
+        "comment": "#abb2d6",
+        "function": "#82aaff",
+        "keyword": "#c792ea",
+        "number": "#f78c6c",
+        "operator": "#959dcb",
+        "string": "#c3e88d",
+        "type": "#ffcb6b",
+        "variable": "#f07178"
+      },
+      "highlights": {
+        "diffAdded": "#c3e88d",
+        "diffModified": "#ffcb6b",
+        "diffRemoved": "#f07178"
+      }
+    }
+  },
+  "light": false,
+  "name": "Material Palenight"
+}

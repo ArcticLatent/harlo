@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#f2e9de",
+      "userMessageBackground": "#fffaf3"
+    },
+    "markdown": {
+      "inlineCode": "#286983",
+      "inlineCodeBackground": "#fffaf3",
+      "link": "#907aa9"
+    },
+    "primary": {
+      "base": "#907aa9"
+    },
+    "status": {
+      "error": "#b4637a",
+      "info": "#56949f",
+      "success": "#286983",
+      "warning": "#d7827e"
+    },
+    "surface": {
+      "background": "#faf4ed",
+      "elevated": "#fffaf3",
+      "foreground": "#575279",
+      "muted": "#fefdfb",
+      "mutedForeground": "#686486",
+      "subtle": "#fffaf3"
+    },
+    "syntax": {
+      "base": {
+        "background": "#fffaf3",
+        "comment": "#726d8c",
+        "function": "#907aa9",
+        "keyword": "#ea9d34",
+        "number": "#ea9d34",
+        "operator": "#575279",
+        "string": "#286983",
+        "type": "#d7827e",
+        "variable": "#b4637a"
+      },
+      "highlights": {
+        "diffAdded": "#286983",
+        "diffModified": "#d7827e",
+        "diffRemoved": "#b4637a"
+      }
+    }
+  },
+  "light": true,
+  "name": "Rosé Pine Dawn"
+}

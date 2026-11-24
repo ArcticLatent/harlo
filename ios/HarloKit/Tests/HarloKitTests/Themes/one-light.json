@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#e5e5e6",
+      "userMessageBackground": "#f0f0f1"
+    },
+    "markdown": {
+      "inlineCode": "#50a14f",
+      "inlineCodeBackground": "#f0f0f1",
+      "link": "#4078f2"
+    },
+    "primary": {
+      "base": "#4078f2"
+    },
+    "status": {
+      "error": "#ca1243",
+      "info": "#0184bc",
+      "success": "#50a14f",
+      "warning": "#c18401"
+    },
+    "surface": {
+      "background": "#fafafa",
+      "elevated": "#f0f0f1",
+      "foreground": "#383a42",
+      "muted": "#fefefe",
+      "mutedForeground": "#5f626c",
+      "subtle": "#f0f0f1"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f0f0f1",
+        "comment": "#666872",
+        "function": "#4078f2",
+        "keyword": "#a626a4",
+        "number": "#d75f00",
+        "operator": "#383a42",
+        "string": "#50a14f",
+        "type": "#c18401",
+        "variable": "#ca1243"
+      },
+      "highlights": {
+        "diffAdded": "#50a14f",
+        "diffModified": "#c18401",
+        "diffRemoved": "#ca1243"
+      }
+    }
+  },
+  "light": true,
+  "name": "One Light"
+}

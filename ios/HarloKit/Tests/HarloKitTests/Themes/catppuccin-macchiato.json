@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#363a4f",
+      "userMessageBackground": "#1e2030"
+    },
+    "markdown": {
+      "inlineCode": "#a6da95",
+      "inlineCodeBackground": "#1e2030",
+      "link": "#8aadf4"
+    },
+    "primary": {
+      "base": "#8aadf4"
+    },
+    "status": {
+      "error": "#ed8796",
+      "info": "#8bd5ca",
+      "success": "#a6da95",
+      "warning": "#eed49f"
+    },
+    "surface": {
+      "background": "#24273a",
+      "elevated": "#1e2030",
+      "foreground": "#cad3f5",
+      "muted": "#202334",
+      "mutedForeground": "#9ea5c3",
+      "subtle": "#1e2030"
+    },
+    "syntax": {
+      "base": {
+        "background": "#1e2030",
+        "comment": "#848ba7",
+        "function": "#8aadf4",
+        "keyword": "#c6a0f6",
+        "number": "#f5a97f",
+        "operator": "#cad3f5",
+        "string": "#a6da95",
+        "type": "#eed49f",
+        "variable": "#ed8796"
+      },
+      "highlights": {
+        "diffAdded": "#a6da95",
+        "diffModified": "#eed49f",
+        "diffRemoved": "#ed8796"
+      }
+    }
+  },
+  "light": false,
+  "name": "Catppuccin Macchiato"
+}

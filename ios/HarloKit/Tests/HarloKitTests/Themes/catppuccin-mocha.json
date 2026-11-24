@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#313244",
+      "userMessageBackground": "#181825"
+    },
+    "markdown": {
+      "inlineCode": "#a6e3a1",
+      "inlineCodeBackground": "#181825",
+      "link": "#89b4fa"
+    },
+    "primary": {
+      "base": "#89b4fa"
+    },
+    "status": {
+      "error": "#f38ba8",
+      "info": "#94e2d5",
+      "success": "#a6e3a1",
+      "warning": "#f9e2af"
+    },
+    "surface": {
+      "background": "#1e1e2e",
+      "elevated": "#181825",
+      "foreground": "#cdd6f4",
+      "muted": "#1b1b29",
+      "mutedForeground": "#9ea5bf",
+      "subtle": "#181825"
+    },
+    "syntax": {
+      "base": {
+        "background": "#181825",
+        "comment": "#8389a1",
+        "function": "#89b4fa",
+        "keyword": "#cba6f7",
+        "number": "#fab387",
+        "operator": "#cdd6f4",
+        "string": "#a6e3a1",
+        "type": "#f9e2af",
+        "variable": "#f38ba8"
+      },
+      "highlights": {
+        "diffAdded": "#a6e3a1",
+        "diffModified": "#f9e2af",
+        "diffRemoved": "#f38ba8"
+      }
+    }
+  },
+  "light": false,
+  "name": "Catppuccin Mocha"
+}

@@ -1,7 +1,7 @@
 [package]
 name = "harlo"
 version = "0.1.0"
-description = "A native desktop app for coding agents run by OpenCode, drawn with Slint."
+description = "A native desktop app for coding agents, drawn with Slint."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -40,7 +40,7 @@ image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 alacritty_terminal = { workspace = true }
 notify-rust = { workspace = true, features = ["z"] }
 open = { workspace = true }
-# Runs the app's background work (requests to OpenCode, git, disk) off the
+# Runs the app's background work (requests to the server, git, disk) off the
 # window's thread.
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util = { workspace = true, features = ["std"] }

@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#586e75",
+      "userMessageBackground": "#073642"
+    },
+    "markdown": {
+      "inlineCode": "#859900",
+      "inlineCodeBackground": "#073642",
+      "link": "#268bd2"
+    },
+    "primary": {
+      "base": "#268bd2"
+    },
+    "status": {
+      "error": "#dc322f",
+      "info": "#2aa198",
+      "success": "#859900",
+      "warning": "#b58900"
+    },
+    "surface": {
+      "background": "#002b36",
+      "elevated": "#073642",
+      "foreground": "#b7bdb6",
+      "muted": "#002731",
+      "mutedForeground": "#b2b9b3",
+      "subtle": "#073642"
+    },
+    "syntax": {
+      "base": {
+        "background": "#073642",
+        "comment": "#93a0a0",
+        "function": "#268bd2",
+        "keyword": "#6c71c4",
+        "number": "#cb4b16",
+        "operator": "#93a1a1",
+        "string": "#859900",
+        "type": "#b58900",
+        "variable": "#dc322f"
+      },
+      "highlights": {
+        "diffAdded": "#859900",
+        "diffModified": "#b58900",
+        "diffRemoved": "#dc322f"
+      }
+    }
+  },
+  "light": false,
+  "name": "Solarized Dark"
+}

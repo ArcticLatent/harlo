@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#343a52",
+      "userMessageBackground": "#16161e"
+    },
+    "markdown": {
+      "inlineCode": "#9ece6a",
+      "inlineCodeBackground": "#16161e",
+      "link": "#2ac3de"
+    },
+    "primary": {
+      "base": "#2ac3de"
+    },
+    "status": {
+      "error": "#c0caf5",
+      "info": "#b4f9f8",
+      "success": "#9ece6a",
+      "warning": "#0db9d7"
+    },
+    "surface": {
+      "background": "#24283b",
+      "elevated": "#16161e",
+      "foreground": "#a9b1d6",
+      "muted": "#202435",
+      "mutedForeground": "#9fa6ca",
+      "subtle": "#16161e"
+    },
+    "syntax": {
+      "base": {
+        "background": "#16161e",
+        "comment": "#7b82a3",
+        "function": "#2ac3de",
+        "keyword": "#bb9af7",
+        "number": "#a9b1d6",
+        "operator": "#a9b1d6",
+        "string": "#9ece6a",
+        "type": "#0db9d7",
+        "variable": "#c0caf5"
+      },
+      "highlights": {
+        "diffAdded": "#9ece6a",
+        "diffModified": "#0db9d7",
+        "diffRemoved": "#c0caf5"
+      }
+    }
+  },
+  "light": false,
+  "name": "Tokyo Night Storm"
+}

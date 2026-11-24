@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#ccd0da",
+      "userMessageBackground": "#e6e9ef"
+    },
+    "markdown": {
+      "inlineCode": "#40a02b",
+      "inlineCodeBackground": "#e6e9ef",
+      "link": "#1e66f5"
+    },
+    "primary": {
+      "base": "#1e66f5"
+    },
+    "status": {
+      "error": "#d20f39",
+      "info": "#179299",
+      "success": "#40a02b",
+      "warning": "#df8e1d"
+    },
+    "surface": {
+      "background": "#eff1f5",
+      "elevated": "#e6e9ef",
+      "foreground": "#4c4f69",
+      "muted": "#fcfcfd",
+      "mutedForeground": "#4c4f69",
+      "subtle": "#e6e9ef"
+    },
+    "syntax": {
+      "base": {
+        "background": "#e6e9ef",
+        "comment": "#62667d",
+        "function": "#1e66f5",
+        "keyword": "#8839ef",
+        "number": "#fe640b",
+        "operator": "#4c4f69",
+        "string": "#40a02b",
+        "type": "#df8e1d",
+        "variable": "#d20f39"
+      },
+      "highlights": {
+        "diffAdded": "#40a02b",
+        "diffModified": "#df8e1d",
+        "diffRemoved": "#d20f39"
+      }
+    }
+  },
+  "light": true,
+  "name": "Catppuccin Latte"
+}

@@ -305,6 +305,8 @@ fn scratch_env(cmd: &mut Command, root: &Path, password: &str) {
         // Key checks go to an address nothing answers at, never a real
         // provider; a test that checks keys sets its own stand-in.
         .env("HARLO_KEY_CHECK_BASE", "http://127.0.0.1:9")
+        // So is the phone relay, unless a test sets its own.
+        .env("HARLO_RELAY", "http://127.0.0.1:9")
         // A session bus that isn't there: the server keeps credentials in
         // the desktop's keyring when it can reach one, so it never can.
         .env(

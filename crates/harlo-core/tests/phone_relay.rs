@@ -174,6 +174,7 @@ impl TestPhone {
 /// Starts phone access for the sandbox's server, keeping its files in `folder`.
 async fn start_phone(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
     Phone::start(Settings {
+        theme: serde_json::Value::Null,
         folder: folder.to_owned(),
         name: "Test computer".to_owned(),
         location: Location::Server {

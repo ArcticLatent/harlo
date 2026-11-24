@@ -44,7 +44,9 @@ pub use catalog::{Agent, Command, FileMatch, McpResource, Model, Skill};
 #[doc(inline)]
 pub use client::{Client, Events};
 #[doc(inline)]
-pub use daemon::{Note, NoteScope, NoteSource, PhoneDevice, PhoneRelay, PhoneState, PhoneWanted};
+pub use daemon::{
+    AvatarPick, Note, NoteScope, NoteSource, PhoneDevice, PhoneRelay, PhoneState, PhoneWanted,
+};
 #[doc(inline)]
 pub use endpoint::{
     Endpoint, SharedService, parse_registration, read_registration, registration_path,

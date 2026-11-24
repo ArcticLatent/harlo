@@ -40,6 +40,7 @@ fn state(path: &str, staged: bool, unstaged: bool) -> FileState {
         path: path.into(),
         staged,
         unstaged,
+        ..FileState::default()
     }
 }
 

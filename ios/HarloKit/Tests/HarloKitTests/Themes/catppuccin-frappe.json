@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#414559",
+      "userMessageBackground": "#292c3c"
+    },
+    "markdown": {
+      "inlineCode": "#a6d189",
+      "inlineCodeBackground": "#292c3c",
+      "link": "#8caaee"
+    },
+    "primary": {
+      "base": "#8caaee"
+    },
+    "status": {
+      "error": "#e78284",
+      "info": "#81c8be",
+      "success": "#a6d189",
+      "warning": "#e5c890"
+    },
+    "surface": {
+      "background": "#303446",
+      "elevated": "#292c3c",
+      "foreground": "#c6d0f5",
+      "muted": "#2b2f3f",
+      "mutedForeground": "#b2bbde",
+      "subtle": "#292c3c"
+    },
+    "syntax": {
+      "base": {
+        "background": "#292c3c",
+        "comment": "#8b93b1",
+        "function": "#8caaee",
+        "keyword": "#ca9ee6",
+        "number": "#ef9f76",
+        "operator": "#c6d0f5",
+        "string": "#a6d189",
+        "type": "#e5c890",
+        "variable": "#e78284"
+      },
+      "highlights": {
+        "diffAdded": "#a6d189",
+        "diffModified": "#e5c890",
+        "diffRemoved": "#e78284"
+      }
+    }
+  },
+  "light": false,
+  "name": "Catppuccin Frappé"
+}

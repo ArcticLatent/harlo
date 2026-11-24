@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#303134",
+      "userMessageBackground": "#232426"
+    },
+    "markdown": {
+      "inlineCode": "#87cc9d",
+      "inlineCodeBackground": "#232426",
+      "link": "#a1c4fc"
+    },
+    "primary": {
+      "base": "#a1c4fc"
+    },
+    "status": {
+      "error": "#e0a5a8",
+      "info": "#8fcfd8",
+      "success": "#87cc9d",
+      "warning": "#d5b27c"
+    },
+    "surface": {
+      "background": "#1c1d1f",
+      "elevated": "#232426",
+      "foreground": "#d2d3d5",
+      "muted": "#191a1c",
+      "mutedForeground": "#a5a7ab",
+      "subtle": "#232426"
+    },
+    "syntax": {
+      "base": {
+        "background": "#232426",
+        "comment": "#8a8c90",
+        "function": "#a1c4fc",
+        "keyword": "#c4adf4",
+        "number": "#dec095",
+        "operator": "#d2d3d5",
+        "string": "#87cc9d",
+        "type": "#d5b27c",
+        "variable": "#e0a5a8"
+      },
+      "highlights": {
+        "diffAdded": "#87cc9d",
+        "diffModified": "#d5b27c",
+        "diffRemoved": "#e0a5a8"
+      }
+    }
+  },
+  "light": false,
+  "name": "Harlo Dark"
+}

@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#d5c4a1",
+      "userMessageBackground": "#ebdbb2"
+    },
+    "markdown": {
+      "inlineCode": "#79740e",
+      "inlineCodeBackground": "#ebdbb2",
+      "link": "#076678"
+    },
+    "primary": {
+      "base": "#076678"
+    },
+    "status": {
+      "error": "#9d0006",
+      "info": "#427b58",
+      "success": "#79740e",
+      "warning": "#b57614"
+    },
+    "surface": {
+      "background": "#fbf1c7",
+      "elevated": "#ebdbb2",
+      "foreground": "#504945",
+      "muted": "#fefcf4",
+      "mutedForeground": "#59514b",
+      "subtle": "#ebdbb2"
+    },
+    "syntax": {
+      "base": {
+        "background": "#ebdbb2",
+        "comment": "#635a52",
+        "function": "#076678",
+        "keyword": "#8f3f71",
+        "number": "#af3a03",
+        "operator": "#504945",
+        "string": "#79740e",
+        "type": "#b57614",
+        "variable": "#9d0006"
+      },
+      "highlights": {
+        "diffAdded": "#79740e",
+        "diffModified": "#b57614",
+        "diffRemoved": "#9d0006"
+      }
+    }
+  },
+  "light": true,
+  "name": "Gruvbox Light"
+}

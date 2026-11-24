@@ -1,0 +1,50 @@
+{
+  "colors": {
+    "chat": {
+      "divider": "#26233a",
+      "userMessageBackground": "#1f1d2e"
+    },
+    "markdown": {
+      "inlineCode": "#31748f",
+      "inlineCodeBackground": "#1f1d2e",
+      "link": "#c4a7e7"
+    },
+    "primary": {
+      "base": "#c4a7e7"
+    },
+    "status": {
+      "error": "#eb6f92",
+      "info": "#9ccfd8",
+      "success": "#31748f",
+      "warning": "#ebbcba"
+    },
+    "surface": {
+      "background": "#191724",
+      "elevated": "#1f1d2e",
+      "foreground": "#e0def4",
+      "muted": "#171520",
+      "mutedForeground": "#908caa",
+      "subtle": "#1f1d2e"
+    },
+    "syntax": {
+      "base": {
+        "background": "#1f1d2e",
+        "comment": "#8985a3",
+        "function": "#c4a7e7",
+        "keyword": "#f6c177",
+        "number": "#f6c177",
+        "operator": "#e0def4",
+        "string": "#31748f",
+        "type": "#ebbcba",
+        "variable": "#eb6f92"
+      },
+      "highlights": {
+        "diffAdded": "#31748f",
+        "diffModified": "#ebbcba",
+        "diffRemoved": "#eb6f92"
+      }
+    }
+  },
+  "light": false,
+  "name": "Rosé Pine"
+}

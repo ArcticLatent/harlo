@@ -29,6 +29,21 @@ pub struct PhoneWanted {
     pub name: String,
     /// Project folders phones don't list.
     pub hidden: Vec<String>,
+    /// The theme phones draw in, as the phone app reads it (see
+    /// `harlo_core::phone::theme`); null for Harlo's own.
+    #[serde(default)]
+    pub theme: Value,
+}
+
+/// An avatar picked on a phone, numbered so the desktop takes each pick
+/// once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarPick {
+    /// Counts the picks since phone access started.
+    pub serial: u64,
+    /// The avatar's name, such as `scarf`.
+    pub name: String,
 }
 
 /// A paired phone, as the server lists it.
@@ -78,6 +93,9 @@ pub struct PhoneState {
     pub devices: Vec<PhoneDevice>,
     /// The IDs of the phones connected now.
     pub connected: Vec<String>,
+    /// The avatar last picked on a phone, if one was.
+    #[serde(default)]
+    pub avatar_pick: Option<AvatarPick>,
 }
 
 /// Who a note is for.

@@ -1,6 +1,6 @@
 // swift-tools-version:6.0
-// HarloKit: the phone protocol (crates/harlo-core/src/phone.rs,
-// crates/harlo-app/src/phone_server.rs) for the iOS app. It builds on Linux
+// HarloKit: the phone protocol (crates/harlo-core/src/phone.rs and
+// crates/harlo-core/src/phone/) for the iOS app. It builds on Linux
 // too, so scripts/ios-e2e.sh can test it against the real harlo.
 import PackageDescription
 
@@ -15,7 +15,8 @@ let package = Package(
         .target(name: "HarloKit", dependencies: ["CTweetNaCl"]),
         // Pairs with a running harlo and drives a session (scripts/ios-e2e.sh).
         .executableTarget(name: "harlo-probe", dependencies: ["HarloKit"]),
-        .testTarget(name: "HarloKitTests", dependencies: ["HarloKit"]),
+        // Themes/: the desktop themes' phone palettes, read from disk.
+        .testTarget(name: "HarloKitTests", dependencies: ["HarloKit"], exclude: ["Themes"]),
     ],
     swiftLanguageModes: [.v6]
 )
