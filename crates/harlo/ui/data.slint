@@ -68,6 +68,8 @@ export struct SidebarRow {
     untitled: bool,
     /// Whether space follows, closing a project's group.
     gap: bool,
+    /// Whether it belongs to a worktree, under the worktree's row.
+    nested: bool,
     /// For a project: whether it has a colour, `tone`, and its icon image,
     /// if it has one.
     colored: bool,
@@ -593,7 +595,7 @@ export struct AttachedChip {
 }
 
 /// A row on a page over the window: 0 a heading, 1 a name and its value,
-/// 2 a note. Tone 1 is good, 2 bad and 3 quiet.
+/// 2 a note. Tone 1 is good, 2 bad, 3 quiet and 4 waiting.
 export struct SheetRow {
     kind: int,
     name: string,
@@ -875,6 +877,9 @@ export global State {
     /// Whether the open session runs without asking ("Don't ask").
     in property <bool> session-trusted;
     in property <string> session-model;
+    /// The worktree the open session runs in, by name; empty in a
+    /// project's own folder.
+    in property <string> session-worktree;
     in property <bool> session-busy;
     in property <string> session-placeholder;
     in property <[TimelineRow]> timeline;

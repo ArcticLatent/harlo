@@ -31,7 +31,7 @@ fn agents(app: &App, rows: &mut Vec<SheetRow>) {
         Some(catalog) => {
             for agent in &catalog.agents {
                 // A primary agent's kind stands out; a subagent's stays quiet.
-                let tone = if agent.primary { 5 } else { 3 };
+                let tone = if agent.primary { 0 } else { 3 };
                 rows.push(SheetRow {
                     glyph: glyph(if agent.read_only {
                         Icon::Eye

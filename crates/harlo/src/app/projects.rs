@@ -353,6 +353,18 @@ impl App {
         })
     }
 
+    /// The name of the worktree session `id` runs in; `None` when it runs
+    /// in a project's own folder, or isn't known.
+    #[must_use]
+    pub fn worktree_of(&self, id: &str) -> Option<&str> {
+        let folder = &self.workspace.session(id)?.directory;
+        self.projects
+            .iter()
+            .flat_map(|p| &p.worktrees)
+            .find(|w| &w.directory == folder)
+            .map(|w| w.name.as_str())
+    }
+
     /// The model new sessions in `folder`, or a worktree of its project,
     /// start with, when one was chosen for the project.
     pub(super) fn project_model(&self, folder: &str) -> Option<harlo_core::workspace::ModelRef> {

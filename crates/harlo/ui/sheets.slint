@@ -408,7 +408,7 @@ component RowBody inherits VerticalLayout {
             text: root.entry.name;
             font-family: root.entry.mono-name ? Fonts.mono : Fonts.sans;
             font-size: root.entry.mono-name ? Size.code : Size.small;
-            color: root.entry.mono-name ? Theme.agent-ink : Theme.text-base;
+            color: Theme.text-base;
             overflow: elide;
             vertical-alignment: center;
             accessible-role: AccessibleRole.text;
@@ -424,8 +424,7 @@ component RowBody inherits VerticalLayout {
             color: root.entry.tone == 1 ? Theme.icon-success-base
                 : root.entry.tone == 2 ? Theme.icon-critical-base
                 : root.entry.tone == 3 ? Theme.text-weak
-                : root.entry.tone == 4 ? Theme.icon-warning-base
-                : root.entry.tone == 5 ? Theme.accent-ink : Theme.text-base;
+                : root.entry.tone == 4 ? Theme.icon-warning-base : Theme.text-base;
             accessible-role: AccessibleRole.text;
         }
         if root.entry.action != "": VerticalLayout {

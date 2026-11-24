@@ -96,7 +96,7 @@ fn shown_rows(app: &App, automation: &Automation) -> Vec<SheetRow> {
     rows.push(match (automation.status, automation.next_due_at) {
         (AutomationStatus::Paused, _) => pair("Next", "Paused", 4),
         (AutomationStatus::Done, _) => pair("Next", "It won't run again", 3),
-        (AutomationStatus::Active, Some(next)) => pair("Next", &capitalised(&moment_now(next)), 5),
+        (AutomationStatus::Active, Some(next)) => pair("Next", &capitalised(&moment_now(next)), 0),
         (AutomationStatus::Active, None) => pair("Next", "Not set", 3),
     });
     rows.push(pair(

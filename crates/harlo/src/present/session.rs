@@ -64,6 +64,7 @@ pub fn header(app: &App, id: &str, state: &State<'_>) {
             .unwrap_or_default()
             .into(),
     );
+    state.set_session_worktree(app.worktree_of(id).unwrap_or_default().into());
     let busy = app.is_busy(id);
     state.set_session_busy(busy);
     state.set_session_placeholder(if busy { PLACEHOLDER_BUSY } else { PLACEHOLDER }.into());

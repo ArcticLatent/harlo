@@ -95,9 +95,8 @@ component Item inherits Rectangle {
                     font-size: Size.label;
                     color: Theme.brand-ink.mix(Theme.text-base, 0.55);
                 }
-                if entry.busy: Working {
-                    size: 12px;
-                }
+                // Its count stays still while a session works: the
+                // session's own row says so.
                 Text {
                     text: entry.detail;
                     vertical-alignment: center;
@@ -172,7 +171,8 @@ component Item inherits Rectangle {
                 height: parent.height - 16px;
             }
             HorizontalLayout {
-                padding-left: 4px;
+                // A worktree's sessions sit under its row.
+                padding-left: entry.nested ? 20px : 4px;
                 padding-right: 4px;
                 spacing: 10px;
                 alignment: stretch;
@@ -225,7 +225,7 @@ component Item inherits Rectangle {
                 height: parent.height - 16px;
             }
             HorizontalLayout {
-                padding-left: 14px;
+                padding-left: entry.nested ? 30px : 14px;
                 padding-right: 4px;
                 spacing: 7px;
                 Icon {
@@ -265,7 +265,7 @@ component Item inherits Rectangle {
 
         if entry.kind == RowKind.more: HorizontalLayout {
             height: 30px;
-            padding-left: 16px;
+            padding-left: entry.nested ? 32px : 16px;
             alignment: start;
             Press {
                 label: entry.title;

@@ -118,7 +118,24 @@ export component ContextPanel inherits Rectangle {
             if State.context-card.error == "" && State.context-card.window-note != "": Weak {
                 text: State.context-card.window-note;
             }
-            if root.counted: HorizontalLayout {
+            // In words first, with the bar; the count is the detail.
+            if root.counted && State.context-card.bar: Text {
+                text: State.context-card.percent;
+                wrap: word-wrap;
+                font-size: 16px * Size.text-scale;
+                font-weight: 600;
+                color: State.context-card.warn ? Theme.icon-warning-base : Theme.text-strong;
+            }
+            if root.counted && State.context-card.bar: FillBar {
+                fill: State.context-card.fill;
+                tint: State.context-card.warn ? Theme.icon-warning-base
+                    : Theme.text-interactive-base;
+            }
+            if root.counted && State.context-card.bar: Weak {
+                text: State.context-card.used + " " + State.context-card.of;
+            }
+            // Without the model's limit there's no share to say.
+            if root.counted && !State.context-card.bar: HorizontalLayout {
                 spacing: 6px;
                 alignment: start;
                 Text {
@@ -133,16 +150,6 @@ export component ContextPanel inherits Rectangle {
                     wrap: no-wrap;
                     vertical-alignment: bottom;
                 }
-            }
-            if root.counted && State.context-card.bar: FillBar {
-                fill: State.context-card.fill;
-                tint: State.context-card.warn ? Theme.icon-warning-base
-                    : Theme.text-interactive-base;
-            }
-            if root.counted && State.context-card.bar: Text {
-                text: State.context-card.percent;
-                font-size: Size.small;
-                color: State.context-card.warn ? Theme.icon-warning-base : Theme.accent-ink;
             }
             if root.counted && State.context-card.messages != "": Weak {
                 text: State.context-card.messages;

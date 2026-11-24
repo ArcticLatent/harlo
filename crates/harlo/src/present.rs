@@ -612,6 +612,9 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
                 ..SidebarRow::default()
             });
             if session_rows(app, &worktree.directory, &worktree.sessions, &mut rows) {
+                for row in &mut rows[heading + 1..] {
+                    row.nested = true;
+                }
                 any = true;
             } else if filtering {
                 rows.truncate(heading);

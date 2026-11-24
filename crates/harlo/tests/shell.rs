@@ -15,6 +15,7 @@ use harlo_core::approvals::Shield;
 use harlo_core::layout::Layout;
 use harlo_core::server::{Location, Update};
 use harlo_core::workspace::{Event as ServerEvent, EventKind, Snapshot};
+use slint::Model as _;
 use support::{demo, ui};
 
 #[test]
@@ -255,12 +256,26 @@ fn worktrees_group_their_sessions_under_the_project() {
         .insert("p_home".into(), vec![demo::HOME.into(), worktree.into()]);
     snapshot.sessions[0].directory = worktree.into();
     snapshot.sessions[0].title = Some("Working in the worktree".into());
+    let id = snapshot.sessions[0].id.clone();
     let app = App::new(Location::Shared, vec![Location::Shared], demo::layout());
     let ui = ui(app);
     ui.send(Message::Tick(demo::now()));
     ui.send(demo::connected(snapshot));
     assert!(ui.shows("feature-x"));
     assert!(ui.shows("Working in the worktree"));
+
+    // Its session sits under the worktree's row, and says where it runs.
+    let state = slint::ComponentHandle::global::<harlo::ui::State>(&ui.window);
+    let rows = state.get_sidebar_rows();
+    let nested: Vec<_> = (0..rows.row_count())
+        .filter_map(|i| rows.row_data(i))
+        .filter(|row| row.nested)
+        .map(|row| row.title.to_string())
+        .collect();
+    assert_eq!(nested, ["Working in the worktree"]);
+    ui.send(Message::OpenSession(id));
+    assert_eq!(state.get_session_worktree(), "feature-x");
+    assert!(ui.shows("In worktree feature-x"));
 
     // The filter keeps the worktree heading when it has matches.
     ui.send(Message::Filter("worktree".into()));

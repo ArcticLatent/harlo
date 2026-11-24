@@ -112,9 +112,11 @@ fn context(found: ContextLoaded) -> Ui {
 fn the_window_shows_how_full_it_is_against_the_models_size() {
     let ui = context(loaded(seen(), Some(Vec::new())));
     assert!(ui.shows("Context window"));
-    assert!(ui.shows("30k"), "the latest step's tokens");
-    assert!(ui.shows("of 200k tokens"));
-    assert!(ui.shows("15% of what the model can hold"));
+    assert!(
+        ui.shows("15% of what the model can hold"),
+        "in words, as its headline"
+    );
+    assert!(ui.shows("30k of 200k tokens"), "the latest step's tokens");
     assert!(ui.shows("12 messages since it was last summarized"));
     assert!(ui.shows("Deep Model"), "the step's model, by name");
     assert!(ui.shows("plan"), "and its agent");
@@ -196,7 +198,7 @@ fn a_step_reloads_it_and_a_late_answer_is_ignored() {
         2,
         Box::new(loaded(seen(), Some(Vec::new()))),
     )));
-    assert!(ui.shows("of 200k tokens"));
+    assert!(ui.shows("30k of 200k tokens"));
 }
 
 #[test]

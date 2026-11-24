@@ -613,10 +613,24 @@ def scene_window(g):
     g.cap("reopened", "After a restart: the tabs and panels that were open")
 
 
+def with_sidebar(h):
+    """Closes an open side panel and shows the sidebar: at narrow widths a
+    panel takes the sidebar's room."""
+    panel = h.find(None, role="Button", where=lambda e: e.label.startswith("Close ")
+                   and e.y < 40 and e.x > h.size[0] / 2)
+    if panel:
+        h.click(panel[0].label, role="Button")
+        h.settle(0.6)
+    if not h.find("New session", role="Button", where=lambda e: e.x < 340):
+        h.click("Toggle sidebar")
+        h.settle(0.6)
+
+
 def scene_worktrees(g):
     """A worktree made from Settings → Projects, its row in the sidebar,
     and a session in it."""
     h = g.h
+    with_sidebar(h)
     settings(h, "Projects")
     h.settle(0.6)
     h.press("project", where=lambda e: e.x > h.size[0] / 3)
@@ -666,6 +680,7 @@ def scene_subagents(g):
     """Work handed to a subagent: its card while it works, its report, its
     own session and the way back."""
     h = g.h
+    with_sidebar(h)
     open_project_session(h, title="Test coverage")
     path = os.path.join(h.info["sandbox"], "scripts.json")
     try:
