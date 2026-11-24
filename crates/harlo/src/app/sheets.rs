@@ -421,11 +421,13 @@ pub enum SettingChoice {
     ExtensionsTab,
     /// What a new schedule does: a prompt, a shell command or code.
     ScheduleDoes,
+    /// [`Preferences::backend`].
+    Backend,
 }
 
 impl SettingChoice {
     /// Every choice, in the order the UI numbers them.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Appearance,
         Self::Contrast,
         Self::DiffColors,
@@ -450,6 +452,7 @@ impl SettingChoice {
         Self::LocalEngine,
         Self::ExtensionsTab,
         Self::ScheduleDoes,
+        Self::Backend,
     ];
 
     /// The options, as Settings names them, in order.
@@ -478,6 +481,7 @@ impl SettingChoice {
             Self::LocalEngine => &["Ollama", "llama.cpp"],
             Self::ExtensionsTab => &["MCP servers", "Plugins", "Skills"],
             Self::ScheduleDoes => &["A prompt", "A shell command", "Code"],
+            Self::Backend => &["Harlo's server", "OpenCode"],
         }
     }
 }
@@ -650,6 +654,9 @@ pub struct Sheets {
     pub autostart_error: Option<String>,
     /// Why a computer couldn't be added, if it couldn't.
     pub computer_error: Option<String>,
+    /// How bringing sessions over from OpenCode went: under way, or what
+    /// it did.
+    pub import: Option<String>,
     /// The hosts the SSH config names, offered to follow.
     pub ssh_hosts: Vec<String>,
     /// The setup guide's step.
@@ -974,10 +981,11 @@ impl App {
     }
 
     /// OpenCode's global config folder, when Harlo may change it: only for
-    /// the background service on this computer, which reads it.
+    /// a server on this computer, which reads it (Harlo's reads it in place).
     #[must_use]
     pub fn global_config(&self) -> Option<&Path> {
-        matches!(self.location, Location::Shared)
+        self.location
+            .is_here()
             .then_some(self.opencode_folder.as_deref())
             .flatten()
     }

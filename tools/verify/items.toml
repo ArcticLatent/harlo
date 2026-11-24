@@ -170,6 +170,11 @@ title = "Local models: Ollama and llama.cpp installed, served, models that fit"
 checks = ["unit:harlo:local_models", "unit:harlo-core:local_models", "unit:harlo-core:local_models_real"]
 
 [[item]]
+id = "backends"
+title = "Harlo's server and OpenCode's on this computer: both offered, where Harlo opens, the service started and found, OpenCode sessions imported"
+checks = ["unit:harlo:backends", "unit:harlo:import_button", "unit:harlo-core:engine_location", "unit:harlo-server:service", "unit:harlo-server:opencode_import"]
+
+[[item]]
 id = "computers"
 title = "Other computers over SSH: added, followed, removed"
 checks = ["unit:harlo:computers", "unit:harlo-core:ssh"]

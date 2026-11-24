@@ -46,7 +46,7 @@ With HARLO_GUI_API_LOG=<file> at `start`, Harlo reaches the server through
 tools/api-log.py, which records every request, response and event in <file>.
 
 With HARLO_GUI_SHARED=1 at `start`, Harlo takes the sandbox for the shared
-background service on this computer (a registration in Harlo's scratch state
+background service on this computer (and opens there, as "Local · OpenCode") (a registration in Harlo's scratch state
 folder) and the sandbox's config folder for OpenCode's own, so settings that
 only apply to that service can be driven. Nothing outside the scratch
 folders is touched either way.
@@ -273,8 +273,15 @@ def cmd_start(args):
         state["harlo_url"] = f"http://127.0.0.1:{port}"
         time.sleep(0.3)
     save(state)
-    if os.environ.get("HARLO_GUI_PREFS"):
-        seed_preferences(gui_root, os.environ["HARLO_GUI_PREFS"])
+    prefs = os.environ.get("HARLO_GUI_PREFS")
+    if state.get("shared"):
+        # Harlo opens on its own server unless told otherwise; here the
+        # sandbox stands in for OpenCode's service, so it opens there.
+        merged = json.loads(prefs or "{}")
+        merged.setdefault("backend", "opencode")
+        prefs = json.dumps(merged)
+    if prefs:
+        seed_preferences(gui_root, prefs)
     start_harlo(state)
     xdotool(state, "windowmove", state["window"], "0", "0")
     xdotool(state, "windowsize", state["window"], width, height)

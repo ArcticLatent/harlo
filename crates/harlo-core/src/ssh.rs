@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 use opencode_client::{SharedService, parse_registration};
 
+use crate::layout::Backend;
+
 /// Returns the SSH config Harlo offers hosts from: `~/.ssh/config`.
 #[must_use]
 pub fn config_file() -> Option<PathBuf> {
@@ -72,14 +74,30 @@ const OPTIONS: [&str; 6] = [
     "ServerAliveCountMax=3",
 ];
 
-/// Reads the registration of `${XDG_STATE_HOME:-~/.local/state}/opencode/service.json`.
-const READ_REGISTRATION: &str =
-    r#"cat "${XDG_STATE_HOME:-$HOME/.local/state}/opencode/service.json" 2>/dev/null || true"#;
+/// Reads the registration of `${XDG_STATE_HOME:-~/.local/state}/<app>/service.json`.
+fn read_registration(backend: Backend) -> &'static str {
+    match backend {
+        Backend::OpenCode => {
+            r#"cat "${XDG_STATE_HOME:-$HOME/.local/state}/opencode/service.json" 2>/dev/null || true"#
+        }
+        Backend::Harlo => {
+            r#"cat "${XDG_STATE_HOME:-$HOME/.local/state}/harlo/service.json" 2>/dev/null || true"#
+        }
+    }
+}
 
-/// Starts the shared service, finding `opencode` where its installer puts
-/// it too, as a non-interactive SSH session's `PATH` may lack it.
-const START_SERVICE: &str =
-    r#"PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; opencode service start"#;
+/// Starts the background service, finding the program where its installer
+/// puts it too, as a non-interactive SSH session's `PATH` may lack it.
+fn start_command(backend: Backend) -> &'static str {
+    match backend {
+        Backend::OpenCode => {
+            r#"PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; opencode service start"#
+        }
+        Backend::Harlo => {
+            r#"PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"; harlo-server service start"#
+        }
+    }
+}
 
 /// `target`'s words, as `ssh` takes them.
 ///
@@ -145,13 +163,13 @@ fn ssh_error(stderr: &[u8], target: &str) -> String {
     format!("Couldn't reach {} over SSH: {line}", destination(target))
 }
 
-/// The shared service registered on `target`, if any.
+/// The `backend` service registered on `target`, if any.
 ///
 /// # Errors
 ///
 /// When `target` can't be reached, or its registration doesn't read.
-pub async fn registered(target: &str) -> Result<Option<SharedService>, String> {
-    let text = run(target, READ_REGISTRATION).await?;
+pub async fn registered(target: &str, backend: Backend) -> Result<Option<SharedService>, String> {
+    let text = run(target, read_registration(backend)).await?;
     if text.trim().is_empty() {
         return Ok(None);
     }
@@ -160,14 +178,13 @@ pub async fn registered(target: &str) -> Result<Option<SharedService>, String> {
         .map_err(|e| format!("{}'s service.json doesn't read: {e}", destination(target)))
 }
 
-/// Starts the shared service on `target`, as OpenCode's own clients do
-/// when none runs.
+/// Starts the `backend` service on `target` when none runs.
 ///
 /// # Errors
 ///
 /// When `target` can't be reached or the service doesn't start.
-pub async fn start_service(target: &str) -> Result<(), String> {
-    run(target, START_SERVICE).await.map(|_| ())
+pub async fn start_service(target: &str, backend: Backend) -> Result<(), String> {
+    run(target, start_command(backend)).await.map(|_| ())
 }
 
 /// A tunnel from a port on this computer to a server on another; it closes

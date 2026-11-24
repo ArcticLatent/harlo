@@ -1,7 +1,7 @@
-"""Harlo's own tools on a server that can't take them: the server says
-they're unavailable, Harlo stops asking (no retry every few seconds) and
-Settings → Tools for agents says why. Only on harlo-server: OpenCode takes
-them."""
+"""Harlo's own tools on harlo-server: the server takes them over one
+connection per folder, which stays open (no retry every few seconds), and
+Settings → Tools for agents shows no refusal. Only on harlo-server; the
+OpenCode run of the same feature is window:own_tools' unit test."""
 
 import json
 import os
@@ -25,19 +25,20 @@ def attempts():
 
 def run(h, s):
     try:
-        s.step("Settings says why the tools aren't offered")
+        s.step("Settings offers the tools, with no refusal")
         settings(h, "Tools for agents")
-        h.wait("Not available on this server", timeout=20)
-        s.expect(h.shows("This server doesn't offer clients' tools to its agents yet."),
-                 "the server's reason")
-        h.shot("unavailable")
+        h.wait("Past sessions", timeout=20)
+        h.settle(3)
+        s.expect(not h.shows("Not available on this server"), "not refused")
+        s.expect(not h.shows("Not offered"), "no error")
+        h.shot("offered")
 
-        s.step("Harlo stops asking")
+        s.step("the connection stays open")
         first = attempts()
         time.sleep(12)
         again = attempts()
-        s.expect(first >= 1, "it asked once per folder", f"{first} attempts")
-        s.expect(again == first, "no more attempts", f"{first} then {again}")
+        s.expect(first >= 1, "it connected", f"{first} attempts")
+        s.expect(again == first, "no reconnecting", f"{first} then {again}")
     finally:
         if os.path.exists(LOG):
             os.remove(LOG)

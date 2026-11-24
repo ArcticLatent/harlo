@@ -118,12 +118,27 @@ pub struct Preferences {
     pub phone_paused: bool,
     /// The user's picture on the rail, by name, such as `classic`.
     pub avatar: String,
+    /// The server Harlo opens on at start; the other stays in the picker.
+    pub backend: Backend,
+}
+
+/// The server software a location runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Backend {
+    /// Harlo's own server, `harlo-server`.
+    #[default]
+    #[serde(rename = "harlo")]
+    Harlo,
+    /// OpenCode's background service.
+    #[serde(rename = "opencode")]
+    OpenCode,
 }
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             reopen_tabs: true,
+            backend: Backend::default(),
             keep_in_tray: true,
             setup_done: false,
             notifications: crate::notifications::Notifications::default(),

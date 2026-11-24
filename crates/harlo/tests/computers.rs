@@ -15,6 +15,7 @@ mod support;
 use std::time::Duration;
 
 use harlo::app::{Message, Section, SheetEvent, Status};
+use harlo_core::layout::Backend;
 use harlo_core::server::Location;
 use remote::Remote;
 use server::Sandbox;
@@ -45,6 +46,8 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     let mut app = demo::new_app();
     app.location = here.clone();
     app.locations = vec![here.clone()];
+    // The other computer stands in for OpenCode's service there.
+    app.preferences.backend = Backend::OpenCode;
     let ui = ui(app);
     ui.send(Message::Sheet(SheetEvent::Open(Section::Server)));
     assert!(ui.shows("Other computers"));
@@ -58,6 +61,7 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     ui.press("Add and follow Computer");
     let there = Location::Ssh {
         target: remote.target.clone(),
+        backend: Backend::OpenCode,
     };
     assert_eq!(ui.app().location, there);
     assert!(
@@ -80,6 +84,13 @@ fn a_computer_is_added_followed_over_ssh_and_removed() {
     assert_eq!(ui.app().location, here, "back to the first location");
     assert!(ui.app().preferences.computers.is_empty());
     assert!(!ui.app().locations.contains(&there));
+    assert!(
+        !ui.app()
+            .locations
+            .iter()
+            .any(|l| matches!(l, Location::Ssh { .. })),
+        "both of its servers go"
+    );
 }
 
 #[test]
@@ -112,8 +123,10 @@ fn the_ssh_configs_hosts_are_offered_and_one_click_follows() {
     assert_eq!(
         ui.app().location,
         Location::Ssh {
-            target: "nano".into()
-        }
+            target: "nano".into(),
+            backend: Backend::Harlo,
+        },
+        "Harlo's server there, as chosen"
     );
     assert!(!ui.shows("Follow: nano"));
 }

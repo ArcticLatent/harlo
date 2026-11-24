@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use harlo_core::approvals::{self, Shield};
 use harlo_core::composer::{self as compose, Attached, Choice, Draft, MenuItem, Outgoing, Trigger};
-use harlo_core::layout::{Layout, Preferences, Store, Tabs};
+use harlo_core::layout::{Backend, Layout, Preferences, Store, Tabs};
 use harlo_core::server::{
     self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
 };
@@ -68,7 +68,7 @@ pub use changes::{
 };
 pub use claude::{Action as ClaudeAction, Claude, Event as ClaudeEvent};
 pub use commit_message::{clean_message, commit_prompt};
-pub use computers::ComputerEvent;
+pub use computers::{ComputerEvent, IMPORTING, imported_text};
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
@@ -878,13 +878,13 @@ impl App {
     pub fn with_preferences(mut self, preferences: Preferences) -> Self {
         self.preferences = preferences;
         self.retheme();
-        // The computers added in Settings → Server join the picker.
+        // The computers added in Settings → Server join the picker, each
+        // with Harlo's server and OpenCode's there.
         for target in &self.preferences.computers {
-            let location = Location::Ssh {
-                target: target.clone(),
-            };
-            if !self.locations.contains(&location) {
-                self.locations.push(location);
+            for location in computer_locations(target) {
+                if !self.locations.contains(&location) {
+                    self.locations.push(location);
+                }
             }
         }
         self
@@ -2590,4 +2590,14 @@ async fn send(
     }
     .map_err(failed)?;
     Ok(Box::new(session))
+}
+
+/// The servers on computer `target` the picker offers: Harlo's, then
+/// OpenCode's.
+#[must_use]
+pub fn computer_locations(target: &str) -> [Location; 2] {
+    [Backend::Harlo, Backend::OpenCode].map(|backend| Location::Ssh {
+        target: target.to_owned(),
+        backend,
+    })
 }

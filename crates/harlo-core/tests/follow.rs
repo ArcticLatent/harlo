@@ -163,5 +163,6 @@ fn location_debug_hides_the_password() {
     let shown = format!("{location:?}");
     assert!(!shown.contains("s3cret"), "{shown}");
     assert_eq!(location.label(), "127.0.0.1:1");
-    assert_eq!(Location::Shared.label(), "Local");
+    assert_eq!(Location::Engine.label(), "Local");
+    assert_eq!(Location::Shared.label(), "Local · OpenCode");
 }

@@ -24,6 +24,7 @@ use std::rc::Rc;
 
 use harlo_core::approvals::Shield;
 use harlo_core::composer::Choice;
+use harlo_core::layout::Backend;
 use harlo_core::server::Location;
 use harlo_core::sessions::{SessionSummary, VISIBLE_SESSIONS, compact_age, visible};
 use harlo_core::theme::{Rgba, Tokens};
@@ -233,7 +234,7 @@ impl Presenter {
                 .collect(),
         );
         let notice = if app.projects.is_empty() {
-            empty_text(&app.status)
+            empty_text(&app.status, &app.location)
         } else {
             String::new()
         };
@@ -572,7 +573,7 @@ fn status_color(t: &Tokens, status: &Status) -> Rgba {
 /// The icon for a location: this computer, or another server.
 fn location_icon(location: &Location) -> Icon {
     match location {
-        Location::Shared => Icon::Monitor,
+        Location::Shared | Location::Engine => Icon::Monitor,
         Location::Server { .. } => Icon::Server,
         Location::Ssh { .. } => Icon::MonitorCloud,
     }
@@ -581,16 +582,28 @@ fn location_icon(location: &Location) -> Icon {
 /// What a location is, under its name.
 fn location_detail(location: &Location) -> &'static str {
     match location {
-        Location::Shared => "OpenCode's background service on this computer",
+        Location::Engine => "Harlo's server on this computer",
+        Location::Shared => "OpenCode's service on this computer",
         Location::Server { .. } => "Server given with --server",
-        Location::Ssh { .. } => "OpenCode's background service there, over SSH",
+        Location::Ssh {
+            backend: Backend::Harlo,
+            ..
+        } => "Harlo's server there, over SSH",
+        Location::Ssh {
+            backend: Backend::OpenCode,
+            ..
+        } => "OpenCode's service there, over SSH",
     }
 }
 
 /// What the list says when it has no projects to show.
-fn empty_text(status: &Status) -> String {
+fn empty_text(status: &Status, location: &Location) -> String {
     match status {
-        Status::Connecting { .. } => "Connecting to OpenCode…".to_owned(),
+        Status::Connecting { .. } => match location.backend() {
+            Some(Backend::Harlo) => "Connecting to Harlo's server…".to_owned(),
+            Some(Backend::OpenCode) => "Connecting to OpenCode…".to_owned(),
+            None => "Connecting…".to_owned(),
+        },
         Status::Lost { reason, .. } => format!("Can't connect: {reason}."),
         Status::Connected { .. } => "No projects yet.\nAdd a folder with + Project.".to_owned(),
     }

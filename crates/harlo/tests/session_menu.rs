@@ -119,7 +119,16 @@ fn the_session_menu_forks_it_whole_or_from_a_prompt() {
     // Fork: a new session with the whole history.
     ui.press("Session actions");
     assert_eq!(ui.app().picker, Some(Picker::SessionMenu));
-    for item in ["Fork", "Export…", "Import a session…", "Archive", "Delete…"] {
+    // On OpenCode's service it can also be copied to Harlo's; never pressed
+    // here, as that reaches the servers on this computer.
+    for item in [
+        "Fork",
+        "Export…",
+        "Import a session…",
+        "Copy to Harlo's server",
+        "Archive",
+        "Delete…",
+    ] {
         assert!(ui.shows(item), "{item}");
     }
     ui.press("Fork");

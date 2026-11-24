@@ -290,6 +290,16 @@ fn session_menu_items(app: &App) -> Vec<Item> {
             None,
             SessionAction::Import,
         ),
+    ]);
+    if matches!(app.location, harlo_core::server::Location::Shared) {
+        items.push(item(
+            "Copy to Harlo's server".to_owned(),
+            Icon::Copy,
+            None,
+            SessionAction::CopyToHarlo,
+        ));
+    }
+    items.extend([
         item(
             "Archive".to_owned(),
             Icon::Archive,

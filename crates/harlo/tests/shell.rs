@@ -24,7 +24,7 @@ fn start_shows_the_design_content() {
     for text in [
         "Harlo",
         "Add a project",
-        "Local",
+        "Local · OpenCode",
         "New session",
         "Ctrl+N",
         "ArcticLatent.github.io",
@@ -143,15 +143,15 @@ fn before_connecting_the_sidebar_says_so() {
 #[test]
 fn the_location_picker_shows_servers_and_the_connection() {
     let ui = ui(demo::app());
-    ui.press("Location: Local");
+    ui.press("Location: Local · OpenCode");
     assert!(ui.app().picking_location);
     assert!(ui.shows(&format!(
         "Connected · OpenCode {}",
         harlo_core::OPENCODE_VERSION
     )));
-    assert!(ui.shows("OpenCode's background service on this computer"));
+    assert!(ui.shows("OpenCode's service on this computer"));
 
-    ui.press("Location: Local");
+    ui.press("Location: Local · OpenCode");
     assert!(!ui.app().picking_location);
 }
 

@@ -14,7 +14,6 @@ use harlo_core::local_models::{
     Computer, Engine, Engines, Install, Installed, ModelFiles, Release, Running, Serve, Suggestion,
     answers, base_url, ollama_models, ollama_pull, suggest,
 };
-use harlo_core::server::Location;
 
 use super::{App, Message};
 use crate::task::{Handle, Task};
@@ -223,11 +222,11 @@ impl App {
             .unwrap_or(Engine::Ollama)
     }
 
-    /// Whether local models serve this server: only the shared one on this
+    /// Whether local models serve this server: only a server on this
     /// computer reaches them.
     #[must_use]
     pub fn local_models_apply(&self) -> bool {
-        matches!(self.location, Location::Shared)
+        self.location.is_here()
     }
 
     /// The suggestion llama.cpp serves, if it's one of them.

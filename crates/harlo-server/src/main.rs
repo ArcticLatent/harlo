@@ -1,6 +1,11 @@
-//! `harlo-server serve [--hostname H] [--port P]`: runs the server until
-//! it's stopped. The password, when set, comes from `OPENCODE_PASSWORD`
-//! (or `HARLO_SERVER_PASSWORD`); clients send it as basic auth.
+//! Harlo's server.
+//!
+//! - `harlo-server serve [--hostname H] [--port P] [--register]` runs it until it's
+//!   stopped. The password, when set, comes from `HARLO_SERVER_PASSWORD` (or
+//!   `OPENCODE_PASSWORD`); clients send it as basic auth. `--register` records it as the
+//!   background service.
+//! - `harlo-server service start` starts the background service unless one answers, and
+//!   prints where it is; `service status` only says.
 
 // Rust guideline compliant 2026-10-09
 
@@ -11,10 +16,15 @@ use std::process::ExitCode;
 async fn main() -> ExitCode {
     let mut hostname = "127.0.0.1".to_owned();
     let mut port = 4096_u16;
-    let mut args = std::env::args().skip(1);
+    let mut register = false;
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().map(String::as_str) == Some("service") {
+        return service(args.nth(1).as_deref()).await;
+    }
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "serve" => {}
+            "--register" => register = true,
             "--hostname" => hostname = args.next().unwrap_or(hostname),
             "--port" => match args.next().map(|p| p.parse()) {
                 Some(Ok(p)) => port = p,
@@ -22,7 +32,7 @@ async fn main() -> ExitCode {
             },
             other => {
                 return fail(&format!(
-                    "Unknown argument {other}. Usage: harlo-server serve [--hostname H] [--port P]"
+                    "Unknown argument {other}. Usage: harlo-server serve [--hostname H] [--port P] [--register] | service start|status"
                 ));
             }
         }
@@ -40,12 +50,23 @@ async fn main() -> ExitCode {
     };
     let port = listener.local_addr().map_or(port, |a| a.port());
     println!("harlo-server listening on http://{hostname}:{port}");
-    // Phone access reaches this server through loopback.
+    // Phone access and the registration reach this server through loopback.
     let me = if hostname == "0.0.0.0" || hostname == "::" {
         "127.0.0.1"
     } else {
         hostname.as_str()
     };
+    if register {
+        let registration = harlo_server::service::Registration {
+            url: format!("http://{me}:{port}"),
+            password: server.password().map(str::to_owned),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            pid: std::process::id(),
+        };
+        if let Err(e) = harlo_server::service::register(&registration) {
+            return fail(&e);
+        }
+    }
     let phone = std::sync::Arc::clone(&server.phone);
     let (url, pw) = (
         format!("http://{me}:{port}"),
@@ -73,14 +94,43 @@ async fn main() -> ExitCode {
         .with_graceful_shutdown(async move { signal.notified().await })
         .into_future();
     tokio::pin!(serving);
-    tokio::select! {
-        result = &mut serving => return finished(result),
-        () = stopped => {}
+    let code = tokio::select! {
+        result = &mut serving => Some(finished(result)),
+        () = stopped => None,
+    };
+    let code = if let Some(code) = code {
+        code
+    } else {
+        stop.notify_one();
+        match tokio::time::timeout(STOP_GRACE, &mut serving).await {
+            Ok(result) => finished(result),
+            Err(_elapsed) => ExitCode::SUCCESS,
+        }
+    };
+    if register {
+        harlo_server::service::unregister();
     }
-    stop.notify_one();
-    match tokio::time::timeout(STOP_GRACE, &mut serving).await {
-        Ok(result) => finished(result),
-        Err(_elapsed) => ExitCode::SUCCESS,
+    code
+}
+
+/// `service start` or `service status`.
+async fn service(what: Option<&str>) -> ExitCode {
+    let found = match what {
+        Some("start") => harlo_server::service::start().await,
+        Some("status") => harlo_server::service::running()
+            .await
+            .ok_or_else(|| "The service isn't running.".to_owned()),
+        _ => return fail("Usage: harlo-server service start|status"),
+    };
+    match found {
+        Ok(registration) => {
+            println!(
+                "harlo-server {} is running at {} (process {})",
+                registration.version, registration.url, registration.pid
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e),
     }
 }
 

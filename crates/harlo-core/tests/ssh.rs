@@ -14,6 +14,7 @@ mod remote;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use harlo_core::layout::Backend;
 use harlo_core::server::{Location, Update, follow};
 use harlo_core::ssh;
 use remote::{Remote, free_port, registration};
@@ -45,14 +46,14 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
     };
     let sandbox = Sandbox::start().await;
     assert!(
-        ssh::registered(&remote.target)
+        ssh::registered(&remote.target, Backend::OpenCode)
             .await
             .expect("reached")
             .is_none(),
         "nothing registered yet"
     );
     remote.register(&sandbox.url, &sandbox.password);
-    let service = ssh::registered(&remote.target)
+    let service = ssh::registered(&remote.target, Backend::OpenCode)
         .await
         .expect("reached")
         .expect("registered");
@@ -60,6 +61,7 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
 
     let url = connect(Location::Ssh {
         target: remote.target.clone(),
+        backend: Backend::OpenCode,
     })
     .await
     .expect("connected");
@@ -67,7 +69,8 @@ async fn a_registered_service_is_followed_through_a_tunnel() {
     assert_ne!(url, sandbox.url, "through the tunnel's own port");
     assert_eq!(
         Location::Ssh {
-            target: remote.target.clone()
+            target: remote.target.clone(),
+            backend: Backend::Harlo,
         }
         .label(),
         "harlo-remote"
@@ -99,6 +102,7 @@ async fn the_service_is_started_there_when_none_runs() {
 
     connect(Location::Ssh {
         target: remote.target.clone(),
+        backend: Backend::OpenCode,
     })
     .await
     .expect("connected");
@@ -114,11 +118,48 @@ async fn an_unreachable_computer_says_why() {
     let closed = free_port();
     let why = connect(Location::Ssh {
         target: format!("-p {closed} {}", remote.target),
+        backend: Backend::Harlo,
     })
     .await
     .expect_err("not reached");
     assert!(
         why.contains("Couldn't reach harlo-remote over SSH"),
         "{why}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn harlos_server_is_started_there_when_none_runs() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let Some(remote) = Remote::start(scratch.path()) else {
+        return;
+    };
+    let sandbox = Sandbox::start().await;
+    // The stand-in registers the sandbox, as `harlo-server service start`
+    // would register the server it starts.
+    let stand_in = format!(
+        "#!/bin/sh\n[ \"$1 $2\" = \"service start\" ] || exit 2\n\
+         mkdir -p \"$XDG_STATE_HOME/harlo\"\n\
+         printf '%s' '{}' > \"$XDG_STATE_HOME/harlo/service.json\"\n",
+        registration(&sandbox.url, &sandbox.password)
+    );
+    let program = remote.root.join("bin/harlo-server");
+    std::fs::write(&program, stand_in).expect("the stand-in");
+    std::process::Command::new("chmod")
+        .arg("+x")
+        .arg(&program)
+        .status()
+        .expect("chmod");
+
+    connect(Location::Ssh {
+        target: remote.target.clone(),
+        backend: Backend::Harlo,
+    })
+    .await
+    .expect("connected");
+    assert!(remote.root.join("state/harlo/service.json").exists());
+    assert!(
+        !remote.root.join("state/opencode/service.json").exists(),
+        "OpenCode's service is left alone"
     );
 }

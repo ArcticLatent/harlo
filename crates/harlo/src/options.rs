@@ -88,10 +88,11 @@ impl Options {
         Ok(options)
     }
 
-    /// The servers the location picker offers; the last one is followed at start.
+    /// The servers the location picker offers: Harlo's and OpenCode's on
+    /// this computer, and the one given with `--server`.
     #[must_use]
     pub fn locations(&self) -> Vec<Location> {
-        let mut locations = vec![Location::Shared];
+        let mut locations = vec![Location::Engine, Location::Shared];
         if let Some(url) = &self.server {
             locations.push(Location::Server {
                 url: url.clone(),

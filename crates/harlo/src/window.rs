@@ -220,7 +220,6 @@ fn perform(window: &AppWindow, effect: Effect) {
 /// saved last time.
 fn boot(options: &Options) -> App {
     let locations = options.locations();
-    let location = locations.last().cloned().unwrap_or(Location::Shared);
     // A missing or unreadable layout starts from the default one.
     let store = Store::user();
     let layout = store
@@ -231,6 +230,11 @@ fn boot(options: &Options) -> App {
         .as_ref()
         .and_then(|store| store.load_preferences().ok())
         .unwrap_or_default();
+    // The server given with `--server`, else the chosen one on this computer.
+    let location = match locations.last() {
+        Some(server @ Location::Server { .. }) => server.clone(),
+        _ => Location::here(preferences.backend),
+    };
     let mut app = App::new(location, locations, layout)
         .with_preferences(preferences)
         .notifying();
@@ -759,6 +763,9 @@ pub const FORGET_NOTE: i32 = 84;
 /// Settings → Memory: stop correcting a note.
 pub const CANCEL_NOTE: i32 = 85;
 
+/// Settings → Server: bring every session over from OpenCode.
+pub const IMPORT_OPENCODE: i32 = 86;
+
 /// The first number of Settings → Models' switches: the one for the model
 /// at place `n` of [`App::models`] is numbered this plus `n`.
 pub const MODEL_SWITCHES: i32 = 10_000;
@@ -791,6 +798,11 @@ fn local_action(number: i32, item: i32) -> Option<Message> {
         REMOVE_COMPUTER => {
             return Some(Message::Sheet(SheetEvent::Computer(
                 app::ComputerEvent::Remove(index?),
+            )));
+        }
+        IMPORT_OPENCODE => {
+            return Some(Message::Sheet(SheetEvent::Computer(
+                app::ComputerEvent::ImportOpenCode,
             )));
         }
         FOLLOW_SSH_HOST => {
@@ -967,7 +979,9 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
-        INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST => local_action(number, item),
+        INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST | IMPORT_OPENCODE => {
+            local_action(number, item)
+        }
         CHECK_PLUGINS => Some(Message::Sheet(SheetEvent::Plugin(app::PluginEvent::Check))),
         UPDATE_PLUGIN => Some(Message::Sheet(SheetEvent::Plugin(
             app::PluginEvent::Update(usize::try_from(item).ok()),

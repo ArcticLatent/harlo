@@ -21,6 +21,7 @@ use opencode_client::{Event, read_registration, registration_path};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::layout::Backend;
 use crate::ssh;
 use crate::workspace::{Fetch, Fetched, Snapshot};
 
@@ -45,8 +46,11 @@ const MAX_BACKOFF: Duration = Duration::from_secs(10);
 /// Its `Debug` output leaves the password out.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Location {
-    /// The shared background service on this computer, found through its registration file.
+    /// OpenCode's background service on this computer, found through its registration file.
     Shared,
+    /// Harlo's own server on this computer, found through its registration
+    /// file and started when none runs.
+    Engine,
     /// A server at an explicit address, as given with `--server`.
     Server {
         /// Base URL, such as `http://127.0.0.1:4096`.
@@ -54,11 +58,13 @@ pub enum Location {
         /// The server password, if it has one.
         password: Option<String>,
     },
-    /// The shared service on another computer, reached over SSH: what
-    /// follows `ssh` to reach it, such as `buildbox` or `me@10.0.0.5`.
+    /// The background service on another computer, reached over SSH.
     Ssh {
-        /// The computer, as `ssh` takes it.
+        /// The computer, as `ssh` takes it: what follows `ssh`, such as
+        /// `buildbox` or `me@10.0.0.5`.
         target: String,
+        /// Which server there.
+        backend: Backend,
     },
 }
 
@@ -66,22 +72,54 @@ impl std::fmt::Debug for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Shared => f.write_str("Shared"),
+            Self::Engine => f.write_str("Engine"),
             Self::Server { url, password } => f
                 .debug_struct("Server")
                 .field("url", url)
                 .field("password", &password.as_ref().map(|_| "…"))
                 .finish(),
-            Self::Ssh { target } => f.debug_struct("Ssh").field("target", target).finish(),
+            Self::Ssh { target, backend } => f
+                .debug_struct("Ssh")
+                .field("target", target)
+                .field("backend", backend)
+                .finish(),
         }
     }
 }
 
 impl Location {
+    /// The `backend` service on this computer.
+    #[must_use]
+    pub fn here(backend: Backend) -> Self {
+        match backend {
+            Backend::Harlo => Self::Engine,
+            Backend::OpenCode => Self::Shared,
+        }
+    }
+
+    /// The server software it runs, when known; `None` for a `--server`.
+    #[must_use]
+    pub fn backend(&self) -> Option<Backend> {
+        match self {
+            Self::Shared => Some(Backend::OpenCode),
+            Self::Engine => Some(Backend::Harlo),
+            Self::Server { .. } => None,
+            Self::Ssh { backend, .. } => Some(*backend),
+        }
+    }
+
+    /// Whether it's a background service on this computer, Harlo's or
+    /// OpenCode's.
+    #[must_use]
+    pub fn is_here(&self) -> bool {
+        matches!(self, Self::Shared | Self::Engine)
+    }
+
     /// Returns whether the server runs on this computer, so its folders are here too.
     #[must_use]
     pub fn is_local(&self) -> bool {
         match self {
-            Self::Shared => true,
+            Self::Shared | Self::Engine => true,
             Self::Server { url, .. } => {
                 let rest = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
                 let host = match rest.strip_prefix('[') {
@@ -98,13 +136,21 @@ impl Location {
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::Shared => "Local".to_owned(),
+            Self::Engine => "Local".to_owned(),
+            Self::Shared => "Local · OpenCode".to_owned(),
             Self::Server { url, .. } => url
                 .trim_start_matches("http://")
                 .trim_start_matches("https://")
                 .trim_end_matches('/')
                 .to_owned(),
-            Self::Ssh { target } => crate::ssh::destination(target),
+            Self::Ssh {
+                target,
+                backend: Backend::Harlo,
+            } => crate::ssh::destination(target),
+            Self::Ssh {
+                target,
+                backend: Backend::OpenCode,
+            } => format!("{} · OpenCode", crate::ssh::destination(target)),
         }
     }
 }
@@ -304,17 +350,35 @@ async fn reach(
             }
             Err("OpenCode's background service isn't running".to_owned())
         }
-        Location::Ssh { target } => {
-            let mut service = ssh::registered(target).await?;
+        Location::Engine => {
+            if let Some(client) = engine().await? {
+                return Ok((client, None));
+            }
+            // Started once when none answers; never stopped.
+            if !*started_service {
+                *started_service = true;
+                start_engine().await?;
+                if let Some(client) = engine().await? {
+                    return Ok((client, None));
+                }
+            }
+            Err("Harlo's server isn't running".to_owned())
+        }
+        Location::Ssh { target, backend } => {
+            let mut service = ssh::registered(target, *backend).await?;
             // Started there as here, once; never stopped.
             if service.is_none() && !*started_service {
                 *started_service = true;
-                ssh::start_service(target).await?;
-                service = ssh::registered(target).await?;
+                ssh::start_service(target, *backend).await?;
+                service = ssh::registered(target, *backend).await?;
             }
             let Some(service) = service else {
+                let what = match backend {
+                    Backend::Harlo => "Harlo's server",
+                    Backend::OpenCode => "OpenCode's background service",
+                };
                 return Err(format!(
-                    "OpenCode's background service isn't running on {}",
+                    "{what} isn't running on {}",
                     ssh::destination(target)
                 ));
             };
@@ -323,6 +387,18 @@ async fn reach(
             Ok((client, Some(tunnel)))
         }
     }
+}
+
+/// A client for the `backend` server on this computer, started when none
+/// runs, as following it would.
+///
+/// # Errors
+///
+/// When it isn't running and can't be started.
+pub async fn reach_here(backend: Backend) -> Result<Client, String> {
+    reach(&Location::here(backend), &mut false)
+        .await
+        .map(|(client, _)| client)
 }
 
 /// Returns a client for the registered shared service, if it answers.
@@ -335,6 +411,70 @@ async fn shared() -> Result<Option<Client>, String> {
     };
     let client = Client::new(service.endpoint);
     Ok(client.info().await.is_ok().then_some(client))
+}
+
+/// Returns a client for Harlo's registered server, if it answers.
+async fn engine() -> Result<Option<Client>, String> {
+    let path = engine_registration();
+    let service =
+        read_registration(&path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
+    let Some(service) = service else {
+        return Ok(None);
+    };
+    let client = Client::new(service.endpoint);
+    Ok(client.info().await.is_ok().then_some(client))
+}
+
+/// `$XDG_STATE_HOME/harlo/service.json`, where Harlo's server registers.
+fn engine_registration() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || {
+                std::env::var_os("HOME")
+                    .map_or_else(PathBuf::new, PathBuf::from)
+                    .join(".local/state")
+            },
+            PathBuf::from,
+        )
+        .join("harlo/service.json")
+}
+
+/// The `harlo-server` program: `HARLO_SERVER_BIN`, else the one beside
+/// this program, else the one on `PATH`.
+#[must_use]
+pub fn engine_program() -> PathBuf {
+    if let Some(program) = std::env::var_os("HARLO_SERVER_BIN").filter(|v| !v.is_empty()) {
+        return PathBuf::from(program);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|me| Some(me.parent()?.join("harlo-server")))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from("harlo-server"))
+}
+
+/// Starts Harlo's server, unless one answers.
+async fn start_engine() -> Result<(), String> {
+    let program = engine_program();
+    let output = tokio::process::Command::new(&program)
+        .args(["service", "start"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                "Harlo's server isn't installed (no `harlo-server` beside Harlo or on PATH)"
+                    .to_owned()
+            }
+            _ => format!("couldn't start Harlo's server: {e}"),
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("couldn't start Harlo's server: {}", stderr.trim()))
+    }
 }
 
 fn registration_file() -> PathBuf {

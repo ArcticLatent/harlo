@@ -6,6 +6,7 @@
 
 use std::rc::Rc;
 
+use harlo_core::layout::Backend;
 use harlo_core::server::{Day, Location, Stats, Tokens};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -912,13 +913,34 @@ fn key_names(way: &str) -> impl Iterator<Item = &str> {
 /// The server Harlo follows, and how the connection stands.
 fn server_rows(app: &App) -> Vec<SheetRow> {
     let address = match &app.location {
-        Location::Ssh { target } => format!("ssh {target}"),
+        Location::Ssh { target, .. } => format!("ssh {target}"),
         other => other.label(),
     };
     let mut rows = vec![pair("Address", &address, 0), status_row(app)];
-    rows.push(note(
-        "Shared with other apps. It keeps running when Harlo closes.",
+    rows.push(note(match app.location.backend() {
+        Some(Backend::Harlo) => "Harlo's own server. It keeps running when Harlo closes.",
+        _ => "Shared with other apps. It keeps running when Harlo closes.",
+    }));
+    rows.push(choice(
+        app,
+        SettingChoice::Backend,
+        "Open on",
+        "Where Harlo starts. Sessions stay on the server they were made on.",
     ));
+    if matches!(app.location, Location::Engine) {
+        rows.push(heading("From OpenCode"));
+        let mut row = pair(
+            "Sessions made on OpenCode",
+            app.sheets
+                .import
+                .as_deref()
+                .unwrap_or("Copied here whole; OpenCode keeps its own."),
+            3,
+        );
+        row.action = "Import all".into();
+        row.setting = crate::window::IMPORT_OPENCODE;
+        rows.push(row);
+    }
     computer_rows(app, &mut rows);
     rows
 }
@@ -932,8 +954,9 @@ fn computer_rows(app: &App, rows: &mut Vec<SheetRow>) {
     for (index, target) in app.preferences.computers.iter().enumerate() {
         let location = Location::Ssh {
             target: target.clone(),
+            backend: app.preferences.backend,
         };
-        let mut row = if app.location == location {
+        let mut row = if matches!(&app.location, Location::Ssh { target: t, .. } if t == target) {
             pair(&location.label(), "Following", 1)
         } else {
             pair(&location.label(), &format!("ssh {target}"), 3)
@@ -1041,6 +1064,10 @@ fn opencode_rows(app: &App) -> Vec<SheetRow> {
         rows.push(note(
             "Harlo attaches to OpenCode's background service and leaves it running when it \
              closes.",
+        ));
+    } else if matches!(app.location, Location::Engine) {
+        rows.push(note(
+            "Harlo starts its own server when none runs and leaves it running when it closes.",
         ));
     } else {
         rows.push(note(

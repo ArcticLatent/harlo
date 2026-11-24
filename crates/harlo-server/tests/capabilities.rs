@@ -61,7 +61,7 @@ async fn client_tools_reach_agents_with_the_calling_session() {
             .await
             .expect("prompt");
         tokio::time::sleep(Duration::from_millis(250)).await;
-        if calls.lock().map(|c| !c.is_empty()).unwrap_or(false) {
+        if calls.lock().is_ok_and(|c| !c.is_empty()) {
             answered = true;
             break;
         }

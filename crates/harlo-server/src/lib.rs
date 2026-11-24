@@ -28,6 +28,7 @@ mod phone;
 mod projects;
 mod pty;
 mod server;
+pub mod service;
 mod shell;
 mod stale;
 mod stats;
