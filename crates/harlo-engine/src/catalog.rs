@@ -55,7 +55,9 @@ impl Wire {
             | "@ai-sdk/fireworks"
             | "@ai-sdk/deepseek"
             | "@aihubmix/ai-sdk-provider"
-            | "venice-ai-sdk-provider" => Self::Chat,
+            | "venice-ai-sdk-provider"
+            | "@ai-sdk/gateway"
+            | "@ai-sdk/cohere" => Self::Chat,
             other => Self::Unsupported(other.to_owned()),
         }
     }
@@ -78,6 +80,8 @@ const KNOWN_BASES: &[(&str, &str)] = &[
         "google",
         "https://generativelanguage.googleapis.com/v1beta/openai",
     ),
+    ("vercel", "https://ai-gateway.vercel.sh/v1"),
+    ("cohere", "https://api.cohere.ai/compatibility/v1"),
     ("fireworks-ai", "https://api.fireworks.ai/inference/v1"),
     ("deepseek", "https://api.deepseek.com/v1"),
     ("aihubmix", "https://aihubmix.com/v1"),
@@ -313,6 +317,17 @@ mod tests {
             .provider(Some("k".into()), &Map::new())
             .expect("signed in");
         assert_eq!(spec.base_url, "https://api.302.ai/v1");
+        for (id, base) in [
+            ("vercel", "https://ai-gateway.vercel.sh/v1"),
+            ("cohere", "https://api.cohere.ai/compatibility/v1"),
+        ] {
+            let entry = catalog.get(id).expect("listed");
+            assert_eq!(entry.wire, Wire::Chat, "{id}");
+            let spec = entry
+                .provider(Some("k".into()), &Map::new())
+                .expect("signed in");
+            assert_eq!(spec.base_url, base);
+        }
 
         let azure = catalog.get("azure").expect("Azure");
         assert_eq!(azure.questions().1[0].key, "resourceName");
