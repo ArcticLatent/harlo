@@ -3,7 +3,9 @@
 //! as Harlo's own tools).
 //!
 //! A server connects the first time a folder that names it is listed or
-//! runs a turn, and stays connected while its entry is unchanged. Its
+//! runs a turn, and stays connected while its entry is unchanged. Folders
+//! that name the same entry share one connection, unless the server is a
+//! program started in the folder: then each folder has its own. Its
 //! tools reach agents through Code Mode (`tools.<server>.<tool>`) unless
 //! its entry says `codemode: false`; then each is offered on its own as
 //! `<server>_<tool>`.
@@ -465,11 +467,58 @@ async fn signed_in(
     }
 }
 
+/// What tells one connection from another.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Key {
+    /// The server's name.
+    name: String,
+    /// Its entry, as JSON text.
+    spec: String,
+    /// The folder it starts in, when that's the folder that names it;
+    /// empty for a server that's the same from anywhere.
+    place: String,
+}
+
+impl Key {
+    /// The key of server `name` with entry `spec`, as `directory` names it.
+    fn new(directory: &str, name: &str, spec: &Value) -> Self {
+        // A program started without a folder of its own runs in the folder
+        // that names it, and works on that folder.
+        let local = spec["type"].as_str() == Some("local") && spec["cwd"].as_str().is_none();
+        Self {
+            name: name.to_owned(),
+            spec: spec.to_string(),
+            place: if local {
+                directory.to_owned()
+            } else {
+                String::new()
+            },
+        }
+    }
+}
+
+/// A connection, and the folders using it.
+struct Held {
+    link: Arc<Link>,
+    folders: HashSet<String>,
+}
+
+/// Stops the connections in `links` that `gone` picks, and forgets them.
+fn stop(links: &mut HashMap<Key, Held>, gone: impl Fn(&Key, &Held) -> bool) {
+    links.retain(|key, held| {
+        let gone = gone(key, held);
+        if gone {
+            held.link.cancel.cancel();
+        }
+        !gone
+    });
+}
+
 /// The connections, and what was changed while the server runs.
 #[derive(Default)]
 pub(crate) struct Mcp {
-    /// Configured servers' links, by name and entry.
-    links: Mutex<HashMap<String, Arc<Link>>>,
+    /// Configured servers' links.
+    links: Mutex<HashMap<Key, Held>>,
     /// Servers clients host, by name.
     hosted: Mutex<BTreeMap<String, Arc<Link>>>,
     /// Servers turned off until connected again.
@@ -507,21 +556,31 @@ impl Server {
 
     /// The link to server `name` with entry `spec`, started if it's new.
     fn mcp_link(self: &Arc<Self>, directory: &str, name: &str, spec: &Value) -> Arc<Link> {
-        let key = format!("{name}\n{spec}");
+        let key = Key::new(directory, name, spec);
         let mut links = lock(&self.mcp.links);
-        if let Some(link) = links.get(&key) {
-            return Arc::clone(link);
-        }
-        // Another entry by the same name stops.
-        links.retain(|k, l| {
-            let same = k.split('\n').next() == Some(name);
-            if same {
-                l.cancel.cancel();
+        // The entry this folder had by the name before is left, and stops
+        // once no folder uses it. Another folder's stays as it is.
+        links.retain(|k, held| {
+            if k.name != name || *k == key || !held.folders.remove(directory) {
+                return true;
             }
-            !same
+            if held.folders.is_empty() {
+                held.link.cancel.cancel();
+            }
+            !held.folders.is_empty()
         });
+        if let Some(held) = links.get_mut(&key) {
+            held.folders.insert(directory.to_owned());
+            return Arc::clone(&held.link);
+        }
         let link = Arc::new(Link::new(name, spec, false));
-        links.insert(key, Arc::clone(&link));
+        links.insert(
+            key,
+            Held {
+                link: Arc::clone(&link),
+                folders: HashSet::from([directory.to_owned()]),
+            },
+        );
         drop(links);
         let (server, spec, directory) = (Arc::clone(self), spec.clone(), directory.to_owned());
         let started = Arc::clone(&link);
@@ -644,12 +703,10 @@ impl Server {
         let spec = entries.get(name).ok_or_else(|| not_found(name))?;
         lock(&self.mcp.off).remove(name);
         // A failed connection is tried again.
-        lock(&self.mcp.links).retain(|k, l| {
-            let stale = k.split('\n').next() == Some(name) && l.status() != Status::Connected;
-            if stale {
-                l.cancel.cancel();
-            }
-            !stale
+        stop(&mut lock(&self.mcp.links), |k, held| {
+            k.name == name
+                && held.folders.contains(directory)
+                && held.link.status() != Status::Connected
         });
         let _ = self.mcp_link(directory, name, spec);
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
@@ -666,13 +723,7 @@ impl Server {
             return Err(not_found(name));
         }
         lock(&self.mcp.off).insert(name.to_owned());
-        lock(&self.mcp.links).retain(|k, l| {
-            let same = k.split('\n').next() == Some(name);
-            if same {
-                l.cancel.cancel();
-            }
-            !same
-        });
+        stop(&mut lock(&self.mcp.links), |k, _| k.name == name);
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
         Ok(())
     }
@@ -694,35 +745,24 @@ impl Server {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        specs.extend(lock(&self.mcp.links).keys().filter_map(|k| {
-            let (name, spec) = k.split_once('\n')?;
-            Some((name.to_owned(), serde_json::from_str(spec).ok()?))
-        }));
+        specs.extend(
+            lock(&self.mcp.links)
+                .keys()
+                .filter_map(|k| Some((k.name.clone(), serde_json::from_str(&k.spec).ok()?))),
+        );
         specs
     }
 
     /// Connects server `name` again, everywhere, after its sign-in changed.
     pub(crate) fn mcp_signed_in(&self, name: &str) {
-        lock(&self.mcp.links).retain(|k, l| {
-            let same = k.split('\n').next() == Some(name);
-            if same {
-                l.cancel.cancel();
-            }
-            !same
-        });
+        stop(&mut lock(&self.mcp.links), |k, _| k.name == name);
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
     }
 
     /// Removes server `name` added while running.
     pub(crate) fn mcp_remove(&self, name: &str) {
         lock(&self.mcp.added).remove(name);
-        lock(&self.mcp.links).retain(|k, l| {
-            let same = k.split('\n').next() == Some(name);
-            if same {
-                l.cancel.cancel();
-            }
-            !same
-        });
+        stop(&mut lock(&self.mcp.links), |k, _| k.name == name);
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
     }
 
@@ -732,9 +772,15 @@ impl Server {
         let off = lock(&self.mcp.off).clone();
         let entries = self.mcp_entries(directory);
         let links: Vec<Arc<Link>> = lock(&self.mcp.links)
-            .values()
-            .filter(|l| entries.contains_key(&l.name) && !off.contains(&l.name))
-            .cloned()
+            .iter()
+            .filter(|(k, held)| {
+                entries
+                    .get(&k.name)
+                    .is_some_and(|spec| **k == Key::new(directory, &k.name, spec))
+                    && held.folders.contains(directory)
+                    && !off.contains(&k.name)
+            })
+            .map(|(_, held)| Arc::clone(&held.link))
             .collect();
         let mut resources = Vec::new();
         let mut templates = Vec::new();

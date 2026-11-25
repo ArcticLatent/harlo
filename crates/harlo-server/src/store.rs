@@ -11,7 +11,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use harlo_engine::memory::Note;
 use harlo_engine::{Message, ModelRef, Rule, Tokens};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -154,10 +156,19 @@ pub struct StoredEvent {
 }
 
 /// The server's SQLite file.
+///
+/// Writes go through one connection. Reading sessions, messages and
+/// events goes through a second one, so a long read (a whole session's
+/// history, a search) holds up no agent saving what it streams.
 #[derive(Debug)]
 pub struct Store {
     conn: Mutex<Connection>,
+    /// The connection reads go through; a store in memory has only the one.
+    reads: Option<Mutex<Connection>>,
 }
+
+/// How long a connection waits for the other to let go of the file.
+const BUSY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The text of `message` that search looks in: a prompt, a command, or
 /// what a step said.
@@ -212,7 +223,7 @@ impl Store {
     /// Fails when the file can't be opened or its tables made.
     pub fn open(path: &Path) -> Result<Self, Error> {
         owner_only(path);
-        let store = Self::with(Connection::open(path)?)?;
+        let mut store = Self::with(Connection::open(path)?)?;
         // (Its journal files take the file's permissions, but were maybe
         // made before it was owner-only.)
         for end in ["-wal", "-shm"] {
@@ -220,6 +231,12 @@ impl Store {
             journal.push(end);
             owner_only(Path::new(&journal));
         }
+        let reads = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        reads.busy_timeout(BUSY)?;
+        store.reads = Some(Mutex::new(reads));
         Ok(store)
     }
 
@@ -233,6 +250,7 @@ impl Store {
     }
 
     fn with(conn: Connection) -> Result<Self, Error> {
+        conn.busy_timeout(BUSY)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -267,6 +285,7 @@ impl Store {
         }
         let store = Self {
             conn: Mutex::new(conn),
+            reads: None,
         };
         if !numbered {
             store.index_all()?;
@@ -330,7 +349,7 @@ impl Store {
             .map(|w| format!("\"{}\"", w.replace('"', "")))
             .collect::<Vec<_>>()
             .join(" ");
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt = conn.prepare(
             "SELECT t.session, t.message, snippet(message_text, 0, '[', ']', '…', 16),
                     json_extract(s.info, '$.title'), json_extract(s.info, '$.time.created')
@@ -439,6 +458,49 @@ impl Store {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The connection to read sessions, messages and events through.
+    fn reader(&self) -> MutexGuard<'_, Connection> {
+        self.reads
+            .as_ref()
+            .unwrap_or(&self.conn)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Changes session `id` as `change` says and saves it, as one step.
+    ///
+    /// Several things change a session at once: its run adds what a step
+    /// cost while its title arrives and a person picks another model. Each
+    /// change is made to the session as it stands, so none undoes another.
+    /// Returns the session as saved, or `None` when there's no such one.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read or the write fails.
+    pub fn change_session(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Session),
+    ) -> Result<Option<Session>, Error> {
+        let conn = self.conn();
+        let both = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)?;
+        let info: Option<String> = both
+            .query_row("SELECT info FROM session WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        let Some(info) = info else {
+            return Ok(None);
+        };
+        let mut session: Session = serde_json::from_str(&info).map_err(json_error)?;
+        change(&mut session);
+        let info = serde_json::to_string(&session).map_err(json_error)?;
+        both.execute(
+            "UPDATE session SET info = ?2 WHERE id = ?1",
+            params![id, info],
+        )?;
+        both.commit()?;
+        Ok(Some(session))
+    }
+
     /// Saves a session, new or changed.
     ///
     /// # Errors
@@ -461,7 +523,7 @@ impl Store {
     /// Fails when the read fails.
     pub fn session(&self, id: &str) -> Result<Option<Session>, Error> {
         let info: Option<String> = self
-            .conn()
+            .reader()
             .query_row("SELECT info FROM session WHERE id = ?1", [id], |r| r.get(0))
             .optional()?;
         info.map(|i| serde_json::from_str(&i).map_err(json_error))
@@ -474,7 +536,7 @@ impl Store {
     ///
     /// Fails when the read fails.
     pub fn sessions(&self) -> Result<Vec<Session>, Error> {
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt = conn.prepare("SELECT info FROM session")?;
         let mut out = stmt
             .query_map([], |r| r.get::<_, String>(0))?
@@ -650,7 +712,7 @@ impl Store {
     ///
     /// Fails when the read fails.
     pub fn messages(&self, session: &str) -> Result<Vec<Message>, Error> {
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt = conn.prepare("SELECT body FROM message WHERE session = ?1 ORDER BY id")?;
         stmt.query_map([session], |r| r.get::<_, String>(0))?
             .map(|b| serde_json::from_str(&b?).map_err(json_error))
@@ -681,7 +743,7 @@ impl Store {
         let order = if newest_first { "DESC" } else { "ASC" };
         // One more than asked for says whether the page is the last.
         let wanted = i64::try_from(limit).unwrap_or(i64::MAX).saturating_add(1);
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt = conn.prepare(&format!(
             "SELECT body FROM message WHERE session = ?1 AND id {side} ?2
              ORDER BY id {order} LIMIT ?3"
@@ -701,7 +763,7 @@ impl Store {
     ///
     /// Fails when the read fails.
     pub fn last_message(&self, session: &str) -> Result<Option<Message>, Error> {
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt =
             conn.prepare("SELECT body FROM message WHERE session = ?1 ORDER BY id DESC LIMIT 1")?;
         let mut rows = stmt.query_map([session], |r| r.get::<_, String>(0))?;
@@ -748,7 +810,7 @@ impl Store {
     ///
     /// Fails when the read fails.
     pub fn events_after(&self, after: u64) -> Result<Vec<StoredEvent>, Error> {
-        let conn = self.conn();
+        let conn = self.reader();
         let mut stmt =
             conn.prepare("SELECT seq, aggregate, body FROM event WHERE seq > ?1 ORDER BY seq")?;
         stmt.query_map([i64::try_from(after).unwrap_or(i64::MAX)], |r| {
@@ -965,6 +1027,60 @@ mod tests {
         assert_eq!(found(&store, "apple"), (vec!["msg_2".into()], 2));
         store.delete_session("ses_1").expect("delete");
         assert_eq!(found(&store, "apple"), (Vec::new(), 0));
+    }
+
+    #[test]
+    fn changes_to_a_session_made_at_once_all_hold() {
+        let store = std::sync::Arc::new(Store::in_memory().expect("store"));
+        store.put_session(&session("ses_a")).expect("session");
+        // A run adding what its steps cost, while a title arrives.
+        let adding: Vec<_> = (0..8)
+            .map(|_| {
+                let store = std::sync::Arc::clone(&store);
+                std::thread::spawn(move || {
+                    for _ in 0..50 {
+                        store
+                            .change_session("ses_a", |s| s.tokens.input += 1)
+                            .expect("changed");
+                    }
+                })
+            })
+            .collect();
+        store
+            .change_session("ses_a", |s| s.title = Some("Named".to_owned()))
+            .expect("changed");
+        for thread in adding {
+            thread.join().expect("joined");
+        }
+        let kept = store.session("ses_a").expect("read").expect("there");
+        assert_eq!(kept.tokens.input, 400);
+        assert_eq!(kept.title.as_deref(), Some("Named"));
+        assert!(
+            store
+                .change_session("ses_none", |_| ())
+                .expect("read")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_read_under_way_holds_up_no_write() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = std::sync::Arc::new(Store::open(&dir.path().join("store.db")).expect("store"));
+        store.put_session(&session("ses_a")).expect("session");
+        // A read that has begun and isn't over: its connection is taken.
+        let reading = store.reader();
+        let writer = std::sync::Arc::clone(&store);
+        let (done, wrote) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let saved = writer.put_message("ses_a", &prompt("msg_1", "hello"));
+            let _ = done.send(saved.is_ok());
+        });
+        let wrote = wrote.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(wrote, Ok(true), "the write waited for the read");
+        drop(reading);
+        // What was written is there to read.
+        assert_eq!(store.messages("ses_a").expect("read").len(), 1);
     }
 
     #[test]

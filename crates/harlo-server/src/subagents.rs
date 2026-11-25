@@ -14,6 +14,18 @@ use serde_json::json;
 use crate::server::{Server, lock};
 use crate::store::Session;
 
+/// How many subagents of one session run at a time.
+///
+/// Each is a session of its own, asking its model step after step. A
+/// model that fans a task out without end would otherwise run up a bill
+/// nobody watches; eight is as many as look-only calls run together.
+const AT_ONCE: usize = 8;
+
+/// How deep subagents nest: a session's subagent may start its own, and
+/// those may not. The built-in subagents start none; this bounds agents
+/// from the configuration that may.
+const DEEPEST: usize = 2;
+
 /// Where a running session's subagents start.
 #[derive(Debug)]
 pub(crate) struct SessionSubagents {
@@ -59,6 +71,7 @@ impl Server {
             .map_err(|e| e.to_string())?;
             child
         } else {
+            self.room_for_subagent(&parent)?;
             let Some(agent) = folder
                 .agents
                 .iter()
@@ -95,6 +108,40 @@ impl Server {
         };
         self.job_updated(&child, "running", None);
         Ok(child.id)
+    }
+
+    /// Whether session `parent` may start one more subagent: it isn't
+    /// nested too deep, and fewer than the most at once are running.
+    fn room_for_subagent(&self, parent: &Session) -> Result<(), String> {
+        let mut depth = 0;
+        let mut above = parent.parent_id.clone();
+        while let Some(id) = above {
+            depth += 1;
+            if depth >= DEEPEST {
+                return Err(
+                    "This session is a subagent's subagent, and those start none of their own. \
+                     Do the work here."
+                        .to_owned(),
+                );
+            }
+            above = self.session(&id).ok().and_then(|s| s.parent_id);
+        }
+        let running = lock(&self.live)
+            .jobs
+            .values()
+            .filter(|job| {
+                job["kind"] == "subagent"
+                    && job["sessionID"] == parent.id.as_str()
+                    && job["status"] == "running"
+            })
+            .count();
+        if running >= AT_ONCE {
+            return Err(format!(
+                "{running} subagents of this session are running, the most at once. Wait for \
+                 one to report back, then start this one."
+            ));
+        }
+        Ok(())
     }
 
     /// Says how child session `child`'s job stands.

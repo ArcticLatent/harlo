@@ -498,6 +498,22 @@ impl Server {
             .ok_or_else(|| Refusal::NotFound(format!("There's no session {id}.")))
     }
 
+    /// Changes session `id` as `change` says and saves it, as one step, so
+    /// nothing else changing it meanwhile is undone.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such session or the store fails.
+    pub(crate) fn change(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Session),
+    ) -> Result<Session, Refusal> {
+        self.store
+            .change_session(id, change)?
+            .ok_or_else(|| Refusal::NotFound(format!("There's no session {id}.")))
+    }
+
     /// Changes a session's permission rules or title.
     ///
     /// # Errors
@@ -509,11 +525,12 @@ impl Server {
         permissions: Option<Vec<Rule>>,
         title: Option<String>,
     ) -> Result<(), Refusal> {
-        let mut session = self.session(id)?;
-        session.time.updated = now();
+        self.session(id)?;
         if let Some(rules) = permissions {
-            session.permissions = rules;
-            self.store.put_session(&session)?;
+            let session = self.change(id, |s| {
+                s.permissions = rules;
+                s.time.updated = now();
+            })?;
             self.emit(
                 "session.permissions",
                 json!({ "sessionID": id, "permissions": session.permissions }),
@@ -522,8 +539,10 @@ impl Server {
             );
         }
         if let Some(title) = title {
-            session.title = Some(title.clone());
-            self.store.put_session(&session)?;
+            self.change(id, |s| {
+                s.title = Some(title.clone());
+                s.time.updated = now();
+            })?;
             self.emit(
                 "session.renamed",
                 json!({ "sessionID": id, "title": title }),
@@ -863,14 +882,15 @@ impl Server {
 
     /// Runs session `id` until its inbox is empty or it's stopped.
     async fn drive(self: Arc<Self>, id: String, stop: CancellationToken) {
-        while let Ok(mut session) = self.session(&id) {
+        let started = |s: &mut Session| {
+            let at = now();
+            s.time.busy = Some(at);
+            s.time.updated = at;
+        };
+        while let Ok(session) = self.change(&id, started) {
             let mut delivered = lock(&self.live).inbox.remove(&id).unwrap_or_default();
             let inbox_ids: Vec<String> = delivered.iter().map(|(m, _)| m.id().to_owned()).collect();
             order_notices(&mut delivered);
-            let started = now();
-            session.time.busy = Some(started);
-            session.time.updated = started;
-            let _ = self.store.put_session(&session);
             self.emit(
                 "session.execution.started",
                 json!({ "sessionID": id }),
@@ -1327,12 +1347,11 @@ impl Server {
         if let Err(e) = self.store.put_message(id, &idle) {
             tracing::error!(name: "message.store.failed", error = %e, "couldn't store a run's end");
         }
-        if let Ok(mut session) = self.session(id) {
-            session.outcome = Some(word.to_owned());
-            session.time.idle = Some(time);
-            session.time.updated = time;
-            let _ = self.store.put_session(&session);
-        }
+        let _ = self.change(id, |s| {
+            s.outcome = Some(word.to_owned());
+            s.time.idle = Some(time);
+            s.time.updated = time;
+        });
         let mut data = json!({ "sessionID": id });
         if let Some(message) = error {
             data["error"] = json!({ "type": "run", "message": message });
@@ -1355,7 +1374,7 @@ impl Server {
 
     /// Adds tokens and cost to session `id`'s, and says so.
     fn add_usage(&self, id: &str, tokens: &harlo_engine::Tokens, cost: f64) {
-        if let Ok(mut session) = self.session(id) {
+        let added = self.change(id, |session| {
             let (t, s) = (&mut session.tokens, tokens);
             t.input += s.input;
             t.output += s.output;
@@ -1364,7 +1383,8 @@ impl Server {
             t.cache.write += s.cache.write;
             session.cost += cost;
             session.time.updated = now();
-            let _ = self.store.put_session(&session);
+        });
+        if let Ok(session) = added {
             self.emit(
                 "session.usage.updated",
                 json!({ "sessionID": id, "cost": session.cost, "tokens": session.tokens }),

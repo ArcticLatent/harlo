@@ -17,7 +17,7 @@ impl Server {
     ///
     /// When there's no such session, or the model isn't configured.
     pub(crate) fn set_model(&self, id: &str, model: ModelRef) -> Result<(), Refusal> {
-        let mut session = self.session(id)?;
+        let session = self.session(id)?;
         let folder = self.folder(&session.location.directory);
         if folder.config.resolve(&model).is_none() {
             return Err(Refusal::Bad(format!(
@@ -25,9 +25,10 @@ impl Server {
                 model.provider, model.model
             )));
         }
-        session.model = Some(model);
-        session.time.updated = now();
-        self.store.put_session(&session)?;
+        let session = self.change(id, |s| {
+            s.model = Some(model);
+            s.time.updated = now();
+        })?;
         self.emit(
             "session.model.selected",
             json!({ "sessionID": id, "model": session.model }),
@@ -45,7 +46,7 @@ impl Server {
     ///
     /// When there's no such session, or no such agent to talk to.
     pub(crate) fn set_agent(&self, id: &str, agent: &str) -> Result<(), Refusal> {
-        let mut session = self.session(id)?;
+        let session = self.session(id)?;
         let folder = self.folder(&session.location.directory);
         let Some(next) = folder
             .agents
@@ -64,9 +65,10 @@ impl Server {
             .into_iter()
             .flatten()
             .collect();
-        session.agent = Some(next.id.clone());
-        session.time.updated = now();
-        self.store.put_session(&session)?;
+        self.change(id, |s| {
+            s.agent = Some(next.id.clone());
+            s.time.updated = now();
+        })?;
         let directory = session.location.directory.clone();
         self.emit(
             "session.agent.selected",

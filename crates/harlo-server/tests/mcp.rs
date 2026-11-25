@@ -148,3 +148,83 @@ async fn a_projects_servers_connect_and_their_tools_answer() {
         .await
         .expect_err("no such server");
 }
+
+/// A stdio MCP server with one tool, `where`, saying the folder it runs in.
+const WHERE: &str = r#"import json, os, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "id" not in msg:
+        continue
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": msg["params"]["protocolVersion"],
+                  "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "where", "version": "1"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "where", "description": "Says where it runs.",
+                             "inputSchema": {"type": "object", "properties": {}}}]}
+    else:
+        result = {"content": [{"type": "text", "text": "runs in " + os.path.basename(os.getcwd())}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}), flush=True)
+"#;
+
+/// Waits until `folder`'s server "here" is connected.
+async fn connected(sandbox: &Sandbox, folder: &str) {
+    let client = sandbox.client();
+    for _ in 0..200 {
+        let listed = client.mcp_servers(folder).await.expect("listed");
+        if listed
+            .iter()
+            .any(|s| s.name == "here" && s.status == McpStatus::Connected)
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the server never connected in {folder}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_folder_has_its_own_server_started_in_it() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let script = sandbox.dir.path().join("where.py");
+    std::fs::write(&script, WHERE).expect("where.py");
+    // One entry in the person's own config, for every folder: a program
+    // started in the folder that uses it.
+    let path = sandbox.dir.path().join("config/harlo/harlo.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("config")).expect("JSON");
+    config["mcp"] = serde_json::json!({ "servers": { "here": {
+        "type": "local", "command": ["python3", "-I", script], "codemode": false,
+    } } });
+    std::fs::write(&path, config.to_string()).expect("config");
+
+    let first = sandbox.project().to_str().expect("utf-8").to_owned();
+    let other = sandbox.dir.path().join("other");
+    std::fs::create_dir_all(&other).expect("other");
+    let other = other.to_str().expect("utf-8").to_owned();
+    connected(&sandbox, &first).await;
+    connected(&sandbox, &other).await;
+
+    // Each folder's sessions reach the one started there.
+    let session = client.create_session(&other).await.expect("session");
+    run_until(
+        &sandbox,
+        &session.id,
+        "tool here_where {} ;; say ok",
+        "runs in other",
+    )
+    .await;
+    let session = client.create_session(&first).await.expect("session");
+    run_until(
+        &sandbox,
+        &session.id,
+        "tool here_where {} ;; say ok",
+        "runs in project",
+    )
+    .await;
+    // Neither took the other's place: both are still connected.
+    connected(&sandbox, &other).await;
+    connected(&sandbox, &first).await;
+}

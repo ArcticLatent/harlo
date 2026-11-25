@@ -109,3 +109,122 @@ async fn a_subagent_works_in_a_child_and_reports_back() {
     }
     panic!("the follow-up never reached the child");
 }
+
+/// Every `subagent` call in session `id`'s steps: whether it started a
+/// child, and what it said.
+async fn subagent_calls(sandbox: &Sandbox, id: &str) -> Vec<(bool, String)> {
+    let listed: serde_json::Value = reqwest::Client::new()
+        .get(format!("{}/api/session/{id}/message", sandbox.url()))
+        .basic_auth("harlo", Some(&sandbox.password))
+        .send()
+        .await
+        .expect("messages")
+        .json()
+        .await
+        .expect("JSON");
+    listed["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|m| m["content"].as_array().cloned().unwrap_or_default())
+        .filter(|part| part["type"] == "tool" && part["name"] == "subagent")
+        .filter(|part| part["state"]["status"] != "running")
+        .map(|part| {
+            (
+                part["state"]["status"] == "completed",
+                part["state"].to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_runs_so_many_subagents_at_once_and_no_more() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+    // Nine at once. Each asks to run a command and waits for leave, so
+    // all are still running when the last is asked for.
+    let call = serde_json::json!({
+        "agent": "general", "description": "Look",
+        "prompt": r#"tool shell {"command":"true"}"#,
+    });
+    let step = vec![format!("tool subagent {call}"); 9].join(" | ");
+    client
+        .prompt(
+            &session.id,
+            &Prompt::new(format!("{step} ;; say Parent done."), Delivery::Queue),
+        )
+        .await
+        .expect("prompt");
+    let mut calls = Vec::new();
+    for _ in 0..200 {
+        calls = subagent_calls(&sandbox, &session.id).await;
+        if calls.len() == 9 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let started = calls.iter().filter(|(started, _)| *started).count();
+    assert_eq!((calls.len(), started), (9, 8), "{calls:?}");
+    let (_, refused) = calls.iter().find(|(started, _)| !started).expect("refused");
+    assert!(refused.contains("the most at once"), "{refused}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_subagents_subagent_starts_none_of_its_own() {
+    let sandbox = Sandbox::start().await;
+    // An agent from the configuration, which nothing stops from handing
+    // tasks on.
+    let agents = sandbox.project().join(".harlo/agents");
+    std::fs::create_dir_all(&agents).expect("agents");
+    std::fs::write(
+        agents.join("nester.md"),
+        "---\ndescription: Hands tasks on\nmode: subagent\n---\nHand the task on.\n",
+    )
+    .expect("agent");
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let mut events = client.events().await.expect("events");
+    let session = client.create_session(&folder).await.expect("session");
+    // Each hands the same task on: the session, its subagent, and that
+    // one's subagent, which is refused.
+    let hand_on = |prompt: &str| {
+        let call = serde_json::json!({ "agent": "nester", "description": "On", "prompt": prompt });
+        format!("tool subagent {call}")
+    };
+    let script = hand_on(&hand_on(&hand_on("say Never reached.")));
+    client
+        .prompt(&session.id, &Prompt::new(script, Delivery::Queue))
+        .await
+        .expect("prompt");
+
+    let mut children = Vec::new();
+    while children.len() < 2 {
+        let child = until(&mut events, |kind| match kind {
+            EventKind::JobUpdated(job) => match job.kind {
+                harlo_client::JobKind::Subagent { child, .. } => Some(child),
+                _ => None,
+            },
+            _ => None,
+        })
+        .await;
+        if !children.contains(&child) {
+            children.push(child);
+        }
+    }
+    let mut calls = Vec::new();
+    for _ in 0..200 {
+        calls = subagent_calls(&sandbox, &children[1]).await;
+        if !calls.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let [(started, said)] = calls.as_slice() else {
+        panic!("one call by the subagent's subagent: {calls:?}");
+    };
+    assert!(!started, "{said}");
+    assert!(said.contains("start none of their own"), "{said}");
+}

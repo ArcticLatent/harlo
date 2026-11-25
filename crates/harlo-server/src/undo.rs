@@ -107,8 +107,7 @@ impl Server {
             );
             revert["restored"] = json!(after);
         }
-        session.revert = Some(revert.clone());
-        self.store.put_session(&session)?;
+        self.change(id, |s| s.revert = Some(revert.clone()))?;
         // The files may be as they were: what the session saw no longer holds.
         self.forget_files(id);
         let public = public(&revert);
@@ -133,7 +132,7 @@ impl Server {
         };
         let from = revert["messageID"].as_str().unwrap_or_default();
         self.store.remove_messages_from(id, from)?;
-        self.store.put_session(&session)?;
+        self.change(id, |s| s.revert = None)?;
         self.emit(
             "session.revert.committed",
             json!({ "sessionID": id }),
@@ -155,7 +154,7 @@ impl Server {
             return Ok(());
         }
         self.put_back(&mut session).await?;
-        self.store.put_session(&session)?;
+        self.change(id, |s| s.revert = None)?;
         self.emit(
             "session.revert.cleared",
             json!({ "sessionID": id }),

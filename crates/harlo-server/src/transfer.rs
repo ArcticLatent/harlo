@@ -108,13 +108,14 @@ impl Server {
         if !std::path::Path::new(directory).is_dir() {
             return Err(Refusal::Bad(format!("{directory} isn't a folder.")));
         }
-        let mut session = self.session(id)?;
-        session.project_id = git::project_id(directory).await;
-        session.location = Location {
-            directory: directory.to_owned(),
-        };
-        session.time.updated = now();
-        self.store.put_session(&session)?;
+        let project = git::project_id(directory).await;
+        let session = self.change(id, |s| {
+            s.project_id = project;
+            s.location = Location {
+                directory: directory.to_owned(),
+            };
+            s.time.updated = now();
+        })?;
         self.forget_files(id);
         self.emit(
             "session.moved",
@@ -135,10 +136,10 @@ impl Server {
     ///
     /// When there's no such session, or the store fails.
     pub(crate) fn archive_session(&self, id: &str, archived: bool) -> Result<(), Refusal> {
-        let mut session = self.session(id)?;
-        session.time.archived = archived.then(now);
-        session.time.updated = now();
-        self.store.put_session(&session)?;
+        let session = self.change(id, |s| {
+            s.time.archived = archived.then(now);
+            s.time.updated = now();
+        })?;
         let kind = if archived {
             "session.archived"
         } else {
