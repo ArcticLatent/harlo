@@ -28,6 +28,19 @@ globset = { version = "0.4.22", default-features = false }
 # quoting, substitutions and redirections; this is the grammar editors use.
 tree-sitter = "0.27.2"
 tree-sitter-bash = "0.25.1"
+# The grammars a file's outline is read with: its functions and types and
+# the lines they span, so an agent can read the part it needs (all MIT).
+# Each is the grammar its language's editors use; no hand-written scan
+# follows nesting, strings and comments in nine languages.
+tree-sitter-rust = "0.24.2"
+tree-sitter-python = "0.25.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-go = "0.25.0"
+tree-sitter-swift = "0.7.4"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-java = "0.23.5"
 # Our crates.
 harlo-client = { path = "crates/harlo-client" }
 harlo-core = { path = "crates/harlo-core" }

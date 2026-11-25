@@ -95,6 +95,7 @@ impl WithFiles<'_> {
                 shown,
                 offset,
                 limit,
+                ..
             } => {
                 let size = tokio::fs::metadata(&path).await.map_or(0, |m| m.len());
                 if size > READ_BYTES {

@@ -227,6 +227,9 @@ pub struct Config {
     /// Whether scripts may read and search the project's files
     /// (`experimental.scriptFiles`, off unless turned on).
     pub script_files: bool,
+    /// Whether `read` can list what a source file declares instead of its
+    /// text (`experimental.outline`, off unless turned on).
+    pub outline: bool,
     /// Permission rules from the file, applied after the agent's own.
     pub permissions: Vec<Rule>,
     /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
@@ -333,6 +336,7 @@ impl Config {
             script_files: value["experimental"]["scriptFiles"]
                 .as_bool()
                 .unwrap_or(false),
+            outline: value["experimental"]["outline"].as_bool().unwrap_or(false),
             model: model_ref(&value["model"]),
             small_model: model_ref(&value["small_model"]),
             permissions,

@@ -110,7 +110,11 @@ async fn automations_are_created_paused_resumed_run_and_deleted() {
             .await
             .ok()?
             .into_iter()
-            .find(|a| a.id == soon.id && a.status == AutomationStatus::Done)
+            // (It is marked done as it starts, so it can't start twice; how
+            // it went is kept when it ends.)
+            .find(|a| {
+                a.id == soon.id && a.status == AutomationStatus::Done && a.last_outcome.is_some()
+            })
     })
     .await;
     assert_eq!(ran.run_count, 1);

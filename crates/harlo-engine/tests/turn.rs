@@ -129,6 +129,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         jobs: None,
         code: None,
         script_files: false,
+        outline: false,
         search: None,
         subagents: None,
         subagent_agents: Vec::new(),

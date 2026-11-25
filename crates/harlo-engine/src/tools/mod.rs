@@ -10,6 +10,7 @@
 // Rust guideline compliant 2026-10-09
 
 mod edit_match;
+mod outline;
 mod search;
 pub mod shell;
 
@@ -169,6 +170,8 @@ pub enum Plan {
         offset: usize,
         /// How many lines.
         limit: usize,
+        /// Whether what the file declares is listed instead of its text.
+        outline: bool,
     },
     /// Writes a file whole.
     Write {
@@ -361,6 +364,66 @@ async fn read(path: &Path, shown: &str, offset: usize, limit: usize) -> Result<O
     })
 }
 
+/// What the file at `path` declares, for a `read` asked for its outline;
+/// for a file that has none, how long it is and why not.
+async fn outlined(path: PathBuf, shown: String) -> Result<Output, String> {
+    let size = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| format!("Couldn't read {shown}: {e}"))?
+        .len();
+    let text = if !outline::reads(&path) {
+        format!(
+            "{shown} has no outline: only {} files have one. Read it, or search it with grep.",
+            outline::LANGUAGES
+        )
+    } else if size > outline::MAX_BYTES {
+        format!("{shown} is too large to outline. Search it with grep.")
+    } else {
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+        // (Off the async threads: a large file takes a moment to read.)
+        tokio::task::spawn_blocking(move || {
+            let lines = content.lines().count();
+            outline::of(&path, &content).map_or_else(
+                || format!("{shown}: {lines} lines. It declares no functions or types.\n"),
+                |listed| {
+                    format!(
+                        "{shown}: {lines} lines. What it declares, after the lines each \
+                         spans:\n{listed}"
+                    )
+                },
+            )
+        })
+        .await
+        .map_err(|e| format!("The outline stopped: {e}"))?
+    };
+    Ok(Output {
+        text,
+        metadata: Map::new(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    })
+}
+
+/// Adds the `outline` argument to the `read` tool among `definitions`.
+pub(crate) fn offer_outline(definitions: &mut [Value]) {
+    let Some(read) = definitions.iter_mut().find(|d| d["name"] == "read") else {
+        return;
+    };
+    if let Some(description) = read["description"].as_str() {
+        read["description"] = json!(format!(
+            "{description} With outline, lists what a source file declares and the lines \
+             each function and type spans, instead of its text: do that first for a long \
+             file, then read only the part you need."
+        ));
+    }
+    read["parameters"]["properties"]["outline"] = json!({
+        "type": "boolean",
+        "description": "List the file's functions and types with their lines, not its text."
+    });
+}
+
 /// The picture type of the file at `path`, judged by its extension, when
 /// it's a picture the model can see.
 fn picture_type(path: &Path) -> Option<&'static str> {
@@ -425,6 +488,10 @@ impl Plan {
                     shown,
                     offset,
                     limit,
+                    outline: input
+                        .get("outline")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                 })
             }
             "write" => {
@@ -742,8 +809,15 @@ impl Plan {
             Self::Read {
                 path,
                 shown,
+                outline: true,
+                ..
+            } => outlined(path, shown).await,
+            Self::Read {
+                path,
+                shown,
                 offset,
                 limit,
+                outline: false,
             } => read(&path, &shown, offset, limit).await,
             Self::Write {
                 path,

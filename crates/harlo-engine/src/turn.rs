@@ -65,6 +65,9 @@ pub struct Turn {
     /// Whether scripts may read and search the project's files, where
     /// the rules allow it without asking.
     pub script_files: bool,
+    /// Whether `read` can list what a source file declares instead of its
+    /// text.
+    pub outline: bool,
     /// Where web searches go; none leaves `websearch` out.
     pub search: Option<std::sync::Arc<dyn crate::web::Searcher>>,
     /// Where subagents start; none offers no subagent tool.
@@ -343,6 +346,9 @@ pub(crate) fn offered(turn: &Turn) -> Vec<Value> {
 /// Every tool the turn has, whatever the rules say of it.
 fn all(turn: &Turn) -> Vec<Value> {
     let mut definitions = tools::definitions();
+    if turn.outline {
+        tools::offer_outline(&mut definitions);
+    }
     definitions.push(crate::question::definition());
     // Skills a rule denies aren't offered.
     let offered: Vec<&crate::skills::Skill> = turn
@@ -1094,6 +1100,21 @@ async fn run_external(
 fn planned(turn: &Turn, name: &str, input: &Map<String, Value>) -> Result<Plan, Called> {
     let fail = |why: String| Called::Ran(failed(input.clone(), "tool", why), Vec::new());
     match plan_for(turn, name, input) {
+        // Not offered, so not done: a model that guesses the argument gets
+        // the file.
+        Ok(Plan::Read {
+            path,
+            shown,
+            offset,
+            limit,
+            outline: true,
+        }) if !turn.outline => Ok(Plan::Read {
+            path,
+            shown,
+            offset,
+            limit,
+            outline: false,
+        }),
         Ok(Plan::TodoWrite { .. }) if !turn.todo => {
             Err(fail(format!("There is no tool called `{name}`.")))
         }
