@@ -1487,7 +1487,7 @@ final class RecordingTests: XCTestCase {
 
     func testEveryScene() async throws {
         let text = try XCTUnwrap(Self.text)
-        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "end"])
+        XCTAssertEqual(Replay.scenes(in: text), ["session", "approval", "working", "end", "edit", "command", "background"])
         let tools = { (s: OpenSession) in s.rows.filter { $0.kind == "tool" } }
 
         var (m, s) = try await open("session")
@@ -1527,6 +1527,34 @@ final class RecordingTests: XCTestCase {
         XCTAssertTrue(diff?.hunks.flatMap(\.lines).contains { $0.text.contains("merge_by_key") } == true)
         let log = await m.actionLog()
         XCTAssertTrue(log?.entries.contains { $0.target.contains("run-tests.sh") } == true, "\(log?.entries.map(\.target) ?? [])")
+
+        // After the tour's end. An edit to read before it's answered,
+        // refused with what to do instead.
+        (m, s) = try await open("edit")
+        let edit = try XCTUnwrap(s.requests.first)
+        XCTAssertEqual(edit.asks, "Wants to edit a file")
+        XCTAssertEqual(edit.detail, "src/sidebar.rs")
+        XCTAssertTrue(edit.diff.hasPrefix("@@") && edit.diff.contains("+pub fn refresh"), edit.diff)
+        XCTAssertTrue(edit.always.hasPrefix("Allow always applies to "), edit.always)
+        XCTAssertTrue(m.takesReasons && m.showsPictures)
+        let refused = await m.answer(edit, edit.refusal(saying: "Keep the name"))
+        XCTAssertTrue(refused && s.requests.isEmpty, m.alert ?? "")
+        // A command the agent waits for can go to the background.
+        (m, s) = try await open("command")
+        XCTAssertFalse(s.backgroundCall.isEmpty)
+        XCTAssertEqual(s.activity?.text, "Running command ./build.sh")
+        let sent = await m.sendToBackground()
+        XCTAssertTrue(sent, m.alert ?? "")
+        // There it's listed with Stop, over the goal and what it waits for.
+        (m, s) = try await open("background")
+        XCTAssertEqual(s.backgroundCall, "")
+        XCTAssertEqual(s.jobs.map(\.title), ["Command", "Goal"])
+        XCTAssertEqual(s.jobs.map(\.action), ["Stop", "Resume"])
+        XCTAssertEqual(s.jobs.last?.detail, "It needs the release date.")
+        XCTAssertTrue(s.rows.contains { $0.html.contains("Tagging it needs the release date") })
+        XCTAssertTrue(s.commands.contains { $0.name == "goal" }, "\(s.commands.map(\.name))")
+        let stopped = await m.act(on: try XCTUnwrap(s.jobs.first))
+        XCTAssertTrue(stopped, m.alert ?? "")
     }
 }
 
@@ -1621,5 +1649,51 @@ final class QueuedMessageTests: XCTestCase {
         // An extension's own entry: its view says whose.
         let entry = ExtView(try JSON.parse(#"{"id": "entry:a1", "kind": "message", "lines": ["stamp"], "timestamp": 5, "entryId": "a1"}"#))
         XCTAssertEqual([entry.entryId, v.entryId], ["a1", ""])
+    }
+}
+
+/// What a session has beside its conversation, and an approval as harlo
+/// on the computer words it.
+final class AsideTests: XCTestCase {
+    func testAnApprovalCarriesWhatItWantsItsChangeAndWhatAlwaysCovers() {
+        let r = UIRequest(["id": "p1", "method": "select", "title": "Allow tool: edit\na.txt", "message": "a.txt",
+                           "options": ["Allow once", "Allow always", "Deny"], "approval": true,
+                           "wants": "edit a file", "detail": "a.txt", "why": "Asks because the rule says ask.",
+                           "diff": "@@ -1 +1 @@\n-one\n+two", "always": "Allow always applies to every edit."])
+        XCTAssertEqual(r.asks, "Wants to edit a file")
+        XCTAssertEqual(r.detail, "a.txt")
+        XCTAssertTrue(r.diff.contains("+two"))
+        XCTAssertEqual(r.always, "Allow always applies to every edit.")
+        // Refused with a reason, trimmed; without one, a plain refusal.
+        XCTAssertEqual(r.refusal(saying: "  Keep it.\n"), ["value": "Deny", "reason": "Keep it."])
+        XCTAssertEqual(r.refusal(saying: "  "), ["value": "Deny"])
+        // An older harlo's: no words of its own.
+        let old = UIRequest(["id": "p2", "method": "select", "title": "Allow tool: shell\nls", "options": ["Allow once", "Deny"], "approval": true])
+        XCTAssertEqual(old.asks, "")
+        XCTAssertEqual(old.diff, "")
+    }
+
+    func testJobRowsComeWithTheCommandThatCanGoToTheBackground() {
+        let ev = Event(["ev": "jobs", "key": "s1", "background": "call_7", "items": [
+            ["id": "job:j1", "symbol": "terminal", "title": "Command", "text": "npm run dev", "note": "In the background", "action": "Stop", "working": true],
+            ["id": "goal:resume", "symbol": "scope", "title": "Goal", "text": "Ship it", "detail": "It needs a date.", "note": "Paused", "action": "Resume", "working": false],
+            ["title": "No id: left out"],
+        ]])
+        guard case .jobs(let key, let rows, let background) = ev else { return XCTFail("a jobs event (\(String(describing: ev)))") }
+        XCTAssertEqual(key, "s1")
+        XCTAssertEqual(background, "call_7")
+        XCTAssertEqual(rows.map(\.id), ["job:j1", "goal:resume"])
+        XCTAssertEqual(rows[0].spoken, "Command, npm run dev, In the background")
+        XCTAssertEqual(rows[1].spoken, "Goal, Ship it, It needs a date., Paused")
+        XCTAssertTrue(rows[0].working)
+        XCTAssertFalse(rows[1].working)
+        XCTAssertEqual(ev?.sessionKey, "s1")
+    }
+
+    func testCurrentToolsHaveWords() {
+        XCTAssertEqual(ToolName.words("execute", running: true), "Running a script")
+        XCTAssertEqual(ToolName.words("execute", running: false), "Ran a script")
+        XCTAssertEqual(ToolName.words("shell", running: true), "Running command")
+        XCTAssertEqual(ToolName.words("goal", running: false), "Set the goal")
     }
 }

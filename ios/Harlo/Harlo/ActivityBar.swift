@@ -2,8 +2,9 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// What the session is doing besides talking: its workflow run, todo
-/// progress, messages waiting. Tapping opens the details.
+/// What the session is doing besides talking: its workflow run, what it
+/// has in the background and its goal, todo progress, messages waiting.
+/// Tapping opens the details.
 struct ActivityBar: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
@@ -21,12 +22,13 @@ struct ActivityBar: View {
         let queued = session.queued
         // (A run shows until it's stopped or its worktree is gone.)
         let run = session.workflow.flatMap { $0.state != "stopped" && !$0.removed ? $0 : nil }
-        let card = run != nil || todo != nil || !queued.isEmpty
+        let card = run != nil || todo != nil || !queued.isEmpty || !session.jobs.isEmpty
         if card {
             VStack(alignment: .leading, spacing: 6) {
                 if let run {
                     WorkflowLine(run: run) { open(.workflow(run.id)) }
                 }
+                JobRows(rows: session.jobs)
                 if let t = todo {
                     Button { open(.activity) } label: {
                         HStack(spacing: 8) {

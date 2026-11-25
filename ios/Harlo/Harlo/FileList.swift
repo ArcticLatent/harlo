@@ -51,6 +51,9 @@ struct FileList: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // (Its path, whole: the name and the folder are read apart.)
+                .accessibilityLabel(f)
+                .accessibilityIdentifier("mention:" + f)
                 if f != files.last { Divider().overlay(Color(p.border)) }
             }
         }

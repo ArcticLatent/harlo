@@ -5,10 +5,12 @@
 
 use std::collections::HashMap;
 
+use harlo_client::Picture;
 use serde_json::{Value, json};
 
+use super::{aside, pictures};
 use crate::server::{ShellRun, ShellStatus};
-use crate::timeline::{Change, Compaction, Entry, Live};
+use crate::timeline::{Change, Compaction, Entry, Live, Script};
 use crate::workspace::{EventKind, Message, ToolStatus};
 
 /// Rows a phone gets of a session: the latest ones. A long session's whole
@@ -18,6 +20,10 @@ pub const PHONE_ROWS: usize = 300;
 
 /// A row's text or HTML on a phone, at most (a huge tool output).
 const ROW_BYTES: usize = 64 * 1024;
+
+/// The most lines of a script a row carries as code: the phone folds a
+/// card past its first lines, and few scripts are longer than this.
+const SCRIPT_LINES: usize = 300;
 
 /// One session's rows, kept current by its live events.
 #[derive(Debug, Default)]
@@ -94,6 +100,19 @@ impl Rows {
         &self.entries
     }
 
+    /// Returns the picture a row named `name`, if a row still shows it.
+    #[must_use]
+    pub fn picture(&self, name: &str) -> Option<&Picture> {
+        let key = pictures::key(name)?;
+        self.entries
+            .iter()
+            .flat_map(|entry| match entry {
+                Entry::Prompt { pictures, .. } | Entry::Tool { pictures, .. } => pictures.iter(),
+                _ => [].iter(),
+            })
+            .find(|picture| picture.key == key)
+    }
+
     /// Returns the latest [`PHONE_ROWS`] rows as the phone reads them, and
     /// how many earlier ones it doesn't get.
     #[must_use]
@@ -154,9 +173,15 @@ fn shell_row(key: &str, run: &ShellRun) -> Value {
         (ShellStatus::Killed, _) => ("error", "Stopped".to_owned()),
     };
     json!({
-        "key": key, "kind": "tool", "title": "Ran", "subtitle": run.command,
-        "state": state, "result": result, "output": clip(&run.output),
+        "key": key, "kind": "tool", "tool": "shell", "title": "shell",
+        "subtitle": run.command, "command": run.command,
+        "state": state, "result": result, "text": clip(&run.output),
     })
+}
+
+/// The names a row's pictures are asked for by.
+fn images(pictures: &[Picture]) -> Vec<String> {
+    pictures.iter().map(pictures::name).collect()
 }
 
 /// Returns one row as the phone reads it (the phone's `Row`).
@@ -167,14 +192,22 @@ pub fn row(entry: &Entry) -> Value {
             key,
             text,
             attachments,
+            pictures,
             ..
         } => {
-            let text = if attachments.is_empty() {
+            // A picture shows under the prompt; anything else is named.
+            let named: Vec<&str> = attachments
+                .iter()
+                .map(String::as_str)
+                .filter(|name| !pictures.iter().any(|p| p.name == *name))
+                .collect();
+            let text = if named.is_empty() {
                 text.clone()
             } else {
-                format!("{text}\n\n{}", attachments.join(", "))
+                format!("{text}\n\n{}", named.join(", "))
             };
-            json!({ "key": key, "kind": "user", "text": clip(&text), "state": "done" })
+            json!({ "key": key, "kind": "user", "text": clip(&text), "state": "done",
+                    "images": images(pictures) })
         }
         Entry::Answer { key, text } => json!({
             "key": key, "kind": "markdown", "text": clip(text), "html": clip(&markdown_html(text)),
@@ -239,6 +272,8 @@ fn tool_row(entry: &Entry) -> Value {
         took,
         files,
         error,
+        pictures,
+        script,
         ..
     } = entry
     else {
@@ -264,11 +299,65 @@ fn tool_row(entry: &Entry) -> Value {
     } else {
         ""
     };
-    json!({
+    let mut row = json!({
         "key": key, "kind": "tool", "tool": name, "title": name, "subtitle": detail,
         "command": command, "state": state(*status), "diff": clip(&diff), "result": result,
         "runMs": took.map_or(0, |t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
-    })
+        "callId": aside::call_of(key), "images": images(pictures),
+    });
+    if let Some(script) = script {
+        row["text"] = Value::String(clip(&script.code));
+        row["code"] = script_code(script);
+        if error.is_none() && !script.calls.is_empty() {
+            let calls = script.calls.len();
+            row["result"] = Value::String(format!(
+                "{calls} {}",
+                if calls == 1 { "call" } else { "calls" }
+            ));
+        }
+    }
+    row
+}
+
+/// A script as the phone shows code: the tools it called on a line of
+/// their own, then its numbered lines.
+fn script_code(script: &Script) -> Value {
+    let mut lines: Vec<Value> = Vec::new();
+    // Each tool once, in the order first called, with how often.
+    let mut called: Vec<(&str, usize)> = Vec::new();
+    for call in &script.calls {
+        match called.iter_mut().find(|(tool, _)| *tool == call.tool) {
+            Some((_, times)) => *times += 1,
+            None => called.push((&call.tool, 1)),
+        }
+    }
+    if !called.is_empty() {
+        let names: Vec<String> = called
+            .iter()
+            .map(|(tool, times)| match times {
+                1 => (*tool).to_owned(),
+                _ => format!("{tool} ×{times}"),
+            })
+            .collect();
+        lines.push(json!({ "f": format!("Called {}", names.join(", ")) }));
+    }
+    let total = script.code.lines().count();
+    lines.extend(
+        script
+            .code
+            .lines()
+            .take(SCRIPT_LINES)
+            .enumerate()
+            .map(|(i, line)| json!({ "n": (i + 1).to_string(), "h": escaped(line) })),
+    );
+    json!({ "path": "", "lines": lines, "total": total, "more": total > SCRIPT_LINES })
+}
+
+/// Text as HTML shows it as is.
+fn escaped(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Whether tool `name` runs a command.
@@ -376,7 +465,53 @@ pub fn changes(sent: &[Value], now: &[Value]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    use harlo_client::{ScriptCall, ToolStatus};
     use serde_json::{Value, json};
+
+    use crate::timeline::{Entry, Script};
+
+    #[test]
+    fn a_script_row_carries_its_code_and_what_it_called() {
+        let call = |tool: &str| ScriptCall {
+            tool: tool.to_owned(),
+            status: ToolStatus::Completed,
+            input: Value::Null,
+        };
+        let entry = Entry::Tool {
+            key: "msg_1/tool/call_9".to_owned(),
+            name: "execute".to_owned(),
+            label: "Script".to_owned(),
+            detail: "Count the tests".to_owned(),
+            status: ToolStatus::Completed,
+            took: None,
+            files: Vec::new(),
+            todos: None,
+            pictures: Vec::new(),
+            error: None,
+            script: Some(Box::new(Script {
+                code: "// Count the tests\nconst a = x < 2 && y;".to_owned(),
+                calls: vec![
+                    call("project.grep"),
+                    call("project.read"),
+                    call("project.grep"),
+                ],
+            })),
+        };
+        let row = super::row(&entry);
+        assert_eq!(row["callId"], "call_9");
+        assert_eq!(row["result"], "3 calls");
+        assert_eq!(row["text"], "// Count the tests\nconst a = x < 2 && y;");
+        assert_eq!(
+            row["code"]["lines"],
+            json!([
+                { "f": "Called project.grep ×2, project.read" },
+                { "n": "1", "h": "// Count the tests" },
+                { "n": "2", "h": "const a = x &lt; 2 &amp;&amp; y;" },
+            ])
+        );
+        assert_eq!(row["code"]["total"], 2);
+        assert_eq!(row["code"]["more"], false);
+    }
 
     fn tool(key: &str, name: &str, state: &str, ms: u64) -> Value {
         json!({ "key": key, "kind": "tool", "tool": name, "state": state, "runMs": ms })

@@ -20,6 +20,10 @@ eval "$("$TOOLS/sandbox.sh")"
 trap '"$TOOLS/sandbox.sh" stop "$DIR"' EXIT
 api() { curl -sf -u "harlo:$PASSWORD" -H 'content-type: application/json' "$@"; }
 
+# A goal's reviewer here always finds it blocked (the scripted model
+# answers from this file, beside its log).
+printf '%s\n' '{"<reviewer>": "{\"verdict\":\"blocked\",\"reason\":\"It needs the release date.\"}"}' > "$DIR/scripts.json"
+
 # A branch to switch to, and a session so the project is listed.
 git -C "$PROJECT" branch feature
 api -X POST "$URL/api/session?directory=$PROJECT" -d '{}' > /dev/null

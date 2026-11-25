@@ -17,12 +17,19 @@ struct RequestCard: View {
     @State private var typed = ""
     @State private var picks: [Set<String>] = []
     @State private var custom: [String] = []
+    /// A refusal's reason is being typed.
+    @State private var explaining = false
 
     /// At the largest text sizes its scrolling parts are shorter, so the
     /// card leaves the conversation room (its answers stay in view).
     var big: Bool { typeSize.isAccessibilitySize }
 
+    /// Harlo on the computer words the approval itself (an older one
+    /// sends only the tool and what it acts on).
+    var worded: Bool { request.approval && !request.wants.isEmpty }
+
     var heading: String {
+        if worded { return request.asks }
         if request.approval { return "Approve this?" }
         return request.title.isEmpty ? "The agent asks" : request.title
     }
@@ -62,7 +69,9 @@ struct RequestCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Color(p.warning))
             }
-            if !request.message.isEmpty {
+            if worded {
+                ApprovalDetails(request: request, brief: key != nil, folded: explaining)
+            } else if !request.message.isEmpty {
                 if key == nil {
                     ScrollView {
                         Text(request.message)
@@ -94,7 +103,7 @@ struct RequestCard: View {
 
     @ViewBuilder var content: some View {
         if request.approval || request.method == "confirm" {
-            ApprovalButtons(request: request, key: key)
+            ApprovalButtons(request: request, key: key, explaining: $explaining)
         } else if request.method == "select" {
             VStack(spacing: 6) {
                 ForEach(request.options, id: \.self) { o in

@@ -89,7 +89,15 @@ func run(_ link: String) async {
     }
     check(replied, "a new session starts with its first message, and the reply streams back (\(s.rows.map(\.kind)))")
     let mine = s.rows.first { $0.kind == "user" }
-    check(mine?.text.contains("Photo 1") == true, "the photo goes with it (\(mine?.text ?? "-"))")
+    check(mine?.images.count == 1 && model.showsPictures, "the photo goes with it, under the message (\(mine?.images ?? []))")
+    if let photo = mine?.images.first {
+        let small = await model.picture(photo, thumb: true)
+        let whole = await model.picture(photo, thumb: false)
+        check(small.picture?.width == 1 && whole.picture?.data.isEmpty == false, "and comes back to look at (\(small.why) \(whole.why))")
+        check(s.pictureName(photo) == "You sent", "named by where it came from (\(s.pictureName(photo)))")
+    }
+    let commands = await waitFor(10) { s.commands.contains { $0.name == "compact" } && s.commands.contains { $0.name == "goal" } }
+    check(commands, "what can be typed after / arrives (\(s.commands.map(\.name)))")
     let underProject = await waitFor(5) { model.sessions.contains { $0.key == s.liveKey && $0.project == repo.name } }
     check(underProject, "it's listed under its project (\(model.sessions.map { "\($0.project): \($0.title)" }))")
     let careful = await waitFor(5) { s.modes?.approval == "always-ask" }
@@ -101,6 +109,9 @@ func run(_ link: String) async {
     let ask = s.requests.first
     check(asked && ask?.options == ["Allow once", "Allow always", "Deny"] && ask?.title.contains("edit") == true,
           "an edit asks for approval (\(ask.map { "\($0.title.replacingOccurrences(of: "\n", with: " | ")): \($0.options)" } ?? "none"))")
+    check(ask?.asks == "Wants to edit a file" && ask?.detail == "a.txt" && ask?.diff.contains("+from the phone") == true
+          && ask?.always.hasPrefix("Allow always applies to ") == true,
+          "it says what the agent wants, shows the change and what Allow always covers (\(ask?.asks ?? "-"); \(ask?.always ?? "-"))")
     if let ask {
         _ = await model.answer(ask, ask.approval(true))
         let ran = await waitFor(15) { s.requests.isEmpty && !s.busy && s.rows.last?.kind == "markdown" }
@@ -141,6 +152,7 @@ func run(_ link: String) async {
 
     await folder(model, s)
     await working(model, s)
+    await aside(model, s)
 
     // The network drops: it reconnects and the session comes back.
     let before = s.rows.count
@@ -266,6 +278,58 @@ func working(_ model: HarloModel, _ s: OpenSession) async {
     }
     check(finished, "the run ends, then the message that waited runs (\(s.rows.suffix(2).map { $0.text.prefix(30) }))")
     print("IOS-E2E activity seen \(seen.sorted())")
+}
+
+/// Beside the conversation: a refusal that says why, a command sent to the
+/// background and stopped from its row, and a goal with its row.
+@MainActor
+func aside(_ model: HarloModel, _ s: OpenSession) async {
+    // Refused with a reason: the agent is told it, and carries on.
+    await model.setApproval("always-ask")
+    _ = await model.send(editScript("a.txt", "from the phone", "refused", then: "Left it."))
+    let asked = await waitFor(15) { s.requests.first?.approval == true }
+    if let ask = s.requests.first, asked, model.takesReasons {
+        _ = await model.answer(ask, ask.refusal(saying: " Keep it as it is. "))
+        let told = await waitFor(15) { s.requests.isEmpty && !s.busy && s.rows.last?.html.contains("Left it.") == true }
+        let edit = s.rows.last { $0.kind == "tool" }
+        check(told && edit?.state == "error" && edit?.result.hasSuffix("said: Keep it as it is.") == true,
+              "a refusal's reason reaches the agent (\(edit?.result ?? "-"))")
+    } else {
+        check(false, "an edit asks, and Harlo takes a refusal's reason (\(s.requests.count), \(model.takesReasons))")
+    }
+
+    // A command the agent waits for goes to the background; the turn goes
+    // on, and its row stops it.
+    await model.setApproval("yolo")
+    _ = await model.send(#"tool shell {"command":"sleep 30"} ;; say Moved on."#)
+    let waitsFor = await waitFor(15) { !s.backgroundCall.isEmpty }
+    check(waitsFor && s.activity?.text == "Running command sleep 30", "it says which command it waits for (\(s.activity?.text ?? "-"))")
+    let moved = await model.sendToBackground()
+    let listed = await waitFor(15) { s.jobs.contains { $0.title == "Command" } && s.backgroundCall.isEmpty }
+    let row = s.jobs.first { $0.title == "Command" }
+    check(moved && listed && row?.text == "sleep 30" && row?.action == "Stop" && row?.working == true,
+          "sent to the background, it's listed with Stop (\(row?.spoken ?? model.alert ?? "-"))")
+    let went = await waitFor(15) { !s.busy && s.rows.last?.html.contains("Moved on.") == true }
+    check(went, "and the turn goes on without it (\(s.rows.last?.kind ?? "-"))")
+    if let row {
+        let stopped = await model.act(on: row)
+        let gone = await waitFor(15) { s.jobs.isEmpty }
+        check(stopped && gone, "Stop on its row ends it (\(s.jobs.map(\.spoken)))")
+    }
+
+    // A goal, typed as the command it is: its row says where it stands
+    // (the reviewer here always finds it blocked), and it's cleared the
+    // same way.
+    _ = await model.send("/goal Ship the release")
+    let paused = await waitFor(30) { s.jobs.contains { $0.title == "Goal" && $0.note == "Paused" } }
+    let goal = s.jobs.first { $0.title == "Goal" }
+    check(paused && goal?.text == "Ship the release" && goal?.detail == "It needs the release date." && goal?.action == "Resume",
+          "a goal typed after / shows with where it stands (\(goal?.spoken ?? model.alert ?? "-"))")
+    _ = await waitFor(15) { !s.busy }
+    _ = await model.send("/goal clear")
+    let cleared = await waitFor(15) { !s.jobs.contains { $0.title == "Goal" } }
+    check(cleared, "and /goal clear takes it away (\(s.jobs.map(\.spoken)))")
+    _ = await waitFor(15) { !s.busy }
 }
 
 /// Reaching Harlo wherever it is: its addresses come in the pairing code
@@ -466,6 +530,40 @@ func record(_ link: String, to path: String) async {
     _ = await model.changes()
     _ = await model.actionLog()
     rec.scene("end")
+
+    // (From here on: scenes of their own, after the tour's end.)
+    // An edit waits for approval with its change to read, and is refused
+    // with what to do instead.
+    await model.setApproval("always-ask")
+    _ = await connected()
+    _ = await model.send("Call it refresh instead of rebuild.")
+    let edit = await waitFor(20) { s.requests.contains { $0.approval && !$0.diff.isEmpty } }
+    let asks = s.requests.first(where: \.approval)
+    check(edit && asks?.asks == "Wants to edit a file" && asks?.always.isEmpty == false, "an edit asks first, with its change (\(asks?.asks ?? "-"))")
+    rec.scene("edit")
+    if let asks { _ = await model.answer(asks, asks.refusal(saying: "Keep the name")) }
+    let kept = await waitFor(20) { !s.busy && s.requests.isEmpty && s.rows.last?.html.contains("stays") == true }
+    check(kept, "refused with a reason, it carries on (\(s.rows.last?.kind ?? "-"))")
+    await model.setApproval("yolo")
+
+    // A goal the reviewer finds blocked: paused, with why.
+    _ = await connected()
+    _ = await model.send("/goal Ship the release")
+    let paused = await waitFor(40) { !s.busy && s.jobs.contains { $0.title == "Goal" && $0.note == "Paused" } }
+    check(paused, "a goal pauses when only you can go on (\(s.jobs.map(\.spoken)))")
+
+    // A command the agent waits for, sent to the background.
+    _ = await connected()
+    _ = await model.send("Build it again while I look.")
+    let waits = await waitFor(20) { !s.backgroundCall.isEmpty }
+    check(waits, "it waits for a command (\(s.activity?.text ?? "-"))")
+    rec.scene("command")
+    let moved = await model.sendToBackground()
+    let listed = await waitFor(20) { !s.busy && s.jobs.contains { $0.title == "Command" } && s.rows.last?.html.contains("in the background") == true }
+    check(moved && listed, "in the background it's listed, and the agent goes on (\(s.jobs.map(\.spoken)))")
+    rec.scene("background")
+    if let job = s.jobs.first(where: { $0.title == "Command" }) { await model.act(on: job) }
+    _ = await waitFor(10) { !s.jobs.contains { $0.title == "Command" } }
 }
 
 let args = CommandLine.arguments

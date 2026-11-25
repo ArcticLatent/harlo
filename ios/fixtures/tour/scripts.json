@@ -87,5 +87,42 @@
       ]
     ]
   ],
+  "Call it refresh instead of rebuild.": [
+    [
+      [
+        "tool",
+        "edit {\"path\": \"src/sidebar.rs\", \"oldString\": \"pub fn rebuild(rows\", \"newString\": \"pub fn refresh(rows\"}"
+      ]
+    ],
+    [
+      [
+        "say",
+        "All right, the name stays as it is."
+      ]
+    ]
+  ],
+  "Build it again while I look.": [
+    [
+      [
+        "tool",
+        "shell {\"command\": \"./build.sh\", \"description\": \"Build the release\"}"
+      ]
+    ],
+    [
+      [
+        "say",
+        "The build is running in the background. I'll read its output when it ends."
+      ]
+    ]
+  ],
+  "<goal>": [
+    [
+      [
+        "say",
+        "The release is built and its tests pass. Tagging it needs the release date, and only you know that."
+      ]
+    ]
+  ],
+  "<reviewer>": "{\"verdict\": \"blocked\", \"reason\": \"It needs the release date.\"}",
   "<prompt_tokens>": 11600
 }

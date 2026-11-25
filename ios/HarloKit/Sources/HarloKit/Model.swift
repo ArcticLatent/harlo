@@ -69,6 +69,12 @@ public final class OpenSession {
     public internal(set) var steering: [String] = []
     public internal(set) var followUp: [String] = []
     public internal(set) var todos: [TodoPhase] = []
+    /// What it has going beside the conversation: commands and subagents
+    /// in the background, its goal.
+    public internal(set) var jobs: [JobRow] = []
+    /// The call of the command its agent waits for ("" none): it can be
+    /// sent to the background.
+    public internal(set) var backgroundCall = ""
     /// pi extensions' views (widgets, footer, a screen open on the
     /// computer, their drawing of tool calls and messages), oldest first.
     public internal(set) var extViews: [ExtView] = []
@@ -201,8 +207,9 @@ public final class OpenSession {
             return Activity(text: last.kind == "thinking" ? "Thinking" : "Writing", since: last.time)
         }
         if let tool = rows[turn...].last(where: { $0.kind == "tool" && $0.state == "running" }) {
-            let what = tool.subtitle.isEmpty ? tool.title : "\(tool.title) \(tool.subtitle)"
-            return Activity(text: "Running \(what)", since: tool.time)
+            // "Running command npm test", "Reading file src/app.rs".
+            let doing = ToolName.words(tool.title, running: true)
+            return Activity(text: tool.subtitle.isEmpty ? doing : "\(doing) \(tool.subtitle)", since: tool.time)
         }
         return Activity(text: "Working", since: turn > rows.startIndex ? rows[rows.index(before: turn)].time : 0)
     }
@@ -210,11 +217,11 @@ public final class OpenSession {
     /// Messages waiting for the agent, steering first.
     public var queued: [QueuedMessage] { QueuedMessage.list(steering: steering, followUp: followUp) }
 
-    /// The agent lets a waiting message be taken back (the demo's).
-    public var canUnqueue: Bool { harness == "demo" }
+    /// A waiting message can be taken back, or sent now.
+    public var canUnqueue: Bool { harness == "demo" || harness == "harlo" }
 
     /// The agent can branch at one of the user's messages (edit & resend).
-    public var canBranch: Bool { harness == "pi" }
+    public var canBranch: Bool { harness == "pi" || harness == "harlo" }
     public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
 
     /// Opens a folded run, or folds an open one (`open`: how it shows now).
@@ -228,6 +235,8 @@ public final class OpenSession {
         // Opening again (back from the background, a new connection):
         // harlo sends what's current, so what was shown before goes.
         todos = []
+        jobs = []
+        backgroundCall = ""
         let waiting = early
         early = []
         for ev in waiting { take(ev) }
@@ -268,6 +277,9 @@ public final class OpenSession {
             followUp = fu
         case .todos(_, let t):
             todos = t
+        case .jobs(_, let rows, let call):
+            jobs = rows
+            backgroundCall = call
         case .ext(_, let change):
             extViews.apply(change)
         case .unsent(_, let text, let photos):
@@ -1073,6 +1085,28 @@ public final class HarloModel {
         _ = await with { c, k in try await c.promote(k, text: message.text) }
     }
 
+    // ---- beside the conversation: the background, the goal ----------------------
+
+    /// Sends the command the open session's agent waits for to the
+    /// background: the turn goes on, and the command shows among its jobs
+    /// with Stop. False when there's none or it couldn't (the alert says why).
+    @discardableResult
+    public func sendToBackground() async -> Bool {
+        guard let call = session?.backgroundCall, !call.isEmpty else { return false }
+        return await with({ c, k in try await c.background(k, call: call) }) != nil
+    }
+
+    /// Does what one of the open session's job rows offers (Stop, Pause,
+    /// Resume, Dismiss). False when it couldn't (the alert says why).
+    @discardableResult
+    public func act(on row: JobRow) async -> Bool {
+        await with({ c, k in try await c.jobAction(k, row: row.id) }) != nil
+    }
+
+    /// harlo passes a refusal's reason on to the agent (an older one
+    /// doesn't: no reason is asked for).
+    public var takesReasons: Bool { demo || features.contains("reasons") }
+
     /// Edit & resend: the session goes back to before one of your messages
     /// (`row`: its key); its text comes back to edit and send again. nil: it
     /// couldn't (the alert says why) or was cancelled.
@@ -1392,7 +1426,8 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .unsent(let k, _, _), .workflow(let k), .ext(let k, _): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .jobs(let k, _, _), .unsent(let k, _, _), .workflow(let k),
+             .ext(let k, _): return k
         case .sessions, .limits, .revoked: return nil
         }
     }
@@ -1439,6 +1474,21 @@ extension UIRequest {
 
     /// The answer for one of `select`'s options.
     public static func choose(_ option: String) -> JSON { ["value": .string(option)] }
+
+    /// The refusal, with what the agent should do instead: it's told, and
+    /// carries on.
+    public func refusal(saying reason: String) -> JSON {
+        var answer = approval(false)
+        let said = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !said.isEmpty { answer["reason"] = .string(said) }
+        return answer
+    }
+
+    /// What it asks, in words: "Wants to run a command" (harlo's own
+    /// words when it sent them).
+    public var asks: String {
+        wants.isEmpty ? "" : "Wants to " + wants
+    }
 
     /// The answer for typed text (`input`, `editor`).
     public static func typed(_ text: String) -> JSON { ["value": .string(text)] }

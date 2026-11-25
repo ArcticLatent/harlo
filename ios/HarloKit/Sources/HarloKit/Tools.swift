@@ -61,6 +61,10 @@ public enum ToolName {
         case "task", "agent", "subagent": return "Subagent"
         case "todo", "todowrite", "todoread": return pick("Updating the todos", "Updated the todos")
         case "run_code": return pick("Running a program", "Ran a program")
+        case "execute": return pick("Running a script", "Ran a script")
+        case "remember", "remember_user": return pick("Keeping a note", "Kept a note")
+        case "goal": return pick("Setting the goal", "Set the goal")
+        case "search_sessions": return pick("Searching past sessions", "Searched past sessions")
         case "lsp": return pick("Looking up the code", "Looked up the code")
         case "ast_grep": return pick("Searching the code's structure", "Searched the code's structure")
         case "ast_edit": return pick("Rewriting by structure", "Rewrote by structure")
@@ -96,7 +100,10 @@ public enum ToolName {
         case "fetch", "webfetch", "web_search", "websearch": return "globe"
         case "task", "agent", "subagent": return "person.2"
         case "todo", "todowrite", "todoread": return "checklist"
-        case "run_code": return "chevron.left.forwardslash.chevron.right"
+        case "run_code", "execute": return "chevron.left.forwardslash.chevron.right"
+        case "remember", "remember_user": return "note.text"
+        case "goal": return "scope"
+        case "search_sessions": return "magnifyingglass"
         case "lsp": return "curlybraces"
         case "ast_grep", "locate": return "magnifyingglass"
         case "ast_edit", "rename": return "pencil.line"
@@ -118,7 +125,7 @@ public enum ToolName {
     public static func saysWords(_ tool: String) -> Bool {
         switch tool.lowercased() {
         case "ask", "askuserquestion", "task", "agent", "subagent", "todo", "todowrite", "exitplanmode",
-             "web_search", "websearch", "skill":
+             "web_search", "websearch", "skill", "goal", "remember", "remember_user", "search_sessions":
             return true
         default:
             return false

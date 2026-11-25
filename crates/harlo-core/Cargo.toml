@@ -49,6 +49,9 @@ base64 = { workspace = true, features = ["std"] }
 if-addrs = { workspace = true }
 # Answers as HTML for the phone.
 pulldown-cmark = { workspace = true, features = ["html"] }
+# A session's pictures fitted to a phone's screen (MIT/Apache; the version
+# the window already builds).
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 # Harlo's updates: the release manifest's signature.
 harlo-update-signing = { workspace = true }
 # Dictation: whisper.cpp, built in, behind one API for speech models.

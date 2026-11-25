@@ -93,9 +93,21 @@ final class HarloUITests: XCTestCase {
     }
 
     /// Waits for `e` to go (false: still there after `timeout`).
+    /// (Asked again and again, and once more at the end: while the app
+    /// shows it's working it never comes to rest, a look at the screen
+    /// takes long, and one that began in time counts.)
     func gone(_ e: XCUIElement, timeout: Double = 8) -> Bool {
-        let done = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: e)
-        return XCTWaiter().wait(for: [done], timeout: timeout) == .completed
+        let end = Date.now.addingTimeInterval(timeout)
+        while Date.now < end {
+            if !e.exists { return true }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return !e.exists
+    }
+
+    /// Something on screen with the accessibility identifier `id`.
+    func marked(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
     /// The screen as it is now, kept as "name".
@@ -217,6 +229,28 @@ final class HarloUITests: XCTestCase {
         shot("08-approval-answered")
     }
 
+    func test04bEditApproval() {
+        launch("edit")
+        openMain()
+        // What it wants, in words; the change itself; what always covers.
+        see("Wants to edit a file")
+        see("pub fn refresh")
+        see("Allow always applies to")
+        shot("08b-edit-approval")
+        audit("edit-approval")
+        // Refused, with what to do instead.
+        app.buttons["Deny and say why"].firstMatch.tap()
+        let reason = marked("denyReason")
+        XCTAssertTrue(reason.waitForExistence(timeout: 5), "a field for the reason")
+        reason.tap()
+        reason.typeText("Keep the name")
+        shot("08c-edit-approval-reason")
+        let deny = app.buttons["Deny"].firstMatch
+        XCTAssertTrue(deny.waitForExistence(timeout: 5), "Deny")
+        deny.tap()
+        XCTAssertTrue(gone(marked("denyReason")), "answered, the card goes")
+    }
+
     func test05ApprovalsTab() {
         launch("approval")
         app.tabBars.buttons["Approvals"].tap()
@@ -232,6 +266,24 @@ final class HarloUITests: XCTestCase {
         shot("10-working")
     }
 
+    func test07Background() {
+        // A command the agent waits for can go to the background.
+        launch("command")
+        openMain()
+        let send = app.buttons["Send to the background"]
+        XCTAssertTrue(send.waitForExistence(timeout: 8), "Background, beside what it's doing")
+        shot("10b-command-running")
+        // There it's listed, with Stop; the goal under it, with what's next.
+        launch("background")
+        openMain()
+        see("In the background")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Stop: '")).firstMatch.waitForExistence(timeout: 5), "Stop on its row")
+        see("It needs the release date.")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Resume: '")).firstMatch.waitForExistence(timeout: 5), "Resume on the goal")
+        shot("10c-background")
+        audit("background")
+    }
+
     func test10FileMention() {
         launch("end")
         openMain()
@@ -240,9 +292,12 @@ final class HarloUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "the composer")
         field.tap()
         field.typeText("@")
-        see("src/sidebar.rs")
+        // (Its row in the list, not the file's link in the reply above.)
+        let row = app.buttons["mention:src/sidebar.rs"]
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "the file in the list")
+        XCTAssertEqual(row.label, "src/sidebar.rs")
         shot("17-mention-list")
-        tap("src/sidebar.rs")
+        row.tap()
         XCTAssertTrue(((field.value as? String) ?? "").contains("@src/sidebar.rs"), "the file goes in as @src/sidebar.rs (\(String(describing: field.value)))")
         shot("18-mention-picked")
     }

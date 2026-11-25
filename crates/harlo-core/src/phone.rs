@@ -18,9 +18,11 @@
 // Rust guideline compliant 2026-10-09
 
 mod activity;
+mod aside;
 mod conn;
 mod crypto;
 mod devices;
+mod pictures;
 mod push;
 mod relay;
 mod requests;

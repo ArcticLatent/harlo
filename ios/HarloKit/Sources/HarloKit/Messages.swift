@@ -223,6 +223,17 @@ public struct UIRequest: Equatable, Sendable, Identifiable {
     public var questions: [Question]
     /// When it came (unix ms; 0 unknown): in the session list's.
     public var asked: Int64
+    /// An approval, as harlo on the computer words it ("" from an older
+    /// one): what the agent wants to do ("run a command", "edit a file").
+    public var wants: String
+    /// What it would act on: the command, the paths.
+    public var detail: String
+    /// Why it has to ask (the rule that says so).
+    public var why: String
+    /// The change an edit would make (`+`, `-`, ` ` lines).
+    public var diff: String
+    /// What "Allow always" would cover from then on, as a sentence.
+    public var always: String
 
     public struct Question: Equatable, Sendable {
         public var id: String
@@ -242,6 +253,11 @@ public struct UIRequest: Equatable, Sendable, Identifiable {
         prefill = v["prefill"].text
         approval = v["approval"].bool ?? false
         asked = v["asked"].int ?? 0
+        wants = v["wants"].text
+        detail = v["detail"].text
+        why = v["why"].text
+        diff = v["diff"].text
+        always = v["always"].text
         questions = (v["questions"].array ?? []).map { q in
             Question(
                 id: q["id"].string ?? (q["id"].int.map { String($0) } ?? ""),
@@ -278,6 +294,10 @@ public enum Event: Equatable, Sendable {
     /// Messages waiting for the agent: steering, then follow-ups.
     case queue(key: String, steering: [String], followUp: [String])
     case todos(key: String, phases: [TodoPhase])
+    /// What the session has going beside the conversation, and the call
+    /// of the command its agent waits for ("" none): that one can be sent
+    /// to the background.
+    case jobs(key: String, rows: [JobRow], background: String)
     /// Messages stopped before they were sent: their words and photos, to
     /// put back in the composer.
     case unsent(key: String, text: String, photos: [Photo])
@@ -307,6 +327,7 @@ public enum Event: Equatable, Sendable {
             })
         case "queue": self = .queue(key: key, steering: (v["steering"].array ?? []).compactMap(\.string), followUp: (v["followUp"].array ?? []).compactMap(\.string))
         case "todos": self = .todos(key: key, phases: TodoPhase.list(v["phases"]))
+        case "jobs": self = .jobs(key: key, rows: JobRow.list(v["items"]), background: v["background"].text)
         case "unsent":
             self = .unsent(key: key, text: v["text"].text, photos: (v["photos"].array ?? []).compactMap { p in
                 Data(base64Encoded: p["data"].text).map { Photo(data: $0, mimeType: p["mimeType"].text) }

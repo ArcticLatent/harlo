@@ -16,10 +16,13 @@ use harlo_client::{Attachment, Delivery, ModelRef, Prompt};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
+use super::aside::{self, Aside};
+use super::pictures;
 use super::requests;
 use super::rows::{self, Rows};
 use super::work;
 use super::{Hub, Sealed, Server, key_bytes, lock, now_secs, random_id};
+use crate::composer::{self, Draft, Outgoing};
 use crate::workspace::{Event, EventKind, Message};
 
 /// What the phone calls the agent behind every session: Harlo's own,
@@ -158,6 +161,11 @@ async fn greet(link: &mut Link, hub: &Hub) -> Option<(super::Device, [u8; 32])> 
     }
 }
 
+/// What this Harlo does for a phone that an older one didn't, by the names
+/// the app looks for: a session's pictures, and a refusal's reason passed on
+/// to the agent.
+const FEATURES: [&str; 2] = ["pictures", "reasons"];
+
 /// One phone's connection, from its hello to its last frame.
 pub(crate) async fn connection(mut link: Link, hub: Arc<Hub>) {
     let Some((device, key)) = greet(&mut link, &hub).await else {
@@ -167,7 +175,7 @@ pub(crate) async fn connection(mut link: Link, hub: Arc<Hub>) {
     let id = random_id(12);
     let sealed = Sealed::new(hub.identity.channel(&key), id.clone());
     let ready = json!({ "type": "ready", "conn": id, "name": hub.name, "device": device.name,
-                        "endpoints": hub.endpoints(), "features": [] });
+                        "endpoints": hub.endpoints(), "features": FEATURES });
     if !send_plain(&link, &ready).await {
         return;
     }
@@ -191,6 +199,8 @@ enum Later {
     Reply(Value),
     /// A session's messages, loaded again.
     Reloaded(String, Vec<Message>),
+    /// An event that took a while to put together.
+    Event(Value),
 }
 
 /// The session a phone has open.
@@ -205,6 +215,11 @@ struct Open {
     earlier: usize,
     dirty: bool,
     reloading: bool,
+    /// Its background work and goal.
+    aside: Aside,
+    /// The `jobs` and `todos` events the phone has.
+    sent_jobs: Value,
+    sent_todos: Value,
 }
 
 /// What a phone's connection keeps between its requests.
@@ -497,6 +512,21 @@ impl Conn {
             }
             open.sent = now;
             open.earlier = earlier;
+            // What stands beside the conversation follows from its rows.
+            let waits = self
+                .hub
+                .current()
+                .is_some_and(|s| lock(&s.workspace).needs_user(&open.key));
+            let jobs = open.aside.event(&open.key, open.rows.entries(), waits);
+            if jobs != open.sent_jobs {
+                out.push(jobs.clone());
+                open.sent_jobs = jobs;
+            }
+            let todos = aside::todos_event(&open.key, open.rows.entries());
+            if todos != open.sent_todos {
+                out.push(todos.clone());
+                open.sent_todos = todos;
+            }
         }
         out
     }
@@ -531,6 +561,11 @@ impl Conn {
                 }
                 Vec::new()
             }
+            // (Only for the session still open.)
+            Later::Event(event) => match &self.open {
+                Some(open) if event["key"] == open.key.as_str() => vec![event],
+                _ => Vec::new(),
+            },
         }
     }
 
@@ -589,6 +624,8 @@ impl Conn {
                     out.push(queue(s, &key));
                 }
             }
+            EventKind::JobUpdated(job) => open.aside.job_changed(job),
+            EventKind::GoalChanged { goal, .. } => open.aside.goal_changed(goal.as_ref()),
             _ => {}
         }
         if reload {
@@ -702,6 +739,18 @@ impl Conn {
                 }
                 Err(e) => error(format!("Couldn't keep the pin: {e}")),
             },
+            "background" => done(
+                client
+                    .move_to_background(key, m["call"].as_str().unwrap_or_default())
+                    .await,
+            ),
+            "jobAction" => {
+                match aside::act(client, key, m["row"].as_str().unwrap_or_default()).await {
+                    Ok(()) => json!({ "ok": true }),
+                    Err(why) => error(why),
+                }
+            }
+            "picture" => self.picture(key, m).await,
             "push" => {
                 if lock(&self.hub.devices).set_push(&self.device.id, m) {
                     self.hub.bump_devices();
@@ -732,11 +781,18 @@ impl Conn {
         let rows = Rows::from_messages(&messages);
         let (now, earlier) = rows.for_phone();
         let context = context_fill(server, key).await;
+        let directory = folder_of(server, key);
+        let beside = Aside::load(&server.client, key, directory.as_deref()).await;
+        let waits = lock(&server.workspace).needs_user(key);
+        let jobs = beside.event(key, rows.entries(), waits);
+        let todos = aside::todos_event(key, rows.entries());
         let mut after = vec![
             json!({ "ev": "reset", "key": key, "rows": now, "earlier": earlier }),
             json!({ "ev": "status", "key": key, "status": status(server, key) }),
             meta(server, key, context),
             queue(server, key),
+            jobs.clone(),
+            todos.clone(),
         ];
         after.extend(
             waiting(server, key)
@@ -751,8 +807,40 @@ impl Conn {
             earlier,
             dirty: false,
             reloading: false,
+            aside: beside,
+            sent_jobs: jobs,
+            sent_todos: todos,
         });
+        // What can be typed after "/" in its folder, once the server says.
+        if let Some(directory) = directory {
+            let (server, key, later) = (Arc::clone(server), key.to_owned(), self.later_tx.clone());
+            tokio::spawn(async move {
+                if let Ok(catalog) = crate::server::catalog(&server.client, &directory).await {
+                    let _ = later.send(Later::Event(commands(&key, &catalog)));
+                }
+            });
+        }
         (json!({ "key": key, "harness": HARNESS }), after)
+    }
+
+    /// One of the open session's pictures, drawn to fit a phone, off the
+    /// loop: decoding a large one takes a moment.
+    async fn picture(&self, key: &str, m: &Value) -> Value {
+        let name = m["path"].as_str().unwrap_or_default();
+        let found = self
+            .open
+            .as_ref()
+            .filter(|open| open.key == key)
+            .and_then(|open| open.rows.picture(name))
+            .cloned();
+        let Some(picture) = found else {
+            return error("That picture isn't in the session any more.");
+        };
+        let thumb = m["size"] == "thumb";
+        tokio::task::spawn_blocking(move || pictures::fitted(&picture, thumb))
+            .await
+            .unwrap_or_else(|_| Err("Harlo couldn't read that picture.".to_owned()))
+            .unwrap_or_else(error)
     }
 
     /// Answers an approval or a question.
@@ -760,9 +848,12 @@ impl Conn {
         let request = m["requestId"].as_str().unwrap_or_default();
         let answer = &m["answer"];
         let result = if request.starts_with("per") {
-            client
-                .reply_permission(key, request, requests::permission_reply(answer), None)
-                .await
+            let reply = requests::permission_reply(answer);
+            // A reason goes with a refusal only.
+            let reason = (reply == harlo_client::PermissionReply::Reject)
+                .then(|| requests::refusal_reason(answer))
+                .flatten();
+            client.reply_permission(key, request, reply, reason).await
         } else {
             let forms = match client.forms(key).await {
                 Ok(forms) => forms,
@@ -832,13 +923,63 @@ async fn send(server: &Server, key: &str, m: &Value) -> Result<(), String> {
     } else {
         Delivery::Steer
     };
-    let mut prompt = Prompt::new(text, delivery);
-    prompt.files = files;
-    server
-        .client
-        .prompt(key, &prompt)
-        .await
-        .map_err(|e| e.to_string())
+    let client = &server.client;
+    let sent = match typed(server, key, text, delivery).await {
+        Outgoing::Command { name, arguments } => {
+            client.run_command(key, &name, &arguments, delivery).await
+        }
+        Outgoing::Compact => client.compact(key).await,
+        Outgoing::Prompt(mut prompt) => {
+            prompt.files.extend(files);
+            client.prompt(key, &prompt).await
+        }
+        // The phone has no side questions or commands of its own to run:
+        // those go to the agent as they were typed.
+        Outgoing::Aside(_) | Outgoing::Shell(_) => {
+            let mut prompt = Prompt::new(text, delivery);
+            prompt.files = files;
+            client.prompt(key, &prompt).await
+        }
+    };
+    sent.map_err(|e| e.to_string())
+}
+
+/// What a phone's message is: a prompt, or, when it starts with the name
+/// of one of the folder's commands or skills, that, as the window reads
+/// what's typed in it.
+async fn typed(server: &Server, key: &str, text: &str, delivery: Delivery) -> Outgoing {
+    let plain = || Outgoing::Prompt(Prompt::new(text, delivery));
+    if !text.trim_start().starts_with('/') {
+        return plain();
+    }
+    let Some(directory) = folder_of(server, key) else {
+        return plain();
+    };
+    match crate::server::catalog(&server.client, &directory).await {
+        Ok(catalog) => composer::outgoing(text, &Draft::default(), &catalog, &directory, delivery),
+        Err(_) => plain(),
+    }
+}
+
+/// The `commands` event for session `key`: what can be typed after "/" in
+/// its folder, as the window's menu lists it.
+fn commands(key: &str, catalog: &crate::server::Catalog) -> Value {
+    let mut list: Vec<Value> = catalog
+        .commands
+        .iter()
+        .map(
+            |c| json!({ "name": c.name, "description": c.description.clone().unwrap_or_default() }),
+        )
+        .collect();
+    if !catalog.commands.iter().any(|c| c.name == composer::COMPACT) {
+        list.push(json!({ "name": composer::COMPACT,
+                          "description": "Summarize the conversation to free up context" }));
+    }
+    list.extend(catalog.skills.iter().map(|s| {
+        json!({ "name": s.name,
+                "description": s.description.clone().unwrap_or_else(|| "Skill".to_owned()) })
+    }));
+    json!({ "ev": "commands", "key": key, "commands": list })
 }
 
 /// Starts a session in the chosen project with its first message.

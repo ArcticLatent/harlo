@@ -39,7 +39,8 @@ part of an answer). The transcript then shows the prompt a person would
 type.
 
 A goal's reviewer (/goal) gets the verdict kept in scripts.json under
-"<reviewer>", or one that finds the goal met.
+"<reviewer>", or one that finds the goal met. The agent's first prompt
+for a goal runs the script kept under "<goal>", when there is one.
 
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
@@ -72,6 +73,9 @@ SUBAGENT_PREAMBLE = "You are a subagent spawned by another session."
 # How the server asks the model to review a goal (/goal).
 REVIEWER = "Stop acting as the assistant. You are now the reviewer for the session's goal."
 HARLO_REVIEWER = "Review the session's goal now, as its reviewer rather than its assistant."
+
+# How the agent's first prompt for a goal starts.
+GOAL_START = "This session now has a goal."
 
 # The verdict a goal's reviewer gives unless scripts.json keeps another.
 MET = '{"verdict":"done","reason":"The work is done and shown."}'
@@ -169,6 +173,8 @@ def plan(messages):
     if script.startswith(ASIDE_PREAMBLE):
         script = script.partition("\n\n")[2].strip()
     known_scripts = stored_scripts()
+    if script.startswith(GOAL_START) and "<goal>" in known_scripts:
+        script = "<goal>"
     if script in known_scripts:
         script = known_scripts[script]
         if isinstance(script, list):

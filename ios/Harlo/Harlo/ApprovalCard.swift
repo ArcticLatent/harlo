@@ -10,6 +10,8 @@ struct ApprovalCard: View {
     let request: UIRequest
     let open: () -> Void
     @State private var now = Date.now
+    /// A refusal's reason is being typed.
+    @State private var explaining = false
 
     /// "Allow tool: bash" → "bash".
     var tool: String { request.tool }
@@ -20,7 +22,12 @@ struct ApprovalCard: View {
         return !tool.isEmpty && m.hasPrefix(tool + ": ") ? String(m.dropFirst(tool.count + 2)) : m
     }
 
+    /// Harlo on the computer words the approval itself (an older one
+    /// sends only the tool and what it acts on).
+    var worded: Bool { request.approval && !request.wants.isEmpty }
+
     var what: String {
+        if worded { return request.asks }
         guard request.approval, !tool.isEmpty else { return request.title.isEmpty ? "The agent asks" : request.title }
         switch Style.toolSymbol(tool) {
         case "terminal": return "Wants to run a command"
@@ -73,7 +80,9 @@ struct ApprovalCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens the session")
-            if request.approval && !command.isEmpty {
+            if worded {
+                ApprovalDetails(request: request, brief: true)
+            } else if request.approval && !command.isEmpty {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: tool.isEmpty ? "doc.text" : Style.toolSymbol(tool))
                         .scaledFont(14)
@@ -89,7 +98,7 @@ struct ApprovalCard: View {
                 .background { RoundedRectangle(cornerRadius: 10).fill(Color(p.codeBackground)) }
             }
             if request.approval || request.method == "confirm" {
-                ApprovalButtons(request: request, key: session.key)
+                ApprovalButtons(request: request, key: session.key, explaining: $explaining)
             } else {
                 RequestCard(request: request, key: session.key, open: open, bare: true)
             }

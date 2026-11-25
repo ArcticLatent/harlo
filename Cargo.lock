@@ -2568,6 +2568,7 @@ dependencies = [
  "harlo-update-signing",
  "hex",
  "if-addrs",
+ "image",
  "jiff",
  "jsonc-parser",
  "llmfit-core",

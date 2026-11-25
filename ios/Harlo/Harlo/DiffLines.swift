@@ -8,12 +8,14 @@ struct DiffLines: View {
     let diff: String
     /// Inside a card already (no card of its own).
     var bare = false
+    /// The most lines shown.
+    var limit = 400
     @AppStorage(CodeWrap.key) private var wrap = true
 
     var body: some View {
         CodeScroll(wrap: wrap) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(400).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(limit).enumerated()), id: \.offset) { _, line in
                     let tint: RGBA? = line.hasPrefix("+") ? (p.token(9) ?? p.success) : line.hasPrefix("-") ? (p.token(10) ?? p.error) : nil
                     Group {
                         if wrap, let first = line.first {

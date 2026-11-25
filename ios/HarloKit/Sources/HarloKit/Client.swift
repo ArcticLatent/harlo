@@ -255,6 +255,17 @@ public actor HarloClient {
         try check(await call("promote", ["key": .string(key), "text": .string(text)]))
     }
 
+    /// Sends the command the agent waits for (its `call`) to the
+    /// background.
+    public func background(_ key: String, call: String) async throws {
+        try check(await self.call("background", ["key": .string(key), "call": .string(call)]))
+    }
+
+    /// Does what a job row offers (`row`: its id).
+    public func jobAction(_ key: String, row: String) async throws {
+        try check(await call("jobAction", ["key": .string(key), "row": .string(row)]))
+    }
+
     /// Branches the session at one of the user's messages (its row key) and
     /// returns that message's text to edit (`fork`, a copy up to it in a
     /// new session, no agent does now). nil: cancelled.

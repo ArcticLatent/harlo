@@ -295,3 +295,312 @@ async fn a_phone_starts_and_renames_sessions() {
     let unknown = p.call(json!({ "op": "wiki", "key": session.id })).await;
     assert!(unknown["error"].is_string(), "{unknown}");
 }
+
+/// The first row of the open session's `jobs` event that `pick` accepts.
+async fn job_row(p: &mut TestPhone, what: &str, pick: impl Fn(&Value) -> bool) -> Value {
+    p.until(what, |_, m| {
+        (m["ev"] == "jobs")
+            .then(|| m["items"].as_array()?.iter().find(|row| pick(row)).cloned())
+            .flatten()
+    })
+    .await
+}
+
+/// Waits until the open session's `jobs` event has no rows.
+async fn no_job_rows(p: &mut TestPhone, what: &str) {
+    p.until(what, |_, m| {
+        (m["ev"] == "jobs" && m["items"] == json!([])).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_moves_a_command_to_the_background_and_follows_a_goal() {
+    let sandbox = Sandbox::start().await;
+    // The goal's reviewer finds it blocked, so it pauses with a reason.
+    std::fs::write(
+        sandbox.root().join("scripts.json"),
+        json!({ "<reviewer>": r#"{"verdict":"blocked","reason":"It needs the release date."}"# })
+            .to_string(),
+    )
+    .expect("the reviewer's verdict");
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    client
+        .set_permissions(&session.id, &[Rule::any("shell", Effect::Allow)])
+        .await
+        .expect("rules");
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    listed(&mut p, &session.id).await;
+    let key = session.id.as_str();
+
+    // Opened: nothing in the background, and what can be typed after "/".
+    let opened = p.call(json!({ "op": "open", "key": key })).await;
+    assert_eq!(opened["key"], key);
+    no_job_rows(&mut p, "nothing in the background").await;
+    let commands = p
+        .until("the commands", |_, m| {
+            (m["ev"] == "commands").then(|| m["commands"].clone())
+        })
+        .await;
+    let names: Vec<&str> = commands
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    assert!(names.contains(&"compact"), "{names:?}");
+    assert!(names.contains(&"goal"), "{names:?}");
+
+    // A command the agent waits for: the phone is told its call, sends it
+    // to the background, and the turn goes on without it.
+    let script = r#"tool shell {"command":"sleep 30"} ;; say moved on"#;
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": script }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let call = p
+        .until("a command under way", |_, m| {
+            (m["ev"] == "jobs")
+                .then(|| {
+                    m["background"]
+                        .as_str()
+                        .filter(|c| !c.is_empty())
+                        .map(str::to_owned)
+                })
+                .flatten()
+        })
+        .await;
+    let moved = p
+        .call(json!({ "op": "background", "key": key, "call": call }))
+        .await;
+    assert_eq!(moved["ok"], true, "{moved}");
+    let row = job_row(&mut p, "the command in the background", |row| {
+        row["title"] == "Command"
+    })
+    .await;
+    assert_eq!(row["text"], "sleep 30");
+    assert_eq!(row["note"], "In the background");
+    assert_eq!(row["action"], "Stop");
+    p.until("the turn going on", |phone, _| {
+        phone.text().contains("markdown moved on").then_some(())
+    })
+    .await;
+
+    // Stop, from its row.
+    let stopped = p
+        .call(json!({ "op": "jobAction", "key": key, "row": row["id"] }))
+        .await;
+    assert_eq!(stopped["ok"], true, "{stopped}");
+    no_job_rows(&mut p, "the command stopped").await;
+    let refused = p
+        .call(json!({ "op": "jobAction", "key": key, "row": "something else" }))
+        .await;
+    assert!(refused["error"].is_string(), "{refused}");
+
+    // A goal typed as the command it is: its row says where it stands and
+    // offers the one thing to do next.
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": "/goal Ship it" }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let paused = job_row(&mut p, "the goal paused", |row| row["note"] == "Paused").await;
+    assert_eq!(paused["title"], "Goal");
+    assert_eq!(paused["text"], "Ship it");
+    assert_eq!(paused["detail"], "It needs the release date.");
+    assert_eq!(paused["action"], "Resume");
+    std::fs::remove_file(sandbox.root().join("scripts.json")).expect("met from now on");
+    let resumed = p
+        .call(json!({ "op": "jobAction", "key": key, "row": paused["id"] }))
+        .await;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    let reached = job_row(&mut p, "the goal reached", |row| row["note"] == "Reached").await;
+    assert_eq!(reached["action"], "Dismiss");
+    let cleared = p
+        .call(json!({ "op": "jobAction", "key": key, "row": reached["id"] }))
+        .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    no_job_rows(&mut p, "the goal dismissed").await;
+}
+
+/// A small PNG, as a phone sends a photo: base64.
+fn photo() -> String {
+    use base64::Engine as _;
+    // A 1x1 red pixel.
+    const PNG: [u8; 69] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
+        0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    base64::engine::general_purpose::STANDARD.encode(PNG)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_reads_an_edit_before_refusing_it_with_a_reason() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    client
+        .set_permissions(&session.id, &[Rule::any("edit", Effect::Ask)])
+        .await
+        .expect("rules");
+    std::fs::write(sandbox.project().join("e.txt"), "one\ntwo\n").expect("e.txt");
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    listed(&mut p, &session.id).await;
+    let key = session.id.as_str();
+    p.call(json!({ "op": "open", "key": key })).await;
+
+    // The approval says what the agent wants, shows the change, and what
+    // Allow always would cover.
+    let script =
+        r#"tool edit {"path":"e.txt","oldString":"two","newString":"three"} ;; say I left it"#;
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": script }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let request = p
+        .until("the approval", |_, m| {
+            (m["ev"] == "request").then(|| m["request"].clone())
+        })
+        .await;
+    assert_eq!(request["wants"], "edit a file");
+    assert_eq!(request["detail"], "e.txt");
+    let diff = request["diff"].as_str().unwrap_or_default();
+    assert!(
+        diff.contains("-two") && diff.contains("+three"),
+        "{request}"
+    );
+    assert!(
+        request["always"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("Allow always applies to "),
+        "{request}"
+    );
+
+    // Refused with a reason: the agent is told it and carries on.
+    let answered = p
+        .call(
+            json!({ "op": "answer", "key": key, "requestId": request["id"],
+                      "answer": { "value": "Deny", "reason": "Keep it at two." } }),
+        )
+        .await;
+    assert_eq!(answered["ok"], true, "{answered}");
+    p.until("the agent's answer", |phone, _| {
+        phone.text().contains("markdown I left it").then_some(())
+    })
+    .await;
+    let refused = p
+        .rows
+        .iter()
+        .find(|r| r["kind"] == "tool")
+        .expect("the edit's row")
+        .clone();
+    assert_eq!(refused["state"], "error");
+    assert!(
+        refused["result"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("said: Keep it at two."),
+        "{refused}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(sandbox.project().join("e.txt")).expect("e.txt"),
+        "one\ntwo\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_reads_a_script_and_gets_a_sessions_pictures() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    client
+        .set_permissions(
+            &session.id,
+            &[
+                Rule::any("execute", Effect::Allow),
+                Rule::any("read", Effect::Allow),
+            ],
+        )
+        .await
+        .expect("rules");
+    std::fs::write(sandbox.project().join("e.txt"), "one\ntwo\n").expect("e.txt");
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    listed(&mut p, &session.id).await;
+    let key = session.id.as_str();
+    p.call(json!({ "op": "open", "key": key })).await;
+
+    // A script: its row carries the code and the tools it called.
+    let script = r#"tool execute {"code":"// Read the file\nconst t = await tools.project.read({path: 'e.txt'});\nreturn t.length;"} ;; say counted"#;
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": script }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    p.until("the script's answer", |phone, _| {
+        phone.text().contains("markdown counted").then_some(())
+    })
+    .await;
+    let ran = p
+        .rows
+        .iter()
+        .find(|r| r["tool"] == "execute")
+        .expect("the script's row")
+        .clone();
+    assert_eq!(ran["subtitle"], "Read the file");
+    assert_eq!(ran["result"], "1 call");
+    assert_eq!(
+        ran["code"]["lines"][0],
+        json!({ "f": "Called project.read" })
+    );
+    assert_eq!(
+        ran["code"]["lines"][1],
+        json!({ "n": "1", "h": "// Read the file" })
+    );
+
+    // A photo sent from the phone shows under its message, and is asked
+    // for by the name its row gives it.
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": "say seen",
+                      "images": [{ "data": photo(), "mimeType": "image/png" }] }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    p.until("the answer about the photo", |phone, _| {
+        phone.text().contains("markdown seen").then_some(())
+    })
+    .await;
+    let named = p
+        .rows
+        .iter()
+        .filter(|r| r["kind"] == "user")
+        .find_map(|r| r["images"][0].as_str().map(str::to_owned))
+        .expect("a picture under the message");
+    for size in ["thumb", "screen"] {
+        let picture = p
+            .call(json!({ "op": "picture", "key": key, "path": named, "size": size }))
+            .await;
+        assert_eq!(picture["width"], 1, "{picture}");
+        assert_eq!(picture["type"], "image/jpeg");
+        assert!(!picture["data"].as_str().unwrap_or_default().is_empty());
+    }
+    let missing = p
+        .call(
+            json!({ "op": "picture", "key": key, "path": "00000000000000aa.png", "size": "thumb" }),
+        )
+        .await;
+    assert!(missing["error"].is_string(), "{missing}");
+}

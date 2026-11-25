@@ -10,7 +10,12 @@
 use harlo_client::{Answer, Field, FieldKind, PermissionReply};
 use serde_json::{Value, json};
 
+use crate::approvals;
 use crate::workspace::{Form, Permission};
+
+/// The most of an edit's diff an approval carries: enough to judge the
+/// change, and far under what a phone takes in one message (1 MB).
+const DIFF_BYTES: usize = 48 * 1024;
 
 /// The approval option that allows this request only.
 pub const ALLOW_ONCE: &str = "Allow once";
@@ -22,8 +27,24 @@ pub const ALLOW_ALWAYS: &str = "Allow always";
 pub const DENY: &str = "Deny";
 
 /// Returns an approval request as the phone reads it (the phone's `UIRequest`).
+///
+/// `title`, `message` and `options` are what every version of the app
+/// reads. A newer one shows the rest as the window does: what the agent
+/// wants to do (`wants`), on what (`detail`), why it has to ask (`why`), the
+/// change an edit would make (`diff`), and what Allow always would cover
+/// from then on (`always`).
 #[must_use]
 pub fn permission(p: &Permission) -> Value {
+    let said = approvals::describe(p);
+    // One file's change needs no header: the approval names the file.
+    let diff = match p.files.as_slice() {
+        [only] => hunks(&only.patch).to_owned(),
+        several => several
+            .iter()
+            .map(|f| f.patch.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
     let mut title = format!("Allow tool: {}", p.action);
     for resource in p.resources.iter().take(3) {
         title.push('\n');
@@ -40,8 +61,57 @@ pub fn permission(p: &Permission) -> Value {
         options.push(ALLOW_ALWAYS);
     }
     options.push(DENY);
+    let always = if p.save.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "Allow always applies to {} in every session of this project.",
+            approvals::always_scope(p)
+        )
+    };
     json!({ "id": p.id, "method": "select", "title": title, "message": message,
-            "options": options, "approval": true })
+            "options": options, "approval": true,
+            "wants": said.wants, "detail": said.detail,
+            "why": p.message.clone().unwrap_or_default(),
+            "diff": clip(&diff, DIFF_BYTES), "always": always })
+}
+
+/// Returns a patch from its first hunk on, without the lines that name
+/// its file; all of it when it has no hunk header.
+fn hunks(patch: &str) -> &str {
+    if patch.starts_with("@@") {
+        return patch;
+    }
+    patch
+        .find("\n@@")
+        .map_or(patch, |start| &patch[start + 1..])
+}
+
+/// Cuts `text` to `most` bytes, at the end of a line.
+fn clip(text: &str, most: usize) -> String {
+    if text.len() <= most {
+        return text.to_owned();
+    }
+    let mut end = most;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let whole = text[..end].rfind('\n').unwrap_or(end);
+    format!(
+        "{}\n… (the rest is in Harlo on your computer)",
+        &text[..whole]
+    )
+}
+
+/// Returns the reason a phone gave for refusing an approval, if it gave one.
+///
+/// The agent is told it, as when a reason is typed in the window.
+#[must_use]
+pub fn refusal_reason(answer: &Value) -> Option<&str> {
+    answer["reason"]
+        .as_str()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
 }
 
 /// Returns the reply a phone's answer to an approval gives.
@@ -250,5 +320,53 @@ mod tests {
         assert_eq!(request["message"], "git clean -fdx");
         let request = permission(&asking(&[], Some(why)));
         assert_eq!(request["message"], why);
+    }
+
+    #[test]
+    fn an_approval_says_what_it_wants_and_what_always_covers() {
+        let request = permission(&asking(&["git status"], Some("Asks.")));
+        assert_eq!(request["wants"], "run a command");
+        assert_eq!(request["detail"], "git status");
+        assert_eq!(request["why"], "Asks.");
+        assert_eq!(
+            request["always"],
+            "Allow always applies to commands starting with “git” in every session of this project."
+        );
+        // Nothing to save: no Allow always, and nothing said about it.
+        let mut once = asking(&["git status"], None);
+        once.save.clear();
+        let request = permission(&once);
+        assert_eq!(request["always"], "");
+        assert_eq!(request["options"], json!([ALLOW_ONCE, DENY]));
+    }
+
+    #[test]
+    fn one_files_change_starts_at_its_first_hunk() {
+        let patch = "--- a.txt\n+++ a.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n";
+        assert_eq!(hunks(patch), "@@ -1,2 +1,2 @@\n one\n-two\n+three\n");
+        assert_eq!(hunks("@@ -1 +1 @@\n-a\n+b"), "@@ -1 +1 @@\n-a\n+b");
+        assert_eq!(hunks("-a\n+b"), "-a\n+b");
+    }
+
+    #[test]
+    fn a_long_diff_is_cut_at_a_line() {
+        let text = "+line\n".repeat(20_000);
+        let cut = clip(&text, DIFF_BYTES);
+        assert!(cut.len() < DIFF_BYTES + 80, "{}", cut.len());
+        assert!(cut.ends_with("+line\n… (the rest is in Harlo on your computer)"));
+        assert_eq!(clip("+a\n-b", DIFF_BYTES), "+a\n-b");
+    }
+
+    #[test]
+    fn a_refusal_carries_its_reason() {
+        assert_eq!(
+            refusal_reason(&json!({ "value": "Deny", "reason": " use npm ci " })),
+            Some("use npm ci")
+        );
+        assert_eq!(
+            refusal_reason(&json!({ "value": "Deny", "reason": "  " })),
+            None
+        );
+        assert_eq!(refusal_reason(&json!({ "value": "Deny" })), None);
     }
 }
