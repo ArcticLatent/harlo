@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
+import { Icon, Press, Dot, Breathing, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -13,11 +13,19 @@ global Inset {
 }
 
 /// The tile showing who made a session's model: the maker's logo, or a
-/// chat mark while the model isn't known or Harlo has no logo for it.
+/// plain chip while the model isn't known or Harlo has no logo for it. It
+/// never changes with what the session is doing: a badge on its corner
+/// says when the session wants looking at.
 component Maker inherits Rectangle {
     /// The logo's number, from 1 (`harlo_core::makers::LOGOS`), or 0.
     in property <int> maker;
     in property <color> tone;
+    /// The session waits for an approval or an answer: the badge breathes.
+    in property <bool> waiting;
+    /// The session has an answer nobody has looked at: a steady badge.
+    in property <bool> unread;
+    /// What is behind the tile, which rings the badge.
+    in property <color> behind;
     /// The logos, in `LOGOS`' order.
     property <[image]> logos: [
         @image-url("images/providers/anthropic.svg"),
@@ -41,7 +49,7 @@ component Maker inherits Rectangle {
     height: 26px;
 
     if root.maker == 0: Icon {
-        text: Icons.message-square;
+        text: Icons.cpu;
         font-size: 15px;
         color: Theme.icon-quiet;
     }
@@ -50,6 +58,28 @@ component Maker inherits Rectangle {
         height: 15px;
         source: root.logos[root.maker - 1];
         colorize: root.tone;
+    }
+    // On the logo's lower right corner, mostly beside it, and ringed so
+    // it reads over any logo.
+    if root.waiting || root.unread: Rectangle {
+        x: parent.width - 6px;
+        y: parent.height - self.height;
+        width: 10px;
+        height: 10px;
+        border-radius: self.width / 2;
+        background: root.behind;
+        if root.waiting: Breathing {
+            Dot {
+                size: 7px;
+                background: Theme.icon-warning-base;
+            }
+        }
+        if !root.waiting: Dot {
+            size: 7px;
+            background: Theme.accent-ink;
+            accessible-role: image;
+            accessible-label: "New answer";
+        }
     }
 }
 
@@ -162,6 +192,9 @@ component Item inherits Rectangle {
                     Maker {
                         maker: entry.maker;
                         tone: entry.tone;
+                        waiting: entry.waiting;
+                        unread: entry.unread;
+                        behind: Theme.background-stronger;
                     }
                 }
                 Text {
@@ -170,8 +203,10 @@ component Item inherits Rectangle {
                     overflow: elide;
                     vertical-alignment: center;
                     font-size: Size.text;
+                    // An answer not looked at yet stands out, as unread mail does.
+                    font-weight: entry.unread ? 600 : 400;
                     color: entry.untitled ? Theme.text-weaker
-                        : entry.selected ? Theme.text-strong : Theme.text-weak;
+                        : entry.selected || entry.unread ? Theme.text-strong : Theme.text-weak;
                 }
                 // Runs without asking: marked beside what it's doing.
                 if entry.trusted: Icon {

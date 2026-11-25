@@ -57,6 +57,7 @@ mod subagents;
 mod terminal;
 mod todos;
 mod undo;
+mod unread;
 mod updates;
 mod voice;
 
@@ -679,6 +680,8 @@ pub struct App {
     /// [`harlo_core::model_menu::shown_by_default`].
     model_defaults: std::collections::HashSet<String>,
     models_for: Option<String>,
+    /// The sessions with an answer nobody has looked at yet.
+    pub unread: HashSet<String>,
     /// The picker whose menu is open.
     pub picker: Option<Picker>,
     /// The open menu's filter text.
@@ -823,6 +826,7 @@ impl App {
             picker: None,
             picker_filter: String::new(),
             system_fonts: None,
+            unread: HashSet::new(),
             picker_index: 0,
             picker_scroll: 0.0,
             drafts: HashMap::new(),
@@ -938,6 +942,7 @@ impl App {
             self.picker = None;
         }
         let task = self.apply(message);
+        self.see_shown();
         let shown = self.follow_document();
         let refocus = match filtering {
             Some(picker) if self.picker.is_none() => Task::effect(Effect::Focus(
@@ -1367,6 +1372,7 @@ impl App {
             Update::Event(event) => {
                 let fetches = self.workspace.apply(&event.kind, event.time);
                 let notice = self.notice(&event.kind);
+                self.track_unread(&event.kind);
                 if let EventKind::SessionDeleted { session_id }
                 | EventKind::SessionArchived { session_id } = &event.kind
                 {

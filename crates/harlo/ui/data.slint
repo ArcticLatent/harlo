@@ -54,6 +54,8 @@ export struct SidebarRow {
     waiting: bool,
     /// Whether all it waits for are answers, no approvals.
     asking: bool,
+    /// Whether it has an answer nobody has looked at yet.
+    unread: bool,
     /// Whether the session runs without asking ("Don't ask").
     trusted: bool,
     /// A session's maker logo, by its number from 1; 0 none.

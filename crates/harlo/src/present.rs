@@ -675,6 +675,7 @@ fn session_rows(
             busy: session.busy,
             waiting: session.waiting,
             asking: session.asking,
+            unread: app.unread.contains(&session.id),
             trusted: app.shield_of(&session.id) == Shield::Trusted,
             maker,
             tone: color(tone),
