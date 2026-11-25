@@ -15,7 +15,7 @@ use crate::prompt::Prompt;
 use crate::settings::{Integration, McpServer, Provider, Stats, WebSearch};
 use crate::setup::Setup;
 use crate::types::{
-    Answer, Delivery, FileDiff, Form, Goal, InboxItem, Message, ModelRef, Permission,
+    Answer, Delivery, FileDiff, Form, Goal, History, InboxItem, Message, ModelRef, Permission,
     PermissionReply, Project, ProjectChange, Revert, Rule, ServerInfo, Session, SessionContext,
 };
 use crate::wire as g;
@@ -929,6 +929,73 @@ impl Client {
             }
         }
         Ok(out)
+    }
+
+    /// Returns the end of a session's timeline: its newest `count`
+    /// messages, or all of them when it has fewer.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist, the server can't be reached, or a
+    /// message Harlo shows doesn't match the pinned schema.
+    pub async fn recent_messages(&self, session_id: &str, count: usize) -> Result<History, Error> {
+        self.history(session_id, None, count).await
+    }
+
+    /// Returns the `count` messages before those a [`History`] holds, from
+    /// where its `earlier` says they start.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session doesn't exist, the server can't be reached, or a
+    /// message Harlo shows doesn't match the pinned schema.
+    pub async fn earlier_messages(
+        &self,
+        session_id: &str,
+        earlier: &str,
+        count: usize,
+    ) -> Result<History, Error> {
+        self.history(session_id, Some(earlier.to_owned()), count)
+            .await
+    }
+
+    /// Reads `count` messages back from the end, or from `cursor`.
+    async fn history(
+        &self,
+        session_id: &str,
+        mut cursor: Option<String>,
+        count: usize,
+    ) -> Result<History, Error> {
+        let path = format!("/api/session/{session_id}/message");
+        let mut newest_first = Vec::new();
+        loop {
+            // (The server may give fewer than asked for at a time.)
+            let left = count.saturating_sub(newest_first.len()).max(1).to_string();
+            let mut req = self
+                .request(Method::GET, &path)
+                .query(&[("limit", left.as_str())]);
+            req = match &cursor {
+                Some(c) => req.query(&[("cursor", c.as_str())]),
+                None => req.query(&[("order", "desc")]),
+            };
+            let v = Self::json(req).await?;
+            let page = v["data"].as_array().cloned().unwrap_or_default();
+            cursor = v["cursor"]["next"]
+                .as_str()
+                .filter(|_| !page.is_empty())
+                .map(str::to_owned);
+            for item in page {
+                newest_first.push(Message::from_json(item)?);
+            }
+            if cursor.is_none() || newest_first.len() >= count {
+                break;
+            }
+        }
+        newest_first.reverse();
+        Ok(History {
+            messages: newest_first,
+            earlier: cursor,
+        })
     }
 
     /// Returns the IDs of sessions that are working right now.

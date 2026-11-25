@@ -20,7 +20,7 @@ regex = { workspace = true, features = ["std", "unicode", "perf"] }
 rquickjs = { workspace = true }
 htmd = { workspace = true }
 markup5ever_rcdom = { workspace = true }
-futures-util = { workspace = true }
+futures-util = { workspace = true, features = ["alloc"] }
 getrandom = { workspace = true, features = ["std"] }
 httpdate = { workspace = true }
 jsonc-parser = { workspace = true, features = ["serde"] }

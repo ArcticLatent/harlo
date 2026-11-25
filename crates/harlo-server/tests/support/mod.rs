@@ -22,11 +22,52 @@ pub struct Sandbox {
     env: Vec<(String, String)>,
 }
 
+/// A free port on this computer, handed to no other test of this program.
+///
+/// Tests run side by side, and the system can give the same port twice
+/// before either server has taken it.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("a free port")
-        .port()
+    static HANDED: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .expect("a free port")
+            .port();
+        let mut handed = HANDED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !handed.contains(&port) {
+            handed.push(port);
+            return port;
+        }
+    }
+}
+
+/// Starts the scripted model, logging its requests to `log`; returns it
+/// and its port.
+///
+/// The model takes a free port itself and says which: one found free here
+/// first could be handed to another test before the model took it.
+pub fn start_model(log: &Path) -> (Child, u16) {
+    use std::io::BufRead as _;
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
+    let mut model = Command::new("python3")
+        .arg("-I")
+        .arg(script)
+        .arg("0")
+        .arg(log)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the scripted model");
+    let said = model.stdout.take().expect("the model's output");
+    let mut line = String::new();
+    std::io::BufReader::new(said)
+        .read_line(&mut line)
+        .expect("the model's port");
+    let port = line.trim().parse().expect("the scripted model's port");
+    (model, port)
 }
 
 pub fn run(dir: &Path, args: &[&str]) {
@@ -58,7 +99,7 @@ impl Sandbox {
         for sub in ["home", "config/harlo", "data", "state", "cache", "project"] {
             std::fs::create_dir_all(root.join(sub)).expect("folder");
         }
-        let model_port = free_port();
+        let (model, model_port) = start_model(&root.join("model.jsonl"));
         let config = format!(
             r#"{{
   "model": "fake/fake-coder",
@@ -88,25 +129,6 @@ impl Sandbox {
             ],
         );
 
-        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
-        let model = Command::new("python3")
-            .arg("-I")
-            .arg(script)
-            .arg(model_port.to_string())
-            .arg(root.join("model.jsonl"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start the scripted model");
-        for _ in 0..200 {
-            if tokio::net::TcpStream::connect(("127.0.0.1", model_port))
-                .await
-                .is_ok()
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
         let port = free_port();
         let password = format!("test-{}", harlo_client::message_id());
         let server = spawn_server(root, port, &password, &env);

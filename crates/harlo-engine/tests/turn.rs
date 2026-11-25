@@ -5,7 +5,8 @@
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use harlo_engine::question::Asked;
@@ -22,30 +23,27 @@ struct Model {
 }
 
 impl Model {
-    async fn start(dir: &Path) -> Self {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .expect("a free port")
-            .port();
+    fn start(dir: &Path) -> Self {
+        use std::io::BufRead as _;
+
+        // The model takes a free port itself and says which: one found
+        // free here first could be handed to another test meanwhile.
         let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
-        let child = Command::new("python3")
+        let mut child = Command::new("python3")
             .arg("-I")
             .arg(script)
-            .arg(port.to_string())
+            .arg("0")
             .arg(dir.join("model.jsonl"))
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .expect("start the scripted model");
-        for _ in 0..100 {
-            if tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .is_ok()
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let said = child.stdout.take().expect("the model's output");
+        let mut line = String::new();
+        std::io::BufReader::new(said)
+            .read_line(&mut line)
+            .expect("the model's port");
+        let port: u16 = line.trim().parse().expect("the scripted model's port");
         Self {
             child,
             url: format!("http://127.0.0.1:{port}/v1"),
@@ -150,7 +148,7 @@ async fn an_approved_edit_runs_and_the_model_answers() {
     let project = dir.path().join("project");
     std::fs::create_dir_all(&project).expect("project");
     std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let events = Events::default();
     let person = Person {
         answer: Answer::Once,
@@ -223,7 +221,7 @@ async fn without_a_careful_rule_edits_run_unasked_and_a_refusal_stops_the_turn()
     let project = dir.path().join("project");
     std::fs::create_dir_all(&project).expect("project");
     std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
 
     let person = Person {
         answer: Answer::Once,
@@ -278,7 +276,7 @@ async fn a_file_outside_the_project_asks_and_always_covers_its_folder() {
     let elsewhere = dir.path().join("elsewhere");
     std::fs::create_dir_all(&project).expect("project");
     std::fs::create_dir_all(&elsewhere).expect("elsewhere");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let target = elsewhere.join("note.txt");
     let prompt = format!(
         r#"tool write {{"path":"{}","content":"hello\n"}} ;; say Wrote it."#,
@@ -345,7 +343,7 @@ async fn a_search_shows_no_file_that_reading_would_ask_about() {
     std::fs::create_dir_all(&project).expect("project");
     std::fs::write(project.join("notes.txt"), "TOKEN is in prod.env\n").expect("notes");
     std::fs::write(project.join("prod.env"), "TOKEN=secret\n").expect("env");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let search =
         |path: &str| format!(r#"tool grep {{"pattern":"TOKEN","path":"{path}"}} ;; say Searched."#);
 
@@ -440,7 +438,7 @@ async fn questions_wait_for_answers_and_a_dismissal_stops_the_turn() {
     let dir = tempfile::tempdir().expect("dir");
     let project = dir.path().join("project");
     std::fs::create_dir_all(&project).expect("project");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let person = Person {
         answer: Answer::Once,
         asked: Mutex::default(),
@@ -491,9 +489,275 @@ fn requests(dir: &Path) -> Vec<serde_json::Value> {
 }
 
 #[tokio::test]
+async fn only_a_step_that_may_change_files_records_them() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
+    let model = Model::start(dir.path());
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    // (The scripted model counts results to find its step: one call a step.)
+    let script = format!(r#"tool read {{"path":"a.txt"}} ;; {EDIT}"#);
+    let mut reads_then_edits = turn(&model, &project, &script, false);
+    let store = dir.path().join("snapshots");
+    reads_then_edits.shadow = Some(harlo_engine::snapshot::Shadow::new(&store, &project));
+    let events = Events::default();
+    let outcome = run(
+        reads_then_edits,
+        &events,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    let events = events.0.lock().expect("events");
+    let recorded: Vec<(bool, bool)> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::StepEnded { step } => step.snapshot.as_ref(),
+            _ => None,
+        })
+        .map(|s| (s.start.is_some(), s.end.is_some()))
+        .collect();
+    // Looking, then the edit, then the answer.
+    assert_eq!(recorded, [(false, false), (true, true), (false, false)]);
+    let edit = events
+        .iter()
+        .find_map(|e| match e {
+            Event::StepEnded { step } => step.snapshot.as_ref().filter(|s| s.start.is_some()),
+            _ => None,
+        })
+        .expect("the edit's step");
+    assert_ne!(edit.start, edit.end, "the edit changed a file");
+}
+
+/// A web search that takes a while, counting how many run at once. The
+/// first asked takes longest, so it ends last.
+#[derive(Debug, Default)]
+struct SlowSearch {
+    running: AtomicUsize,
+    most: AtomicUsize,
+}
+
+impl harlo_engine::web::Searcher for SlowSearch {
+    fn search<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<harlo_engine::tools::Output, String>> {
+        Box::pin(async move {
+            let running = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(running, Ordering::SeqCst);
+            let wait = if query == "q0" { 120 } else { 40 };
+            tokio::time::sleep(Duration::from_millis(wait)).await;
+            self.running.fetch_sub(1, Ordering::SeqCst);
+            Ok(harlo_engine::tools::Output {
+                text: format!("found {query}"),
+                metadata: serde_json::Map::new(),
+                changed: Vec::new(),
+                pictures: Vec::new(),
+            })
+        })
+    }
+}
+
+/// What each of the turn's calls returned, as the model reads it.
+fn texts(events: &Events) -> Vec<String> {
+    tool_results(events)
+        .iter()
+        .map(|state| match state {
+            ToolState::Completed { content, .. } => {
+                content[0]["text"].as_str().unwrap_or_default().to_owned()
+            }
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn calls_that_only_look_run_at_once_and_end_in_the_order_made() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    let model = Model::start(dir.path());
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    let script = (0..10)
+        .map(|n| format!(r#"tool websearch {{"query":"q{n}"}}"#))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let mut searches = turn(&model, &project, &script, false);
+    let search = Arc::new(SlowSearch::default());
+    let shared: Arc<dyn harlo_engine::web::Searcher> = Arc::<SlowSearch>::clone(&search);
+    searches.search = Some(shared);
+    let events = Events::default();
+    let outcome = run(searches, &events, &person, &CancellationToken::new()).await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    // Eight at a time, however many the model asked for.
+    assert_eq!(search.most.load(Ordering::SeqCst), 8);
+    // The model reads them as it asked, though the first ended last…
+    let expected: Vec<String> = (0..10).map(|n| format!("found q{n}")).collect();
+    assert_eq!(texts(&events), expected);
+    // …and they are reported in that order too.
+    let reported: Vec<String> = events
+        .0
+        .lock()
+        .expect("events")
+        .iter()
+        .filter_map(|e| match e {
+            Event::ToolEnded {
+                state: ToolState::Completed { content, .. },
+                ..
+            } => content[0]["text"].as_str().map(str::to_owned),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reported, expected);
+}
+
+#[tokio::test]
+async fn a_call_that_changes_files_runs_between_the_reads_beside_it() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
+    let model = Model::start(dir.path());
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+    let script = r#"tool read {"path":"a.txt"} | tool edit {"path":"a.txt","oldString":"alpha","newString":"omega"} | tool read {"path":"a.txt"}"#;
+    let events = Events::default();
+    let outcome = run(
+        turn(&model, &project, script, false),
+        &events,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    let texts = texts(&events);
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(texts[0].contains("alpha"), "before the edit: {texts:?}");
+    assert!(texts[1].starts_with("Edited a.txt"), "{texts:?}");
+    assert!(texts[2].contains("omega"), "after the edit: {texts:?}");
+}
+
+#[tokio::test]
+async fn a_refusal_still_lets_the_reads_before_it_run() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");
+    let model = Model::start(dir.path());
+    let person = Person {
+        answer: Answer::Reject(None),
+        asked: Mutex::default(),
+    };
+    let script = r#"tool read {"path":"a.txt"} | tool edit {"path":"a.txt","oldString":"alpha","newString":"omega"} | tool read {"path":"a.txt"}"#;
+    let events = Events::default();
+    let outcome = run(
+        turn(&model, &project, script, true),
+        &events,
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(!matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    let results = tool_results(&events);
+    assert!(
+        matches!(&results[0], ToolState::Completed { .. }),
+        "{results:?}"
+    );
+    let kinds: Vec<&str> = results[1..]
+        .iter()
+        .map(|state| match state {
+            ToolState::Error { error, .. } => error.kind.as_str(),
+            _ => "ran",
+        })
+        .collect();
+    assert_eq!(kinds, ["rejected", "skipped"]);
+    let left = std::fs::read_to_string(project.join("a.txt")).expect("a.txt");
+    assert_eq!(left, "alpha\n");
+}
+
+/// The names of the tools a request offered the model.
+fn offered(request: &serde_json::Value) -> Vec<String> {
+    request["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_agent_is_offered_only_the_tools_its_rules_let_it_use() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    let model = Model::start(dir.path());
+    let person = Person {
+        answer: Answer::Once,
+        asked: Mutex::default(),
+    };
+
+    // The agent that finds things in the code: it reads and searches, and
+    // runs commands when a person lets it.
+    let explore = harlo_engine::agents::builtins(&dir.path().join("plans"))
+        .into_iter()
+        .find(|a| a.id == "explore")
+        .expect("the explore agent");
+    let mut looks = turn(&model, &project, "say Looked.", false);
+    looks.rules = vec![(harlo_engine::AGENT.to_owned(), explore.rules)];
+    let outcome = run(
+        looks,
+        &Events::default(),
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    // The default agent, and the same held back from the shell by the
+    // configuration.
+    let outcome = run(
+        turn(&model, &project, "say Built.", false),
+        &Events::default(),
+        &person,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    let mut held = turn(&model, &project, "say Held.", false);
+    held.rules
+        .push(("config".to_owned(), vec![Rule::any("shell", Effect::Deny)]));
+    let outcome = run(held, &Events::default(), &person, &CancellationToken::new()).await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+
+    let sent = requests(dir.path());
+    assert_eq!(sent.len(), 3, "{sent:?}");
+    assert_eq!(offered(&sent[0]), ["read", "glob", "grep", "shell"]);
+    let all = offered(&sent[1]);
+    for tool in ["read", "write", "edit", "shell", "question", "webfetch"] {
+        assert!(all.iter().any(|t| t == tool), "{tool} in {all:?}");
+    }
+    let without: Vec<String> = all.iter().filter(|t| *t != "shell").cloned().collect();
+    assert_eq!(offered(&sent[2]), without);
+}
+
+#[tokio::test]
 async fn a_step_refused_as_too_long_is_summarized_and_asked_again() {
     let dir = tempfile::tempdir().expect("dir");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let project = dir.path().join("project");
     std::fs::create_dir(&project).expect("project");
     let turn = turn(
@@ -550,7 +814,7 @@ async fn a_step_refused_as_too_long_is_summarized_and_asked_again() {
 #[tokio::test]
 async fn a_full_context_is_summarized_before_the_next_step() {
     let dir = tempfile::tempdir().expect("dir");
-    let model = Model::start(dir.path()).await;
+    let model = Model::start(dir.path());
     let project = dir.path().join("project");
     std::fs::create_dir(&project).expect("project");
     std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");

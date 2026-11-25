@@ -2,13 +2,19 @@
 //!
 //! The command runs in its own process group, so stopping it ends
 //! everything it started. Pagers and editors are turned off so nothing
-//! waits for a person. Long output keeps its start and end.
+//! waits for a person. Long output keeps its start and end, while it is
+//! read as well as when it is shown: a command that prints without end
+//! takes a fixed amount of memory. What a command printed before it was
+//! stopped or ran out of time is kept.
 
 // Rust guideline compliant 2026-10-09
 
+use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
@@ -22,6 +28,13 @@ use super::Output;
 const MAX_LINES: usize = 600;
 /// Bytes the model sees of a long output.
 const MAX_BYTES: usize = 16 * 1024;
+/// Characters the model sees of one long line: enough for any line of
+/// code, a fraction of a minified file's or a data dump's.
+const MAX_LINE: usize = 2_000;
+/// Bytes kept of the start, and of the end, of each of a command's two
+/// streams while it runs. More than any reader of the output shows, and
+/// a fixed cost for a command that never stops printing.
+const KEPT_BYTES: usize = 1024 * 1024;
 /// How long a stopped command gets to end before it's killed.
 const GRACE: Duration = Duration::from_secs(2);
 
@@ -42,7 +55,9 @@ pub enum Ended {
 /// and how it ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ran {
-    /// Everything it printed.
+    /// What it printed, up to when it ended or was stopped. Of a stream
+    /// longer than a couple of megabytes, the start and the end, with a
+    /// line between them saying how much was left out.
     pub output: String,
     /// How it ended.
     pub ended: Ended,
@@ -87,13 +102,12 @@ pub async fn execute(
         }
     };
     let group = child.id().and_then(|id| i32::try_from(id).ok());
-    let (out, err) = (child.stdout.take(), child.stderr.take());
-    let reading = async { tokio::join!(read_all(out), read_all(err)) };
+    let (out, err) = (Mutex::new(Kept::default()), Mutex::new(Kept::default()));
+    let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
     let waiting = async {
-        let (out, err) = reading.await;
-        (child.wait().await, out, err)
+        tokio::join!(read_into(out_pipe, &out), read_into(err_pipe, &err));
+        child.wait().await
     };
-    tokio::pin!(waiting);
     let limit = async {
         match timeout {
             Some(t) => tokio::time::sleep(t).await,
@@ -101,31 +115,76 @@ pub async fn execute(
         }
     };
     let ended = tokio::select! {
-        r = &mut waiting => Ok(r),
-        () = limit => Err(Ended::TimedOut),
-        () = stop.cancelled() => Err(Ended::Stopped),
+        status = waiting => Ended::Exited(status.ok().and_then(|s| s.code())),
+        () = limit => Ended::TimedOut,
+        () = stop.cancelled() => Ended::Stopped,
     };
-    match ended {
-        Ok((status, stdout, stderr)) => {
-            let mut output = stdout;
-            if !stderr.is_empty() {
-                if !output.is_empty() && !output.ends_with('\n') {
-                    output.push('\n');
-                }
-                output.push_str(&stderr);
-            }
-            Ran {
-                output,
-                ended: Ended::Exited(status.ok().and_then(|s| s.code())),
-            }
+    if !matches!(ended, Ended::Exited(_)) {
+        end_group(group).await;
+    }
+    // What was read so far: all of it, for a command that ended by itself.
+    let text = |kept: &Mutex<Kept>| kept.lock().unwrap_or_else(PoisonError::into_inner).text();
+    let (mut output, stderr) = (text(&out), text(&err));
+    if !stderr.is_empty() {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
         }
-        Err(ended) => {
-            end_group(group).await;
-            Ran {
-                output: String::new(),
-                ended,
-            }
+        output.push_str(&stderr);
+    }
+    Ran { output, ended }
+}
+
+/// The start and the end of what a stream gave, and how much it gave.
+#[derive(Debug, Default)]
+struct Kept {
+    head: Vec<u8>,
+    tail: VecDeque<u8>,
+    total: usize,
+}
+
+impl Kept {
+    /// Takes the stream's next bytes.
+    fn push(&mut self, mut bytes: &[u8]) {
+        self.total += bytes.len();
+        let room = KEPT_BYTES - self.head.len();
+        let (first, rest) = bytes.split_at(room.min(bytes.len()));
+        self.head.extend_from_slice(first);
+        bytes = rest;
+        // Of the rest, the last `KEPT_BYTES` stay.
+        if bytes.len() >= KEPT_BYTES {
+            self.tail.clear();
+            bytes = &bytes[bytes.len() - KEPT_BYTES..];
         }
+        let over = (self.tail.len() + bytes.len()).saturating_sub(KEPT_BYTES);
+        self.tail.drain(..over);
+        self.tail.extend(bytes);
+    }
+
+    /// What was kept, as text, saying how much was left out between.
+    fn text(&self) -> String {
+        let mut text = String::from_utf8_lossy(&self.head).into_owned();
+        let left_out = self.total - self.head.len() - self.tail.len();
+        if left_out > 0 {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            let _ = writeln!(text, "… ({left_out} bytes left out) …");
+        }
+        let (a, b) = self.tail.as_slices();
+        text.push_str(&String::from_utf8_lossy(&[a, b].concat()));
+        text
+    }
+}
+
+/// Reads a pipe to its end into `kept`.
+async fn read_into(pipe: Option<impl AsyncRead + Unpin>, kept: &Mutex<Kept>) {
+    let Some(mut pipe) = pipe else { return };
+    let mut chunk = vec![0; 64 * 1024];
+    // (A read error just ends what we show.)
+    while let Ok(read @ 1..) = pipe.read(&mut chunk).await {
+        kept.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(&chunk[..read]);
     }
 }
 
@@ -138,7 +197,17 @@ pub(super) async fn run(
     stop: &CancellationToken,
 ) -> Output {
     let ran = execute(command, cwd, Some(Duration::from_millis(timeout_ms)), stop).await;
-    match ran.ended {
+    // What it printed is shown however it ended: a build that ran out of
+    // time got somewhere first.
+    let printed = |ending: String| {
+        let mut shown = capped(&ran.output);
+        if !shown.is_empty() {
+            shown.push('\n');
+        }
+        shown.push_str(&ending);
+        shown
+    };
+    match &ran.ended {
         Ended::Exited(code) => {
             let mut shown = capped(&ran.output);
             if shown.is_empty() {
@@ -147,14 +216,17 @@ pub(super) async fn run(
             if let Some(code) = code.filter(|c| *c != 0) {
                 let _ = write!(shown, "\n(exit code {code})");
             }
-            said(shown, code)
+            said(shown, *code)
         }
         Ended::TimedOut => said(
-            format!("Stopped after {} s: it took too long.", timeout_ms / 1000),
+            printed(format!(
+                "Stopped after {} s: it took too long.",
+                timeout_ms / 1000
+            )),
             None,
         ),
-        Ended::Stopped => said("Stopped.".to_owned(), None),
-        Ended::NotStarted(why) => said(why, None),
+        Ended::Stopped => said(printed("Stopped.".to_owned()), None),
+        Ended::NotStarted(why) => said(why.clone(), None),
     }
 }
 
@@ -169,35 +241,46 @@ async fn end_group(group: Option<i32>) {
     unsafe { libc::kill(-pid, libc::SIGKILL) };
 }
 
-/// Everything a pipe gives, as text.
-async fn read_all(pipe: Option<impl AsyncRead + Unpin>) -> String {
-    let mut bytes = Vec::new();
-    if let Some(mut p) = pipe {
-        // (A read error just ends what we show.)
-        let _ = p.read_to_end(&mut bytes).await;
+/// `line`, cut to [`MAX_LINE`] characters with a note of what was left out.
+pub(super) fn short_line(line: &str) -> Cow<'_, str> {
+    // (Bytes first: no shorter line has more characters than bytes.)
+    if line.len() <= MAX_LINE {
+        return Cow::Borrowed(line);
     }
-    String::from_utf8_lossy(&bytes).into_owned()
+    let count = line.chars().count();
+    if count <= MAX_LINE {
+        return Cow::Borrowed(line);
+    }
+    let start: String = line.chars().take(MAX_LINE).collect();
+    Cow::Owned(format!(
+        "{start}… ({} more characters on this line)",
+        count - MAX_LINE
+    ))
 }
 
-/// `text` within the line and byte caps, keeping its start and end.
+/// `text` within the line and byte caps, keeping its start and end; long
+/// lines are cut short first.
 fn capped(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() <= MAX_LINES && text.len() <= MAX_BYTES {
-        return text.trim_end().to_owned();
+    let lines: Vec<Cow<'_, str>> = text.lines().map(short_line).collect();
+    let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
+    if lines.len() <= MAX_LINES && bytes <= MAX_BYTES {
+        return lines.join("\n").trim_end().to_owned();
     }
     let half_lines = MAX_LINES / 2;
     let half_bytes = MAX_BYTES / 2;
     let mut head = String::new();
+    let mut first = 0;
     for line in lines.iter().take(half_lines) {
         if head.len() + line.len() + 1 > half_bytes {
             break;
         }
         head.push_str(line);
         head.push('\n');
+        first += 1;
     }
     let mut tail: Vec<&str> = Vec::new();
     let mut size = 0;
-    for line in lines.iter().rev().take(half_lines) {
+    for line in lines[first..].iter().rev().take(half_lines) {
         if size + line.len() + 1 > half_bytes {
             break;
         }
@@ -205,9 +288,10 @@ fn capped(text: &str) -> String {
         tail.push(line);
     }
     tail.reverse();
-    let left_out = lines
-        .len()
-        .saturating_sub(head.lines().count() + tail.len());
+    let left_out = lines.len() - first - tail.len();
+    if left_out == 0 {
+        return format!("{head}{}", tail.join("\n"));
+    }
     format!("{head}… ({left_out} lines left out) …\n{}", tail.join("\n"))
 }
 
@@ -235,6 +319,79 @@ mod tests {
         assert_eq!(out.text, "hi\noops\n(exit code 3)");
         let slow = run("sleep 30", dir.path(), 100, &stop).await;
         assert!(slow.text.starts_with("Stopped after"), "{}", slow.text);
+    }
+
+    #[tokio::test]
+    async fn a_command_out_of_time_keeps_what_it_printed() {
+        let dir = tempfile::tempdir().expect("dir");
+        let stop = CancellationToken::new();
+        let slow = run("echo compiled 3 of 9; sleep 30", dir.path(), 300, &stop).await;
+        assert_eq!(
+            slow.text,
+            "compiled 3 of 9\nStopped after 0 s: it took too long."
+        );
+        // Stopped by the person, too.
+        let stopping = stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            stopping.cancel();
+        });
+        let stopped = run("echo halfway; sleep 30", dir.path(), 60_000, &stop).await;
+        assert_eq!(stopped.text, "halfway\nStopped.");
+    }
+
+    #[tokio::test]
+    async fn endless_output_takes_a_fixed_amount_of_memory() {
+        let dir = tempfile::tempdir().expect("dir");
+        let stop = CancellationToken::new();
+        // 20 MB of numbered lines, then one last line.
+        let command = "seq 1 2600000; echo the end";
+        let ran = execute(command, dir.path(), Some(Duration::from_secs(60)), &stop).await;
+        assert_eq!(ran.ended, Ended::Exited(Some(0)));
+        assert!(
+            ran.output.len() < 2 * KEPT_BYTES + 100,
+            "{}",
+            ran.output.len()
+        );
+        assert!(ran.output.starts_with("1\n2\n3\n"));
+        assert!(ran.output.ends_with("2600000\nthe end\n"));
+        assert!(ran.output.contains(" bytes left out) …\n"));
+
+        let shown = run(command, dir.path(), 60_000, &stop).await.text;
+        assert!(shown.len() <= MAX_BYTES + 100, "{}", shown.len());
+        assert!(
+            shown.starts_with("1\n") && shown.ends_with("the end"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn what_is_kept_of_a_stream_is_its_start_and_end() {
+        let mut kept = Kept::default();
+        kept.push(b"abc");
+        kept.push(b"def");
+        assert_eq!((kept.text().as_str(), kept.total), ("abcdef", 6));
+        // Past the start's share, only the newest bytes stay.
+        let mut long = Kept::default();
+        long.push(&vec![b'a'; KEPT_BYTES]);
+        long.push(&vec![b'b'; KEPT_BYTES + 10]);
+        long.push(b"cd");
+        assert_eq!(long.tail.len(), KEPT_BYTES);
+        assert_eq!(long.total, 2 * KEPT_BYTES + 12);
+        let text = long.text();
+        assert!(text.contains("\n… (12 bytes left out) …\n"), "no note");
+        assert!(text.starts_with("aaa") && text.ends_with("bbcd"));
+    }
+
+    #[test]
+    fn one_very_long_line_is_cut_not_dropped() {
+        let line = "x".repeat(50_000);
+        let shown = capped(&format!("before\n{line}\nafter\n"));
+        assert!(shown.starts_with("before\nxxx"), "{}", &shown[..40]);
+        assert!(shown.contains("… (48000 more characters on this line)"));
+        assert!(shown.ends_with("\nafter"));
+        assert!(shown.len() < 2 * MAX_LINE + 200);
+        assert_eq!(short_line("short"), "short");
     }
 
     #[test]

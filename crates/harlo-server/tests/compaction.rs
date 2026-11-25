@@ -83,3 +83,91 @@ async fn a_compacted_session_carries_on_from_its_summary() {
     assert!(!sent.contains("First answer."), "{sent}");
     assert!(sent.contains("Second answer."), "{sent}");
 }
+
+/// A file of about 90,000 characters, every line saying `word`.
+fn big(word: &str) -> String {
+    format!(
+        "{} filler to make a long line of text\n",
+        format!("{word} ").repeat(6)
+    )
+    .repeat(1_200)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_taken_up_cold_has_its_old_tool_results_cleared() {
+    let sandbox = Sandbox::start().await;
+    // Any pause counts as cold here: `prune` is the seconds of rest it
+    // takes (`true` for the five minutes a provider's cache lasts).
+    let path = sandbox.dir.path().join("config/harlo/harlo.json");
+    let config = std::fs::read_to_string(&path).expect("config");
+    let mut config: serde_json::Value = serde_json::from_str(&config).expect("json");
+    config["compaction"] = serde_json::json!({ "prune": 0 });
+    std::fs::write(&path, config.to_string()).expect("config");
+    for word in ["oneone", "twotwo", "threethree"] {
+        std::fs::write(sandbox.project().join(format!("{word}.txt")), big(word)).expect("file");
+    }
+    let client = sandbox.client();
+    let directory = sandbox.project().to_str().expect("utf-8").to_owned();
+    let mut events = client.events().await.expect("events");
+    let session = client.create_session(&directory).await.expect("session");
+    let mut turn = async |script: &str| {
+        client
+            .prompt(&session.id, &Prompt::new(script, Delivery::Queue))
+            .await
+            .expect("prompt");
+        until(&mut events, |kind| match kind {
+            EventKind::Done { .. } => Some(()),
+            _ => None,
+        })
+        .await;
+    };
+    let last_sent = || {
+        support::turn_requests(sandbox.dir.path())
+            .pop()
+            .map(|request| request["messages"].clone())
+            .expect("a request")
+    };
+
+    turn(
+        r#"tool read {"path":"oneone.txt"} ;; tool read {"path":"twotwo.txt"} ;; tool read {"path":"threethree.txt"} ;; say Read them."#,
+    )
+    .await;
+    // While the turn ran, every step read the whole of what came before.
+    let sent = last_sent().to_string();
+    assert!(sent.contains("oneone") && sent.contains("threethree"));
+
+    // Taken up again, the oldest result is cleared; the newest two stay.
+    turn("say Still here.").await;
+    let second = last_sent();
+    let sent = second.to_string();
+    assert!(!sent.contains("oneone oneone"), "the oldest is cleared");
+    assert!(sent.contains("This output was cleared"), "{}", &sent[..400]);
+    assert!(sent.contains("twotwo twotwo") && sent.contains("threethree threethree"));
+    // People still see what the call returned.
+    let stored = reqwest::Client::new()
+        .get(format!(
+            "{}/api/session/{}/message",
+            sandbox.url(),
+            session.id
+        ))
+        .basic_auth("harlo", Some(&sandbox.password))
+        .send()
+        .await
+        .expect("request")
+        .text()
+        .await
+        .expect("messages");
+    assert!(stored.contains("oneone oneone"));
+    assert!(stored.contains(r#""cleared":"#), "and that it was cleared");
+
+    // The next turn reads the same conversation, to the letter: what was
+    // cleared stays cleared, and nothing more goes.
+    turn("say And again.").await;
+    let third = last_sent();
+    let (second, third) = (
+        second.as_array().expect("messages"),
+        third.as_array().expect("messages"),
+    );
+    assert!(third.len() > second.len());
+    assert_eq!(&third[..second.len()], &**second);
+}

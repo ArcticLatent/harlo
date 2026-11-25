@@ -413,6 +413,20 @@ pub fn entries(messages: &[Message]) -> Vec<Entry> {
     rows
 }
 
+/// The agent whose step opens `messages`, before any prompt among them:
+/// it answered a prompt that came before them.
+#[must_use]
+pub fn opening_agent(messages: &[Message]) -> Option<&str> {
+    messages
+        .iter()
+        .find_map(|message| match message {
+            Message::User { .. } => Some(None),
+            Message::Assistant { agent, .. } => Some(Some(agent.as_str())),
+            _ => None,
+        })
+        .flatten()
+}
+
 fn text_key(message: &str, ordinal: impl std::fmt::Display) -> String {
     format!("{message}/text/{ordinal}")
 }

@@ -372,6 +372,16 @@ impl From<g::PermissionRule> for Rule {
     }
 }
 
+/// A stretch of a session's timeline, and where the one before it starts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct History {
+    /// Its messages, oldest first.
+    pub messages: Vec<Message>,
+    /// Where the messages before these start, when there are any: what
+    /// `Client::earlier_messages` takes.
+    pub earlier: Option<String>,
+}
+
 /// One entry in a session's timeline.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {

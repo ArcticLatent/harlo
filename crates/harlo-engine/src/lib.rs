@@ -44,8 +44,9 @@ mod turn;
 pub mod web;
 
 pub use config::{
-    CONFIG_FILES, Config, ModelRef, ModelSpec, PROJECT_FOLDER, Price, ProviderSpec, VariantSpec,
-    config_folder, copy_from_opencode, merge_config, project_config_files, read_config_document,
+    CONFIG_FILES, Config, ModelRef, ModelSpec, PROJECT_FOLDER, Price, ProviderSpec, Prune,
+    VariantSpec, config_folder, copy_from_opencode, merge_config, project_config_files,
+    read_config_document,
 };
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};

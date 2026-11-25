@@ -276,6 +276,30 @@ pub fn decide(layers: &[(&str, &[Rule])], action: &str, resource: &str) -> Decis
     })
 }
 
+/// What stands for any text when a pattern is tried: a plain word, so a
+/// command made of it reads as one command.
+const SOMETHING: &str = "harlo-some-resource";
+
+/// Whether the rules let `action` through for any resource at all, asked
+/// about or not.
+///
+/// A tool whose every call they would refuse isn't worth describing to the
+/// model. The answer comes from trying resources: one no pattern names, and
+/// one for each rule that lets the action through, made from its pattern.
+/// It leans towards yes: a tool is left out only when all of those are
+/// refused.
+#[must_use]
+pub(crate) fn permits(layers: &[(&str, &[Rule])], action: &str) -> bool {
+    let named = layers
+        .iter()
+        .flat_map(|(_, rules)| rules.iter())
+        .filter(|r| r.effect != Effect::Deny && glob(&r.action, action))
+        .map(|r| r.resource.replace('*', SOMETHING).replace('?', "x"));
+    std::iter::once(SOMETHING.to_owned())
+        .chain(named)
+        .any(|resource| decide(layers, action, &resource).effect != Effect::Deny)
+}
+
 /// Decides `action` on `resource`, taken whole.
 fn decide_one(layers: &[(&str, &[Rule])], action: &str, resource: &str) -> Decision {
     let last_in = |layer: &'_ str, rules: &'_ [Rule]| {
@@ -345,6 +369,41 @@ pub(crate) fn glob(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_action_is_permitted_when_any_resource_gets_through() {
+        let rule = |action: &str, resource: &str, effect| Rule {
+            action: action.to_owned(),
+            resource: resource.to_owned(),
+            effect,
+        };
+        // An agent that only looks, and may run commands when allowed to.
+        let agent = [
+            rule("*", "*", Effect::Deny),
+            rule("read", "*", Effect::Allow),
+            rule("shell", "*", Effect::Ask),
+            rule("edit", "notes/*", Effect::Allow),
+        ];
+        let layers: [(&str, &[Rule]); 1] = [(AGENT, &agent)];
+        assert!(permits(&layers, "read"));
+        assert!(permits(&layers, "shell"), "asking isn't refusing");
+        assert!(permits(&layers, "edit"), "its notes");
+        assert!(!permits(&layers, "webfetch"));
+        // A later layer takes away what it covers whole, and no more.
+        let config = [
+            rule("read", "*", Effect::Deny),
+            rule("shell", "rm *", Effect::Deny),
+        ];
+        let layers: [(&str, &[Rule]); 2] = [(AGENT, &agent), ("config", &config)];
+        assert!(!permits(&layers, "read"));
+        assert!(permits(&layers, "shell"));
+        // It can't give back what the agent refuses.
+        let config = [rule("webfetch", "*", Effect::Allow)];
+        let layers: [(&str, &[Rule]); 2] = [(AGENT, &agent), ("config", &config)];
+        assert!(!permits(&layers, "webfetch"));
+        // With no rule at all, everything asks.
+        assert!(permits(&[], "edit"));
+    }
 
     #[test]
     fn what_an_agent_refuses_no_later_rule_allows() {

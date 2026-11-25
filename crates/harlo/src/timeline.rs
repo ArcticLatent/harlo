@@ -41,6 +41,30 @@ pub enum Event {
         /// Which of the row's files.
         file: usize,
     },
+    /// The reader came near the first row shown: what came before it, if
+    /// anything, is wanted.
+    NearStart,
+}
+
+/// A stretch of a session's history, as its timeline takes it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Stretch {
+    /// Its rows, oldest first.
+    pub entries: Vec<Entry>,
+    /// Where the history before it starts, when there is any.
+    pub earlier: Option<String>,
+    /// The agent whose step opens it, answering a prompt before it.
+    pub opened_by: Option<String>,
+}
+
+impl From<Vec<Entry>> for Stretch {
+    /// A whole history: nothing comes before it.
+    fn from(entries: Vec<Entry>) -> Self {
+        Self {
+            entries,
+            ..Self::default()
+        }
+    }
 }
 
 /// Where loading a session's history stands.
@@ -147,6 +171,14 @@ pub struct Timeline {
     stamps: u64,
     /// Whether a fade started since [`Timeline::take_fading`] last asked.
     fading: bool,
+    /// Where the history before the first row starts, when there is any.
+    earlier: Option<String>,
+    /// Whether that history is on its way.
+    fetching: bool,
+    /// The agent whose step opens the rows, answering a prompt before them.
+    opened_by: Option<String>,
+    /// Counts the stretches put before the rows.
+    above: u64,
 }
 
 impl Timeline {
@@ -165,6 +197,10 @@ impl Timeline {
             revision: 0,
             stamps: 0,
             fading: false,
+            earlier: None,
+            fetching: false,
+            opened_by: None,
+            above: 0,
         }
     }
 
@@ -186,14 +222,103 @@ impl Timeline {
         self.rows.iter().map(|row| &row.entry)
     }
 
-    /// Replaces the rows with a fresh history.
+    /// Replaces the rows with a fresh, whole history.
     ///
     /// Rows whose key and content are unchanged keep their parsed Markdown;
     /// measured heights are kept by key, so a reload doesn't make it jump.
     /// While the session works, streamed rows the history doesn't have yet
     /// stay at the end: The server stores them once they're done.
     pub fn set(&mut self, entries: Vec<Entry>) {
-        let old = std::mem::take(&mut self.rows);
+        self.set_end(entries.into());
+    }
+
+    /// Replaces the rows with the end of a fresh history.
+    ///
+    /// Rows read from before the stretch stay when it joins them: when its
+    /// first row is one already shown. Otherwise the stretch is all there
+    /// is, until what came before it is read again.
+    pub fn set_end(&mut self, stretch: Stretch) {
+        let kept = (stretch.entries.first())
+            .and_then(|first| self.index.get(first.key()).copied())
+            .unwrap_or(0);
+        if kept == 0 {
+            self.earlier = stretch.earlier;
+            self.opened_by = stretch.opened_by;
+            self.fetching = false;
+        }
+        self.fill(kept, stretch.entries);
+    }
+
+    /// Puts the stretch of history that `from` leads to before the rows.
+    ///
+    /// A stretch asked for before the rows were replaced leads somewhere
+    /// else by now, and is dropped.
+    pub fn add_earlier(&mut self, from: &str, mut stretch: Stretch) {
+        if self.earlier.as_deref() != Some(from) {
+            return;
+        }
+        self.fetching = false;
+        // Its last prompt is answered by the rows already shown, if by
+        // nothing of its own.
+        if let Some(Entry::Prompt { agent, .. }) =
+            (stretch.entries.iter_mut().rev()).find(|entry| matches!(entry, Entry::Prompt { .. }))
+            && agent.is_none()
+        {
+            agent.clone_from(&self.opened_by);
+        }
+        self.earlier = stretch.earlier;
+        self.opened_by = stretch.opened_by;
+        let mut fresh = Vec::with_capacity(stretch.entries.len());
+        for entry in stretch.entries {
+            if !self.index.contains_key(entry.key()) {
+                let stamp = self.stamp();
+                fresh.push(Row::new(entry, false, stamp));
+            }
+        }
+        if !fresh.is_empty() {
+            self.rows.splice(0..0, fresh);
+            self.above += 1;
+        }
+        self.reindex();
+    }
+
+    /// Whether history from before the first row waits to be read.
+    #[must_use]
+    pub fn has_earlier(&self) -> bool {
+        self.earlier.is_some() && !self.fetching
+    }
+
+    /// Starts reading the history before the first row: where it starts,
+    /// unless there is none or it's on its way already.
+    pub fn fetch_earlier(&mut self) -> Option<String> {
+        if self.fetching || self.load != Load::Ready {
+            return None;
+        }
+        let from = self.earlier.clone()?;
+        self.fetching = true;
+        self.revision += 1;
+        Some(from)
+    }
+
+    /// Notes that reading the history before the first row failed; coming
+    /// near the start again tries again.
+    pub fn earlier_failed(&mut self) {
+        self.fetching = false;
+        self.revision += 1;
+    }
+
+    /// Counts the stretches put before the rows.
+    #[must_use]
+    pub fn above(&self) -> u64 {
+        self.above
+    }
+
+    /// Replaces the rows from `kept` on with `entries`.
+    fn fill(&mut self, kept: usize, entries: Vec<Entry>) {
+        let mut old = std::mem::take(&mut self.rows);
+        let replaced = old.split_off(kept);
+        self.rows = old;
+        let old = replaced;
         let mut in_flight = Vec::new();
         let mut by_key: HashMap<String, Row> = HashMap::with_capacity(old.len());
         let loaded: std::collections::HashSet<&str> = entries.iter().map(Entry::key).collect();
@@ -490,7 +615,11 @@ impl Timeline {
                 self.revision += 1;
             }
             // The app acts on these.
-            Event::Link(_) | Event::Undo(_) | Event::OpenSession(_) | Event::Review { .. } => {}
+            Event::Link(_)
+            | Event::Undo(_)
+            | Event::OpenSession(_)
+            | Event::Review { .. }
+            | Event::NearStart => {}
         }
     }
 

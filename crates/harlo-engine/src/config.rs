@@ -57,6 +57,22 @@ impl ModelRef {
 }
 
 /// A model's prices, in US dollars per million tokens.
+/// When a session's old tool results are cleared for the model.
+///
+/// Only ever as a session is taken up again after a rest: in the middle
+/// of a turn the provider reads the conversation from its cache, and
+/// clearing would have it charged as new.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Prune {
+    /// Once the provider's cache has let go of the conversation.
+    #[default]
+    Cold,
+    /// After this many milliseconds of rest.
+    After(i64),
+    /// Never.
+    Never,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Price {
     /// The context size from which these prices apply; none for the base
@@ -84,7 +100,19 @@ impl Price {
         dollars(tokens.input, self.input)
             + dollars(tokens.output, self.output)
             + dollars(tokens.cache.read, self.cache_read)
-            + dollars(tokens.cache.write, self.cache_write)
+            + dollars(tokens.cache.write, self.written())
+    }
+}
+
+impl Price {
+    /// The price of input written to the cache: the input price when the
+    /// model lists none, since a write is never free where it's counted.
+    fn written(&self) -> f64 {
+        if self.cache_write > 0.0 {
+            self.cache_write
+        } else {
+            self.input
+        }
     }
 }
 
@@ -203,6 +231,11 @@ pub struct Config {
     /// The context size, in tokens, at which a session is summarized
     /// (`compaction.limit`); none leaves it to the engine.
     pub compact_at: Option<u64>,
+    /// When a rested session's old tool results are cleared as it's taken
+    /// up again (`compaction.prune`: `false` for never, a number for that
+    /// many seconds of rest; otherwise once the provider's cache has let
+    /// go of the conversation).
+    pub prune: Prune,
     /// MCP servers (`mcp.servers`), by name, as the file has them.
     pub mcp: Value,
     /// What it says of web search: the service it names
@@ -286,6 +319,12 @@ impl Config {
             compact_at: value["compaction"]["limit"]
                 .as_u64()
                 .filter(|limit| *limit > 0),
+            prune: match &value["compaction"]["prune"] {
+                Value::Bool(false) => Prune::Never,
+                seconds => seconds
+                    .as_i64()
+                    .map_or(Prune::Cold, |s| Prune::After(s.saturating_mul(1_000))),
+            },
             mcp: value["mcp"]["servers"].clone(),
             websearch: if value["websearch"] == false {
                 Some(Value::Bool(false))
@@ -717,5 +756,42 @@ mod tests {
         std::fs::write(&target, "{}\n").expect("edited");
         assert_eq!(copy_from_opencode(home.path()).expect("checked"), None);
         assert_eq!(std::fs::read_to_string(&target).expect("read"), "{}\n");
+    }
+
+    #[test]
+    fn old_tool_results_are_cleared_once_cold_unless_told_otherwise() {
+        let prune = |text: &str| Config::parse(text, None).expect("config").prune;
+        assert_eq!(prune("{}"), Prune::Cold);
+        assert_eq!(prune(r#"{ "compaction": { "prune": true } }"#), Prune::Cold);
+        assert_eq!(
+            prune(r#"{ "compaction": { "prune": false } }"#),
+            Prune::Never
+        );
+        assert_eq!(
+            prune(r#"{ "compaction": { "prune": 90 } }"#),
+            Prune::After(90_000)
+        );
+    }
+
+    #[test]
+    fn a_cache_write_without_a_price_costs_what_input_does() {
+        let tokens = crate::message::Tokens {
+            cache: crate::message::Cache {
+                read: 0,
+                write: 1_000_000,
+            },
+            ..Default::default()
+        };
+        let unlisted = Price {
+            input: 2.0,
+            ..Default::default()
+        };
+        assert!((unlisted.of(&tokens) - 2.0).abs() < 1e-9);
+        let listed = Price {
+            input: 2.0,
+            cache_write: 2.5,
+            ..Default::default()
+        };
+        assert!((listed.of(&tokens) - 2.5).abs() < 1e-9);
     }
 }

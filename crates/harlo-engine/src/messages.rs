@@ -2,8 +2,9 @@
 //! the events of its streamed reply.
 //!
 //! Thinking blocks go back with their signatures to the provider and model
-//! that wrote them; others' reasoning is left out. The system prompt and
-//! the end of the conversation are marked for the prompt cache.
+//! that wrote them; others' reasoning is left out. The system prompt, the
+//! end of the conversation and the end of the request before are marked for
+//! the prompt cache.
 
 // Rust guideline compliant 2026-10-09
 
@@ -143,6 +144,38 @@ fn messages(at: Signer<'_>, history: &[Message]) -> Vec<Value> {
     out
 }
 
+/// Marks `message`'s last block that can carry a cache point, if it has one.
+///
+/// Thinking blocks can't carry one.
+fn mark_end(message: &mut Value) {
+    let block = message["content"].as_array_mut().and_then(|blocks| {
+        blocks
+            .iter_mut()
+            .rev()
+            .find(|b| !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking")))
+    });
+    if let Some(block) = block {
+        block["cache_control"] = json!({ "type": "ephemeral" });
+    }
+}
+
+/// Marks the conversation for the prompt cache, at two places.
+///
+/// Its end is marked, so the next request reads all of this one. So is the
+/// end of the message before the model's last reply, which is where the
+/// request before this one ended: the provider looks only a few blocks back
+/// from a mark for what it has, and a reply of many blocks with their
+/// results would put the last request's end out of its sight.
+fn mark(messages: &mut [Value]) {
+    let replied = messages.iter().rposition(|m| m["role"] == "assistant");
+    if let Some(before) = replied.and_then(|at| at.checked_sub(1)) {
+        mark_end(&mut messages[before]);
+    }
+    if let Some(last) = messages.last_mut() {
+        mark_end(last);
+    }
+}
+
 /// The request's body: the system prompt, the history and the tools, then
 /// the model's and variant's own fields over them.
 pub(crate) fn request(
@@ -154,14 +187,7 @@ pub(crate) fn request(
     extra: &Map<String, Value>,
 ) -> Value {
     let mut messages = messages(at, history);
-    // The conversation so far is cached up to its last block.
-    if let Some(last) = messages
-        .last_mut()
-        .and_then(|m| m["content"].as_array_mut())
-        .and_then(|c| c.last_mut())
-    {
-        last["cache_control"] = json!({ "type": "ephemeral" });
-    }
+    mark(&mut messages);
     let mut body = json!({
         "model": at.model,
         "max_tokens": output.unwrap_or(DEFAULT_OUTPUT),
@@ -389,5 +415,95 @@ pub(crate) mod tests {
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[1]["cache_control"]["type"], "ephemeral");
         assert_eq!(sent["max_tokens"], DEFAULT_OUTPUT);
+    }
+
+    /// A person's message saying `said`.
+    fn says(said: &str) -> Message {
+        Message::User {
+            id: said.into(),
+            time: crate::message::Created { created: 0 },
+            text: said.into(),
+            skills: Vec::new(),
+            files: Vec::new(),
+        }
+    }
+
+    /// A step of `calls` tool calls, each after a line of text.
+    fn calling(calls: usize) -> Message {
+        step(
+            (0..calls)
+                .flat_map(|n| {
+                    [
+                        Part::Text {
+                            text: format!("Reading {n}."),
+                        },
+                        Part::Tool {
+                            id: format!("t{n}"),
+                            name: "read".into(),
+                            state: crate::message::ToolState::Completed {
+                                input: Map::new(),
+                                content: vec![json!({ "type": "text", "text": "read" })],
+                                metadata: Map::new(),
+                            },
+                            time: crate::message::ToolTime::default(),
+                        },
+                    ]
+                })
+                .collect(),
+        )
+    }
+
+    /// Where a request's messages are marked: (message, block) pairs.
+    fn marks(sent: &Value) -> Vec<(usize, usize)> {
+        let messages = sent["messages"].as_array().expect("messages");
+        messages
+            .iter()
+            .enumerate()
+            .flat_map(|(m, message)| {
+                let blocks = message["content"].as_array().expect("blocks");
+                blocks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| !b["cache_control"].is_null())
+                    .map(move |(b, _)| (m, b))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_request_marks_its_end_and_where_the_one_before_ended() {
+        // A reply of thirty blocks, more than a provider looks back over.
+        let history = [says("Go."), calling(2), calling(15)];
+        let send = |upto: usize| request(AT, None, "sys", &history[..upto], &[], &Map::new());
+        let (first, second, third) = (send(1), send(2), send(3));
+        // The first request has one end only.
+        assert_eq!(marks(&first), [(0, 0)]);
+        // Each later one marks its own end, and the end of the last.
+        let end = |sent: &Value| *marks(sent).last().expect("an end");
+        assert_eq!(marks(&second), [end(&first), (2, 1)]);
+        assert_eq!(marks(&third), [end(&second), (4, 14)]);
+        // With the system prompt's, that is within the four a request may have.
+        assert!(marks(&third).len() < 4);
+    }
+
+    #[test]
+    fn a_mark_is_never_on_thinking() {
+        let sent = request(
+            AT,
+            None,
+            "sys",
+            &[step(vec![
+                Part::Text {
+                    text: "Done.".into(),
+                },
+                Part::Reasoning {
+                    text: "hmm".into(),
+                    signature: Some(AT.sign(WIRE, &json!({ "signature": "sig" }))),
+                },
+            ])],
+            &[],
+            &Map::new(),
+        );
+        assert_eq!(marks(&sent), [(0, 0)]);
     }
 }

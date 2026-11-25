@@ -936,6 +936,13 @@ export global State {
     in property <bool> session-busy;
     in property <string> session-placeholder;
     in property <[TimelineRow]> timeline;
+    /// Whether history from before the timeline's first row waits to be
+    /// read: coming near the start asks for it.
+    in property <bool> timeline-more;
+    /// How many rows last came before the row that was first, and a count
+    /// that moves each time some do.
+    in property <int> timeline-above;
+    in property <int> timeline-above-serial;
     in property <[PromptMark]> prompt-marks;
     in property <[InboxRow]> inbox;
     // What the open session waits on.
@@ -1108,6 +1115,9 @@ export global Logic {
     callback open-panel(int);
     callback toggle-group(string);
     callback toggle-diff(string);
+    /// The reader came near the timeline's first row, with history before
+    /// it still unread.
+    callback timeline-near-start();
     callback undo(string);
     /// Asks the open session's agent to go on after a stop.
     callback continue-run();

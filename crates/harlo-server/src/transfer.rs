@@ -169,6 +169,7 @@ impl Server {
         self.interrupt(id);
         lock(&self.live).inbox.remove(id);
         self.forget_files(id);
+        self.refresh_prompt(id);
         self.store.delete_session(id)?;
         self.emit(
             "session.deleted",

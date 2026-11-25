@@ -561,13 +561,44 @@ async fn update_session(
     done()
 }
 
+/// The most messages one page holds, whatever a client asks for.
+const MAX_PAGE: usize = 1_000;
+
+/// A session's messages: all of them, or with `limit` a page of them.
+///
+/// `order` is `asc` (oldest first, the default) or `desc`. A page's
+/// `cursor.next` asks for the page after it, in the same order; it is
+/// null on the last one.
 async fn messages(State(server): Shared, Path(id): Path<String>, Query(q): Params) -> Answer {
     server.session(&id)?;
-    let mut list = server.store.messages(&id)?;
-    if q.get("order").is_some_and(|o| o == "desc") {
-        list.reverse();
-    }
-    ok(json!({ "data": list, "cursor": { "previous": null, "next": null } }))
+    let newest_first = q.get("order").is_some_and(|o| o == "desc");
+    let limit = q.get("limit").and_then(|l| l.parse::<usize>().ok());
+    let Some(limit) = limit.filter(|l| *l > 0) else {
+        let mut list = server.store.messages(&id)?;
+        if newest_first {
+            list.reverse();
+        }
+        return ok(json!({ "data": list, "cursor": { "previous": null, "next": null } }));
+    };
+    // A cursor says which way it goes and the last message it passed.
+    let (newest_first, past) = match q.get("cursor").map(|c| c.split_once(':')) {
+        None => (newest_first, None),
+        Some(Some(("desc", past))) => (true, Some(past)),
+        Some(Some(("asc", past))) => (false, Some(past)),
+        Some(_) => {
+            return Err(Refusal::Bad(
+                "That cursor isn't one of this server's.".into(),
+            ));
+        }
+    };
+    let (list, more) = server
+        .store
+        .message_page(&id, newest_first, past, limit.min(MAX_PAGE))?;
+    let next = list.last().filter(|_| more).map(|last| {
+        let order = if newest_first { "desc" } else { "asc" };
+        format!("{order}:{}", last.id())
+    });
+    ok(json!({ "data": list, "cursor": { "previous": null, "next": next } }))
 }
 
 async fn session_diff(State(server): Shared, Path(id): Path<String>) -> Answer {

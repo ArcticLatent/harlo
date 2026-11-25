@@ -22,6 +22,27 @@ use tokio_util::sync::CancellationToken;
 
 use crate::rules::{Effect, Rule};
 
+/// The tools that change no file of the project, whatever they're called
+/// with. A tool not named here may: a command, a script, a subagent, a
+/// tool from outside.
+const LOOKING: &[&str] = &[
+    "read",
+    "glob",
+    "grep",
+    "question",
+    "todowrite",
+    "skill",
+    "remember",
+    "search_sessions",
+    "webfetch",
+    "websearch",
+];
+
+/// Whether the tool named `tool` leaves the project's files as they are.
+pub(crate) fn only_looks(tool: &str) -> bool {
+    LOOKING.contains(&tool)
+}
+
 /// The tools' definitions, as a model is told about them.
 #[must_use]
 pub fn definitions() -> Vec<Value> {
@@ -304,6 +325,15 @@ async fn read(path: &Path, shown: &str, offset: usize, limit: usize) -> Result<O
             pictures: vec![picture],
         });
     }
+    // (A file this large is a log or data: not to be loaded to show a page.)
+    let size = tokio::fs::metadata(path).await.map_or(0, |m| m.len());
+    if size > READ_FILE_BYTES {
+        return Err(format!(
+            "{shown} is {} MB, too large to read. Search it with grep, or take the part you \
+             need with a command.",
+            size / (1024 * 1024)
+        ));
+    }
     let content = tokio::fs::read_to_string(path)
         .await
         .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
@@ -330,6 +360,14 @@ fn picture_type(path: &Path) -> Option<&'static str> {
 
 /// Lines a read shows when no limit is given.
 const READ_LINES: usize = 2000;
+/// Bytes one read shows at most, whatever its line limit: about 25,000
+/// tokens. A file of ordinary lines reaches the line limit first.
+const READ_BYTES: usize = 100 * 1024;
+/// The largest file a read loads, in bytes.
+const READ_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// Bytes of a result from a tool outside the engine (an MCP server's) the
+/// model is shown; the whole of a longer one is saved for it to read.
+const RESULT_BYTES: usize = 32 * 1024;
 /// The default command timeout.
 const SHELL_TIMEOUT_MS: u64 = 120_000;
 
@@ -420,6 +458,22 @@ impl Plan {
                 "There is no tool called `{other}`. The tools are read, write, edit, glob, grep and shell."
             )),
         }
+    }
+
+    /// Whether the call only looks, so it can run beside others that do.
+    ///
+    /// A read, a search of files or of the web, and a fetch: none changes
+    /// what another finds, whichever ends first.
+    #[must_use]
+    pub(crate) fn together(&self) -> bool {
+        matches!(
+            self,
+            Self::Read { .. }
+                | Self::Glob { .. }
+                | Self::Grep { .. }
+                | Self::WebFetch { .. }
+                | Self::WebSearch { .. }
+        )
     }
 
     /// What the call needs permission for.
@@ -913,14 +967,23 @@ fn files_metadata(shown: &str, before: Option<&str>, after: &str) -> Map<String,
 }
 
 /// Lines `offset`.. of `content`, at most `limit`, each with its number.
+///
+/// A very long line is cut short, and the lines stop at [`READ_BYTES`]
+/// if that comes before `limit`; what follows says where to read on.
 fn numbered(content: &str, offset: usize, limit: usize) -> String {
     let total = content.lines().count();
     let mut out = String::new();
+    let mut shown_to = offset - 1;
     for (i, line) in content.lines().enumerate().skip(offset - 1).take(limit) {
+        let line = shell::short_line(line);
+        // (The first line asked for is always shown.)
+        if !out.is_empty() && out.len() + line.len() > READ_BYTES {
+            break;
+        }
         let _ = writeln!(out, "{:>5}: {line}", i + 1);
+        shown_to = i + 1;
     }
-    let shown_to = (offset - 1 + limit).min(total);
-    if shown_to < total {
+    if shown_to < total && !out.is_empty() {
         let _ = writeln!(
             out,
             "({} more lines; read on with offset {})",
@@ -929,9 +992,54 @@ fn numbered(content: &str, offset: usize, limit: usize) -> String {
         );
     }
     if out.is_empty() {
-        out.push_str("(The file is empty.)\n");
+        out.push_str(if total == 0 {
+            "(The file is empty.)\n"
+        } else {
+            "(No lines there: the file is shorter.)\n"
+        });
     }
     out
+}
+
+/// A result from a tool outside the engine, as the model is shown it.
+///
+/// One longer than [`RESULT_BYTES`] is saved whole under `spill`, and the
+/// model gets its start and where the rest is.
+pub(crate) fn outside_result(value: &Value, spill: &Path) -> String {
+    let text = match value {
+        Value::String(text) => text.clone(),
+        // (Without the spaces and line breaks: they cost tokens.)
+        other => other.to_string(),
+    };
+    if text.len() <= RESULT_BYTES {
+        return text;
+    }
+    let mut end = RESULT_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    // Saved in lines, so it can be read in parts and searched.
+    let whole = match value {
+        Value::String(text) => text.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| text.clone()),
+    };
+    let saved = std::fs::create_dir_all(spill).ok().and_then(|()| {
+        let path = spill.join(format!("{}.txt", crate::id::ascending_id("result")));
+        std::fs::write(&path, &whole).ok().map(|()| path)
+    });
+    let rest = match saved {
+        Some(path) => format!(
+            "the whole result is saved in {}: read it in parts or search it with grep",
+            path.display()
+        ),
+        None => "the rest couldn't be saved: ask the tool for less at a time".to_owned(),
+    };
+    format!(
+        "{}\n… ({} of {} bytes shown; {rest})",
+        &text[..end],
+        end,
+        text.len()
+    )
 }
 
 #[cfg(test)]
@@ -946,6 +1054,65 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn a_read_is_bounded_in_bytes_as_well_as_lines() {
+        // A minified file: one line far past any limit.
+        let minified = format!("{}\nlast\n", "x".repeat(300_000));
+        let shown = numbered(&minified, 1, READ_LINES);
+        assert!(shown.len() < 3_000, "{}", shown.len());
+        assert!(shown.contains("more characters on this line)"));
+        assert!(shown.ends_with("    2: last\n"));
+
+        // Many long lines: it stops at the size limit and says where to go on.
+        let wide = format!("{}\n", "y".repeat(1_000)).repeat(150);
+        let shown = numbered(&wide, 1, READ_LINES);
+        assert!(shown.len() <= READ_BYTES + 100, "{}", shown.len());
+        let lines = shown.lines().filter(|l| l.contains(": y")).count();
+        assert!((90..150).contains(&lines), "{lines}");
+        assert!(
+            shown.ends_with(&format!(
+                "({} more lines; read on with offset {})\n",
+                150 - lines,
+                lines + 1
+            )),
+            "{}",
+            &shown[shown.len() - 80..]
+        );
+        // Reading on from there reaches the end.
+        let rest = numbered(&wide, lines + 1, READ_LINES);
+        assert!(rest.contains("  150: y") && !rest.contains("more lines"));
+        assert_eq!(
+            numbered("a\n", 5, 10),
+            "(No lines there: the file is shorter.)\n"
+        );
+    }
+
+    #[test]
+    fn a_long_result_from_outside_is_cut_and_saved_whole() {
+        let dir = tempfile::tempdir().expect("scratch");
+        assert_eq!(outside_result(&json!("hi"), dir.path()), "hi");
+        assert_eq!(
+            outside_result(&json!({ "a": [1, 2] }), dir.path()),
+            r#"{"a":[1,2]}"#
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).expect("list").count(), 0);
+
+        let rows: Vec<Value> = (0..5_000).map(|n| json!({ "row": n })).collect();
+        let shown = outside_result(&json!({ "rows": rows }), dir.path());
+        assert!(shown.len() < RESULT_BYTES + 300, "{}", shown.len());
+        assert!(shown.starts_with(r#"{"rows":[{"row":0}"#));
+        let saved = std::fs::read_dir(dir.path())
+            .expect("list")
+            .next()
+            .expect("a file")
+            .expect("entry")
+            .path();
+        assert!(shown.contains(&saved.display().to_string()), "{shown}");
+        let whole = std::fs::read_to_string(saved).expect("saved");
+        assert!(whole.contains("\"row\": 4999"));
+        assert!(whole.lines().count() > 5_000, "in lines, to read in parts");
+    }
+
     #[test]
     fn links_and_parent_folders_dont_hide_a_file_outside_the_project() {
         let dir = tempfile::tempdir().expect("dir");

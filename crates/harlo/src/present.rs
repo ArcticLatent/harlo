@@ -207,6 +207,11 @@ impl Presenter {
         let crew = app.crew(id);
         if let Some(timeline) = app.timeline(id) {
             self.timeline.show(&app.tokens, Some((id, timeline, &crew)));
+            state.set_timeline_more(timeline.has_earlier());
+            if let Some(rows) = self.timeline.take_came_above() {
+                state.set_timeline_above(i32::try_from(rows).unwrap_or(i32::MAX));
+                state.set_timeline_above_serial(state.get_timeline_above_serial().wrapping_add(1));
+            }
         }
         session::header(app, id, state);
         sync(&self.inbox, session::inbox(app, id));

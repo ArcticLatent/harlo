@@ -128,30 +128,59 @@ pub fn definitions() -> Vec<Value> {
     ]
 }
 
+/// Characters of one note the system prompt shows: a decision in a
+/// sentence or two fits many times over.
+const NOTE_CHARS: usize = 1_000;
+
+/// Bytes of notes the system prompt shows in all, about 2,000 tokens,
+/// paid on every request. The newest notes come first to that.
+const NOTES_BYTES: usize = 8 * 1024;
+
 /// The system prompt's section for `notes` (those still holding), or
 /// nothing when there are none.
+///
+/// `notes` come oldest first. When they are more than the prompt has room
+/// for, the oldest are left out and the section says how many.
 #[must_use]
 pub fn render(notes: &[Note]) -> String {
     let holding: Vec<&Note> = notes.iter().filter(|n| n.superseded_by.is_none()).collect();
     if holding.is_empty() {
         return String::new();
     }
-    let mut out = String::from(
-        "Notes kept from earlier sessions. Follow them unless the person says otherwise, cite a \
-         note by its ID when you rely on it, and use search_sessions to see why one was kept:\n",
-    );
-    for note in holding {
+    let mut lines: Vec<String> = Vec::new();
+    let mut size = 0;
+    for note in holding.iter().rev() {
         let from = note
             .source
             .title
             .as_deref()
             .map_or_else(String::new, |t| format!(", from \"{t}\""));
+        let mut text: String = note.text.chars().take(NOTE_CHARS).collect();
+        if text.len() < note.text.len() {
+            text.push('…');
+        }
+        let line = format!(
+            "- [{}] ({} note{from}) {text}\n",
+            note.id,
+            note.scope.as_str()
+        );
+        // (The newest note is shown whatever its size.)
+        if !lines.is_empty() && size + line.len() > NOTES_BYTES {
+            break;
+        }
+        size += line.len();
+        lines.push(line);
+    }
+    let mut out = String::from(
+        "Notes kept from earlier sessions. Follow them unless the person says otherwise, cite a \
+         note by its ID when you rely on it, and use search_sessions to see why one was kept:\n",
+    );
+    out.extend(lines.iter().rev().map(String::as_str));
+    let left_out = holding.len() - lines.len();
+    if left_out > 0 {
         let _ = writeln!(
             out,
-            "- [{}] ({} note{from}) {}",
-            note.id,
-            note.scope.as_str(),
-            note.text
+            "({left_out} older notes aren't shown here; search_sessions finds them.)"
         );
     }
     out
@@ -175,6 +204,33 @@ mod tests {
             created: 1,
             superseded_by: superseded_by.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn the_notes_section_has_a_size_and_keeps_the_newest() {
+        // A very long note is cut; it is still shown.
+        let long = render(&[note("not_1", &"x".repeat(5_000), None)]);
+        assert!(long.len() < NOTE_CHARS + 400, "{}", long.len());
+        assert!(long.trim_end().ends_with('…'));
+
+        // More notes than there is room for: the oldest are left out.
+        let many: Vec<Note> = (0..100)
+            .map(|n| note(&format!("not_{n:03}"), &"decided. ".repeat(40), None))
+            .collect();
+        let text = render(&many);
+        assert!(text.len() < NOTES_BYTES + 400, "{}", text.len());
+        assert!(text.contains("[not_099]") && !text.contains("[not_000]"));
+        let shown = text.matches("- [not_").count();
+        assert!(
+            text.ends_with(&format!(
+                "({} older notes aren't shown here; search_sessions finds them.)\n",
+                100 - shown
+            )),
+            "{text}"
+        );
+        // In the order they were kept.
+        let (earlier, later) = (text.find("[not_098]"), text.find("[not_099]"));
+        assert!(earlier < later, "{earlier:?} {later:?}");
     }
 
     #[test]

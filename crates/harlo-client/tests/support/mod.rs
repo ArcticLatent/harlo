@@ -6,8 +6,7 @@
 //! stops both processes and removes the folder.
 //!
 //! The server is `harlo-server`, built from this workspace the first time a
-//! sandbox starts (or the program `HARLO_SERVER_BIN` names). The import
-//! tests start a private the server too, with [`Sandbox::start_program`].
+//! sandbox starts (or the program `HARLO_SERVER_BIN` names).
 
 // Rust guideline compliant 2026-10-09
 
@@ -16,7 +15,6 @@
     reason = "each test file uses a different part of the harness"
 )]
 
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
@@ -76,9 +74,6 @@ fn spawn_server(program: &Path, root: &Path, port: u16, password: &str) -> Child
     let project = root.join("project");
     let mut server = Command::new(program);
     scratch_env(&mut server, root, password);
-    // OpenCode, run only to import from, reads its password from its own
-    // variable.
-    server.env("OPENCODE_PASSWORD", password);
     server
         .args([
             "serve",
@@ -101,23 +96,58 @@ fn spawn_server(program: &Path, root: &Path, port: u16, password: &str) -> Child
         .expect("start the server")
 }
 
+/// A free port on this computer, handed to no other test of this program.
+///
+/// Tests run side by side, and the system can give the same port twice
+/// before either server has taken it.
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("a free local port")
-        .local_addr()
-        .expect("bound address")
-        .port()
+    static HANDED: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .expect("a free port")
+            .port();
+        let mut handed = HANDED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !handed.contains(&port) {
+            handed.push(port);
+            return port;
+        }
+    }
+}
+
+/// Starts the scripted model, logging its requests to `log`; returns it
+/// and its port.
+///
+/// The model takes a free port itself and says which: one found free here
+/// first could be handed to another test before the model took it.
+fn start_model(log: &Path) -> (Child, u16) {
+    use std::io::BufRead as _;
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
+    let mut model = Command::new("python3")
+        .arg("-I")
+        .arg(script)
+        .arg("0")
+        .arg(log)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the scripted model");
+    let said = model.stdout.take().expect("the model's output");
+    let mut line = String::new();
+    std::io::BufReader::new(said)
+        .read_line(&mut line)
+        .expect("the model's port");
+    let port = line.trim().parse().expect("the scripted model's port");
+    (model, port)
 }
 
 impl Sandbox {
     /// Starts the scripted model and a private `harlo-server`.
     pub async fn start() -> Self {
-        Self::start_program(&binary()).await
-    }
-
-    /// Starts the scripted model and a private `program serve`, which
-    /// takes `harlo-server`'s arguments: OpenCode for the import tests.
-    pub async fn start_program(program: &Path) -> Self {
+        let program = binary();
         assert!(program.exists(), "no server at {}", program.display());
         let dir = tempfile::Builder::new()
             .prefix("harlo-sandbox.")
@@ -127,27 +157,16 @@ impl Sandbox {
         for sub in ["home", "config/harlo", "data", "state", "cache", "project"] {
             std::fs::create_dir_all(root.join(sub)).expect("scratch subfolder");
         }
-        let model_port = free_port();
+        let (model, model_port) = start_model(&root.join("model.jsonl"));
         let port = free_port();
         let password = format!("test-{}", harlo_client::message_id());
         prepare(root, model_port);
 
-        let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-model.py");
-        let model = Command::new("python3")
-            .arg("-I")
-            .arg(&tools)
-            .arg(model_port.to_string())
-            .arg(root.join("model.jsonl"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start the scripted model");
-
-        let server = spawn_server(program, root, port, &password);
+        let server = spawn_server(&program, root, port, &password);
         let url = format!("http://127.0.0.1:{port}");
         let sandbox = Self {
             dir,
-            program: program.to_owned(),
+            program,
             server,
             model,
             url,
@@ -200,29 +219,6 @@ impl Sandbox {
         self.project().to_string_lossy().into_owned()
     }
 
-    /// Runs the server's program as a command line against this server,
-    /// as a second client would: the `opencode` CLI, for the import tests.
-    pub fn cli(&self, args: &[&str]) -> String {
-        let mut cmd = Command::new(&self.program);
-        scratch_env(&mut cmd, self.dir.path(), &self.password);
-        let out = cmd
-            .env("OPENCODE_PASSWORD", &self.password)
-            .args(args)
-            .args(["--server", &self.url])
-            // The CLI takes its folder from `PWD`, not only the working directory.
-            .env("PWD", self.project())
-            .current_dir(self.project())
-            .stdin(Stdio::null())
-            .output()
-            .expect("run the command line");
-        assert!(
-            out.status.success(),
-            "{args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8_lossy(&out.stdout).into_owned()
-    }
-
     /// The sandbox's scratch folder, which holds the model's log (`model.jsonl`).
     pub fn root(&self) -> &Path {
         self.dir.path()
@@ -251,11 +247,6 @@ fn prepare(root: &Path, model_port: u16) {
         "permissions": [ { "action": "shell", "resource": "*", "effect": "ask" } ]
     });
     std::fs::write(root.join("config/harlo/harlo.json"), config.to_string()).expect("config");
-    // OpenCode, run only to import from, reads the same config from its own
-    // folder.
-    let opencode = root.join("config/opencode");
-    std::fs::create_dir_all(&opencode).expect("OpenCode's config folder");
-    std::fs::write(opencode.join("opencode.json"), config.to_string()).expect("config");
 
     let project = root.join("project");
     std::fs::write(project.join("a.txt"), "alpha\n").expect("a.txt");

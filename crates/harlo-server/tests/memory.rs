@@ -265,6 +265,15 @@ async fn people_correct_and_forget_notes_and_off_means_none() {
     .await;
     let kept = notes(&sandbox, &a.project_id).await;
     assert_eq!(kept.len(), 2, "{kept:?}");
+    // The session that kept them goes on with the prompt it began with,
+    // to the letter: a provider reads its conversation from its cache.
+    turn(&client, &a.id, "say Still here.").await;
+    let began = system_prompt_for(&sandbox, "tool remember");
+    assert_eq!(system_prompt_for(&sandbox, "say Still here."), began);
+    assert!(
+        !began.contains("Notes kept from earlier sessions"),
+        "{began}"
+    );
     let id = |text: &str| {
         kept.iter()
             .find(|n| n["text"] == text)
@@ -294,6 +303,13 @@ async fn people_correct_and_forget_notes_and_off_means_none() {
     assert_eq!(
         left[0]["text"],
         "Cache in Postgres, shared by every server."
+    );
+    // What a person changes reaches the sessions going, too.
+    turn(&client, &a.id, "say After the correction.").await;
+    let corrected = system_prompt_for(&sandbox, "say After the correction.");
+    assert!(
+        corrected.contains("shared by every server") && !corrected.contains(&format!("[{old}]")),
+        "{corrected}"
     );
 
     // Off, sessions get no notes and no memory tools.

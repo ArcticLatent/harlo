@@ -130,6 +130,10 @@ fn input(at: Signer<'_>, history: &[Message]) -> Vec<Value> {
     out
 }
 
+/// The provider whose requests name their conversation for its cache.
+/// Others that speak Responses may refuse a field they don't know.
+const KEYED: &str = "openai";
+
 /// The request's body: the instructions, the history and the tools, then
 /// the model's and variant's own fields over them.
 pub(crate) fn request(
@@ -159,28 +163,40 @@ pub(crate) fn request(
             .collect();
         body["tool_choice"] = json!("auto");
     }
+    // OpenAI sends requests that carry the same key to the same cache.
+    // Without one, the steps of a conversation are spread over its
+    // machines, and most are charged whole though they start alike. The
+    // first message's ID stands for the conversation: it never changes,
+    // and no other session has it.
+    if at.provider == KEYED
+        && let Some(first) = history.first().map(Message::id).filter(|id| !id.is_empty())
+    {
+        body["prompt_cache_key"] = json!(first);
+    }
     if let Value::Object(fields) = &mut body {
         fields.extend(extra.clone());
     }
     body
 }
 
-/// Usage as Responses reports it: input without the cached part, output
-/// with reasoning.
+/// Usage as Responses reports it: input without the parts read from the
+/// cache and written to it, output with reasoning.
 fn tokens(u: &Value) -> Tokens {
     let input = u["input_tokens"].as_u64().unwrap_or(0);
-    let cached = u["input_tokens_details"]["cached_tokens"]
-        .as_u64()
-        .unwrap_or(0);
+    let details = &u["input_tokens_details"];
+    let cached = details["cached_tokens"].as_u64().unwrap_or(0);
+    // Models that charge for writing to the cache count those tokens
+    // apart from the ones read; the rest is ordinary input.
+    let written = details["cache_write_tokens"].as_u64().unwrap_or(0);
     Tokens {
-        input: input.saturating_sub(cached),
+        input: input.saturating_sub(cached).saturating_sub(written),
         output: u["output_tokens"].as_u64().unwrap_or(0),
         reasoning: u["output_tokens_details"]["reasoning_tokens"]
             .as_u64()
             .unwrap_or(0),
         cache: Cache {
             read: cached,
-            write: 0,
+            write: written,
         },
     }
 }
@@ -344,5 +360,52 @@ mod tests {
         assert_eq!(input[1]["type"], "message");
         assert_eq!(input.len(), 2);
         assert_eq!(body["store"], false);
+    }
+
+    #[test]
+    fn a_conversation_is_named_for_openais_cache_and_no_other() {
+        let history = [
+            Message::User {
+                id: "msg_first".into(),
+                time: crate::message::Created { created: 1 },
+                text: "hi".into(),
+                skills: Vec::new(),
+                files: Vec::new(),
+            },
+            step(vec![Part::Text { text: "Hi".into() }]),
+        ];
+        let body = request(AT, "", &history, &[], &Map::new());
+        assert_eq!(body["prompt_cache_key"], "msg_first");
+        // The next step's request, a message longer, carries the same.
+        let body = request(AT, "", &history[..1], &[], &Map::new());
+        assert_eq!(body["prompt_cache_key"], "msg_first");
+
+        let other = Signer {
+            provider: "elsewhere",
+            model: "gpt",
+        };
+        let body = request(other, "", &history, &[], &Map::new());
+        assert!(body.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn tokens_written_to_the_cache_are_counted_apart() {
+        let counted = tokens(&json!({
+            "input_tokens": 1_000, "output_tokens": 7,
+            "input_tokens_details": { "cached_tokens": 600, "cache_write_tokens": 300 },
+        }));
+        assert_eq!(counted.input, 100);
+        assert_eq!(
+            counted.cache,
+            Cache {
+                read: 600,
+                write: 300
+            }
+        );
+        // A model that counts no writes reports none.
+        let counted = tokens(&json!({
+            "input_tokens": 1_000, "input_tokens_details": { "cached_tokens": 600 },
+        }));
+        assert_eq!((counted.input, counted.cache.write), (400, 0));
     }
 }

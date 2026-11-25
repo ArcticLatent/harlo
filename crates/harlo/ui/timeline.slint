@@ -837,8 +837,56 @@ export component Timeline inherits ListView {
     /// chains those rounds within one frame.
     callback end-moved();
 
+    /// How far below the first row's top the view is, and the first row in
+    /// view, placed as the list places rows (each counts as the average
+    /// height). Both are kept as the reader scrolls.
+    property <length> top-offset;
+    property <int> top-row;
+    /// How far to go down from the row `rows-came-above` put at the top.
+    property <length> still-down;
+
     scrolled => {
         root.following = self.content-y <= root.end + 4px;
+        root.top-offset = -self.content-y;
+        root.top-row = self.content-height > 0
+            ? floor(-self.content-y / self.content-height * State.timeline.length)
+            : 0;
+        // Within a screen of the first row, what came before it is wanted.
+        if State.timeline-more && self.content-y >= -self.visible-height {
+            Logic.timeline-near-start();
+        }
+    }
+
+    /// Keeps the reader's place after `count` rows came before the first.
+    /// At the end, the view stays at the end.
+    ///
+    /// Near the start, where the reader is when the rows are asked for,
+    /// the row that was first goes to the top, and `settle-above()`, called
+    /// on the event loop's next turn, goes as far down from it as the
+    /// reader was: the list has laid the rows below it out by then, so the
+    /// place is theirs to the pixel. Further down, the row that was at the
+    /// top goes to the top again, as near as the list can tell which it was.
+    public function rows-came-above(count: int) {
+        if root.following {
+            return;
+        }
+        if root.top-offset <= self.visible-height * 1.5 {
+            root.jump-to(count);
+            root.still-down = root.top-offset;
+        } else {
+            root.jump-to(count + root.top-row);
+            root.still-down = 0;
+        }
+        root.top-row += count;
+    }
+
+    /// Finishes what `rows-came-above` began.
+    public function settle-above() {
+        if root.still-down > 0 {
+            self.content-y = max(root.end, self.content-y - root.still-down);
+            root.still-down = 0;
+            root.following = self.content-y <= root.end + 4px;
+        }
     }
     // The end, watched only while following. Scrolled away, it stays put,
     // so rows measured while scrolling run no handler here: Slint counts

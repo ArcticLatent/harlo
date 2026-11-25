@@ -9,6 +9,11 @@
 //! tools and all, with one message after it, so the provider reads it from
 //! its cache instead of charging for the whole conversation again. Only a
 //! conversation that outgrew the context is cut to fit first.
+//!
+//! Apart from summaries, a conversation taken up again after its
+//! provider's cache let go of it can have its old tool results cleared
+//! ([`clear_cold`]): the next request is charged whole either way, so a
+//! shorter one costs less, and so does every step after it.
 
 // Rust guideline compliant 2026-10-09
 
@@ -47,6 +52,54 @@ const CHARS_PER_TOKEN: u64 = 3;
 /// The characters kept from the start and from the end of a tool result
 /// that is cut to make the conversation fit.
 const KEPT: (usize, usize) = (1_500, 500);
+
+/// How long after a session's last step its conversation is taken to
+/// have left Anthropic's cache, in milliseconds.
+///
+/// Anthropic keeps a marked conversation five minutes from its last use.
+/// Past that, the next request is charged whole, whatever it holds.
+pub const COLD_AFTER: i64 = 5 * 60 * 1000;
+
+/// The same for providers that keep a conversation longer.
+///
+/// `OpenAI`'s newer models keep one for at least thirty minutes from its
+/// last read, its earlier ones for five to ten minutes and up to an hour.
+/// Clearing before the cache lets go costs more than it saves: what is
+/// left is charged as new where it would have been read at a fraction.
+const COLD_AFTER_KEPT_LONGER: i64 = 30 * 60 * 1000;
+
+/// How long a conversation sent over `wire` rests before its provider's
+/// cache is taken to have let go of it, in milliseconds.
+#[must_use]
+pub fn cold_after(wire: &crate::catalog::Wire) -> i64 {
+    match wire {
+        crate::catalog::Wire::Messages => COLD_AFTER,
+        _ => COLD_AFTER_KEPT_LONGER,
+    }
+}
+
+/// The newest tool results a cold conversation keeps whole, in tokens:
+/// what the agent was working with when it was left.
+const RECENT: u64 = 40_000;
+
+/// A tool result smaller than this, in tokens, isn't worth clearing.
+const SMALL: u64 = 500;
+
+/// Clearing fewer tokens than this in all isn't worth changing the
+/// conversation for.
+const WORTH: u64 = 20_000;
+
+/// The key, in a tool result's metadata, of when its output was cleared
+/// from what the model reads. People still see the output.
+pub const CLEARED: &str = "cleared";
+
+/// What the model reads in place of a cleared output.
+pub const CLEARED_NOTE: &str = "(This output was cleared to keep the conversation short. \
+                                Call the tool again if you need it.)";
+
+/// Tools whose results stay whatever their age: instructions the agent
+/// follows and answers it can't get again.
+const LASTING: &[&str] = &["skill", "question", "todowrite", "subagent", "remember"];
 
 /// The context size, in tokens, from which a session is summarized
 /// before its next step.
@@ -151,25 +204,130 @@ pub fn since_summary(history: &[Message]) -> &[Message] {
 /// context, so the next one should start from a summary.
 #[must_use]
 pub fn is_full(history: &[Message], limit: u64) -> bool {
-    since_summary(history)
-        .iter()
-        .rev()
-        .find_map(|m| match m {
-            Message::Assistant(step) => Some(&step.tokens),
-            _ => None,
-        })
-        .is_some_and(|t| t.input + t.cache.read + t.cache.write + t.output >= limit)
+    last_used(history).is_some_and(|used| used >= limit)
 }
 
-/// The tokens the history's last step used of the context, if it has one.
+/// The tokens the history's last step used of the context, if it has
+/// one, less what was cleared since.
 fn last_used(history: &[Message]) -> Option<u64> {
-    since_summary(history).iter().rev().find_map(|m| match m {
-        Message::Assistant(step) => {
-            let t = &step.tokens;
-            Some(t.input + t.cache.read + t.cache.write + t.output)
-        }
+    let read = since_summary(history);
+    let step = read.iter().rev().find_map(|m| match m {
+        Message::Assistant(step) => Some(step),
         _ => None,
-    })
+    })?;
+    let t = &step.tokens;
+    let used = t.input + t.cache.read + t.cache.write + t.output;
+    Some(used.saturating_sub(cleared_since(read, when(step))))
+}
+
+/// When a step last had the model's server read the conversation.
+fn when(step: &crate::message::Assistant) -> i64 {
+    (step.time.completed)
+        .or(step.time.streamed)
+        .unwrap_or(step.time.created)
+}
+
+/// A completed tool result: about how many tokens it takes, when it was
+/// cleared if it was, and whether it may be.
+fn result(part: &Part) -> Option<(u64, Option<i64>, bool)> {
+    let Part::Tool {
+        name,
+        state: ToolState::Completed {
+            content, metadata, ..
+        },
+        ..
+    } = part
+    else {
+        return None;
+    };
+    let chars: usize = (content.iter())
+        .filter_map(|block| block["text"].as_str())
+        .map(str::len)
+        .sum();
+    let tokens = u64::try_from(chars).unwrap_or(u64::MAX) / CHARS_PER_TOKEN;
+    let cleared = metadata.get(CLEARED).and_then(Value::as_i64);
+    Some((tokens, cleared, !LASTING.contains(&name.as_str())))
+}
+
+/// About how many tokens of `messages`' tool results were cleared at or
+/// after `since`.
+fn cleared_since(messages: &[Message], since: i64) -> u64 {
+    messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::Assistant(step) => Some(step.content.iter()),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(result)
+        .filter(|(_, cleared, _)| cleared.is_some_and(|at| at >= since))
+        .map(|(tokens, ..)| tokens)
+        .sum()
+}
+
+/// Clears the old tool results of a conversation taken up again late.
+///
+/// Late is `after` milliseconds or more past its last step. Returns the
+/// places in `history` of the messages it changed, for them to be stored.
+///
+/// By then the provider's cache has let go of the conversation, and the
+/// next request is charged whole whatever it holds: a shorter one costs
+/// less, and so does every step that follows. While the cache holds, the
+/// conversation is left as it is, because changing it would cost a
+/// request charged whole that a cached one would have spared.
+///
+/// The newest results stay, about [`RECENT`] tokens of them, as do short
+/// ones and those of tools whose answers can't be had again. Nothing is
+/// cleared unless it adds up to [`WORTH`] tokens. A cleared result keeps
+/// its output for people; the model reads [`CLEARED_NOTE`] in its place,
+/// in every request from then on.
+pub fn clear_cold(history: &mut [Message], now: i64, after: i64) -> Vec<usize> {
+    let from = history.len() - since_summary(history).len();
+    let last = history[from..].iter().rev().find_map(|m| match m {
+        Message::Assistant(step) => Some(when(step)),
+        _ => None,
+    });
+    if last.is_none_or(|at| now.saturating_sub(at) < after) {
+        return Vec::new();
+    }
+    // Newest first: what is still whole counts as recent until that's full.
+    let mut recent = 0;
+    let mut old: Vec<(usize, usize, u64)> = Vec::new();
+    for (at, message) in history.iter().enumerate().skip(from).rev() {
+        let Message::Assistant(step) = message else {
+            continue;
+        };
+        for (part, (tokens, cleared, may)) in (step.content.iter().enumerate().rev())
+            .filter_map(|(part, made)| Some((part, result(made)?)))
+        {
+            if cleared.is_some() {
+                continue;
+            }
+            if recent < RECENT {
+                recent += tokens;
+            } else if may && tokens >= SMALL {
+                old.push((at, part, tokens));
+            }
+        }
+    }
+    if old.iter().map(|(.., tokens)| tokens).sum::<u64>() < WORTH {
+        return Vec::new();
+    }
+    let mut changed = Vec::new();
+    for (at, part, _) in old {
+        if let Message::Assistant(step) = &mut history[at]
+            && let Part::Tool {
+                state: ToolState::Completed { metadata, .. },
+                ..
+            } = &mut step.content[part]
+        {
+            metadata.insert(CLEARED.to_owned(), Value::from(now));
+            if changed.last() != Some(&at) {
+                changed.push(at);
+            }
+        }
+    }
+    changed
 }
 
 /// About how many tokens `message` takes in a request.
@@ -377,6 +535,107 @@ mod tests {
             skills: Vec::new(),
             files: Vec::new(),
         }
+    }
+
+    /// A step that ended at `ended` whose tool `name` returned `tokens`
+    /// tokens of text.
+    fn tool_step(id: &str, name: &str, tokens: usize, ended: i64) -> Message {
+        let Message::Assistant(mut made) = read_step(&"x".repeat(tokens * 3)) else {
+            unreachable!("a step");
+        };
+        made.id = id.into();
+        made.time.completed = Some(ended);
+        if let Part::Tool { name: tool, .. } = &mut made.content[0] {
+            *tool = name.into();
+        }
+        Message::Assistant(made)
+    }
+
+    /// What the model reads of each step's tool result, oldest first.
+    fn read_by_model(history: &[Message]) -> Vec<String> {
+        history
+            .iter()
+            .filter_map(|m| match m {
+                Message::Assistant(step) => step.content.first(),
+                _ => None,
+            })
+            .filter_map(|part| match part {
+                Part::Tool { state, .. } => Some(chat::result_text(state)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_conversation_left_to_go_cold_loses_its_old_tool_results() {
+        const MINUTE: i64 = 60_000;
+        let history = vec![
+            prompt("first"),
+            tool_step("a1", "read", 30_000, MINUTE),
+            tool_step("a2", "skill", 30_000, MINUTE),
+            tool_step("a3", "read", 100, MINUTE),
+            tool_step("a4", "shell", 25_000, MINUTE),
+            tool_step("a5", "grep", 30_000, MINUTE),
+            tool_step("a6", "read", 15_000, 2 * MINUTE),
+        ];
+
+        // Taken up while the cache still holds it, nothing changes.
+        let mut warm = history.clone();
+        assert!(clear_cold(&mut warm, 6 * MINUTE, COLD_AFTER).is_empty());
+        assert_eq!(warm, history);
+
+        // Past that, the results before the newest 40,000 tokens go: the
+        // long ones, of tools whose answers can be had again.
+        let mut cold = history.clone();
+        let changed = clear_cold(&mut cold, 7 * MINUTE, COLD_AFTER);
+        assert_eq!(changed, [4, 1], "the messages to store again");
+        let read = read_by_model(&cold);
+        let cleared: Vec<bool> = read.iter().map(|text| text == CLEARED_NOTE).collect();
+        assert_eq!(cleared, [true, false, false, true, false, false]);
+        // People still see what the call returned.
+        let Message::Assistant(step) = &cold[1] else {
+            unreachable!("a step");
+        };
+        let Part::Tool {
+            state: ToolState::Completed { content, .. },
+            ..
+        } = &step.content[0]
+        else {
+            unreachable!("a result");
+        };
+        assert_eq!(content[0]["text"].as_str().map(str::len), Some(90_000));
+
+        // Once cleared it stays as it is: every later request reads the same.
+        let again = cold.clone();
+        assert!(clear_cold(&mut cold, 60 * MINUTE, COLD_AFTER).is_empty());
+        assert_eq!(cold, again);
+    }
+
+    #[test]
+    fn too_little_to_clear_leaves_a_cold_conversation_alone() {
+        let history = vec![
+            prompt("first"),
+            tool_step("a1", "read", 15_000, 0),
+            tool_step("a2", "read", 45_000, 0),
+        ];
+        let mut cold = history.clone();
+        assert!(clear_cold(&mut cold, COLD_AFTER, COLD_AFTER).is_empty());
+        assert_eq!(cold, history);
+    }
+
+    #[test]
+    fn what_was_cleared_no_longer_counts_towards_a_summary() {
+        let mut history = vec![
+            prompt("first"),
+            tool_step("a1", "read", 60_000, 0),
+            tool_step("a2", "read", 45_000, 0),
+        ];
+        if let Message::Assistant(step) = &mut history[2] {
+            step.tokens.input = 120_000;
+        }
+        assert!(is_full(&history, 100_000));
+        assert_eq!(clear_cold(&mut history, COLD_AFTER, COLD_AFTER), [1]);
+        assert!(!is_full(&history, 100_000), "60,000 tokens lighter");
     }
 
     #[test]

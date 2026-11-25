@@ -11,6 +11,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -24,6 +25,19 @@ use crate::{Error, ModelRef, ProviderSpec};
 
 /// The longest the server may stay silent during a reply.
 const IDLE: Duration = Duration::from_mins(5);
+
+/// How long a finished reply's stream is read on for its closing bytes.
+/// They come with the last event or right behind it; a server that sends
+/// none in this time loses its connection, and nothing else.
+const CLOSING: Duration = Duration::from_secs(2);
+
+/// The HTTP client every model request goes through.
+///
+/// One for the process, so a step uses the connection the step before it
+/// opened: a client of its own for each request opened a connection, with
+/// its TLS handshake, for every step of every turn. Shared for speed only;
+/// nothing reads state from it.
+static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 /// Where a request goes.
 #[derive(Debug, Clone)]
@@ -277,9 +291,15 @@ fn chat_messages(history: &[Message]) -> Vec<Value> {
 
 /// The pictures a call returned, as image parts.
 pub(crate) fn result_pictures(state: &ToolState) -> Vec<Value> {
-    let ToolState::Completed { content, .. } = state else {
+    let ToolState::Completed {
+        content, metadata, ..
+    } = state
+    else {
         return Vec::new();
     };
+    if metadata.contains_key(crate::compaction::CLEARED) {
+        return Vec::new();
+    }
     content
         .iter()
         .filter(|c| {
@@ -293,6 +313,12 @@ pub(crate) fn result_pictures(state: &ToolState) -> Vec<Value> {
 /// What the model is told a call returned.
 pub(crate) fn result_text(state: &ToolState) -> String {
     match state {
+        // (Cleared from a conversation taken up again after a long pause.)
+        ToolState::Completed { metadata, .. }
+            if metadata.contains_key(crate::compaction::CLEARED) =>
+        {
+            crate::compaction::CLEARED_NOTE.to_owned()
+        }
         ToolState::Completed { content, .. } => content
             .iter()
             .filter_map(|c| c["text"].as_str())
@@ -320,7 +346,7 @@ pub(crate) async fn stream(
     stop: &CancellationToken,
     on: &mut (dyn FnMut(Piece) + Send),
 ) -> Result<Reply, Error> {
-    let client = reqwest::Client::new();
+    let client = &*HTTP;
     let base = &to.base_url;
     let mut req = match &to.wire {
         Wire::Chat => client.post(format!("{base}/chat/completions")),
@@ -414,6 +440,14 @@ pub(crate) async fn stream(
             break;
         }
     }
+    // The reply is whole, but the stream's closing bytes may still be on
+    // their way, and a connection left with bytes unread is closed, not
+    // used again. They are read behind the turn's back, which waits for
+    // nothing.
+    tokio::spawn(async move {
+        let _ =
+            tokio::time::timeout(CLOSING, async { while events.next().await.is_some() {} }).await;
+    });
     Ok(reply.finish(on))
 }
 
@@ -675,6 +709,92 @@ fn tokens(u: &Value) -> Tokens {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model's server on this computer that counts the connections
+    /// opened to it. It answers each request with a short reply, and sends
+    /// the stream's closing bytes a moment after the reply's last event.
+    async fn counting_model() -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::Ordering;
+
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let port = listener.local_addr().expect("address").port();
+        let opened = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = std::sync::Arc::clone(&opened);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counted.fetch_add(1, Ordering::Relaxed);
+                tokio::spawn(async move {
+                    let mut got: Vec<u8> = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    loop {
+                        // One request: its head, then the body the head announces.
+                        let head_end = loop {
+                            if let Some(at) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                                break at + 4;
+                            }
+                            match stream.read(&mut buffer).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => got.extend_from_slice(&buffer[..n]),
+                            }
+                        };
+                        let head = String::from_utf8_lossy(&got[..head_end]).to_ascii_lowercase();
+                        let length: usize = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:"))
+                            .and_then(|value| value.trim().parse().ok())
+                            .unwrap_or(0);
+                        while got.len() < head_end + length {
+                            match stream.read(&mut buffer).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(n) => got.extend_from_slice(&buffer[..n]),
+                            }
+                        }
+                        got.drain(..head_end + length);
+                        let events = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
+                                      data: [DONE]\n\n";
+                        let reply = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                             Transfer-Encoding: chunked\r\n\r\n{:x}\r\n{events}\r\n",
+                            events.len()
+                        );
+                        if stream.write_all(reply.as_bytes()).await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        if stream.write_all(b"0\r\n\r\n").await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        (port, opened)
+    }
+
+    #[tokio::test]
+    async fn a_step_uses_the_connection_the_step_before_opened() {
+        let (port, opened) = counting_model().await;
+        let to = Endpoint {
+            base_url: format!("http://127.0.0.1:{port}"),
+            api_key: None,
+            headers: Vec::new(),
+            wire: Wire::Chat,
+            signer: ("fake".into(), "fake-coder".into()),
+        };
+        let stop = CancellationToken::new();
+        for _ in 0..3 {
+            let reply = stream(&to, &json!({}), &stop, &mut |_| {})
+                .await
+                .expect("a reply");
+            assert_eq!(reply.blocks, [Block::Text("Hi".into())]);
+            // (As long as the quickest tool takes between two steps.)
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(opened.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
 
     fn fed(chunks: &[Value]) -> (Reply, Vec<Piece>) {
         let mut pieces = Vec::new();

@@ -2,6 +2,10 @@
 
     python3 -I tools/fake-model.py <port> <log.jsonl>
 
+With port 0 it takes a free port and prints its number, alone on the first
+line of its output. Tests start it that way: a port found free beforehand
+may be handed to another test before this server takes it.
+
 GET  /v1/models            one model, "fake-coder"
 POST /v1/chat/completions  streamed (SSE) or plain JSON
 POST /v1/messages          the same script, streamed as Anthropic's Messages
@@ -458,4 +462,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
-ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+SERVER = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+if PORT == 0:
+    # The caller left the choice of port to the system: say which it is.
+    print(SERVER.server_address[1], flush=True)
+SERVER.serve_forever()

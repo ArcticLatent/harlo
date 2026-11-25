@@ -14,7 +14,7 @@ use harlo_core::server::{
 };
 use harlo_core::sessions::Project;
 use harlo_core::theme::{self, Mode, Scheme, Tokens};
-use harlo_core::timeline::{Entry, entries};
+use harlo_core::timeline::{Entry, entries, opening_agent};
 use harlo_core::workspace::{EventKind, Fetch, Fetched, InboxItem, ModelRef, Session, Workspace};
 use std::time::Instant;
 
@@ -23,7 +23,7 @@ use crate::keys::{Key, KeyPress};
 use crate::model::{self, AgentChoice, Feedback, Folder, ModelChoice, Picker, Variant};
 use crate::task::{Effect, Task};
 use crate::text::{Cursor, Edit, Position, TextBox};
-use crate::timeline::{self, Activity, Timeline};
+use crate::timeline::{self, Activity, Stretch, Timeline};
 
 mod agents;
 mod appearance;
@@ -433,8 +433,13 @@ pub enum Message {
     Pasted(Option<Vec<u8>>),
     /// A send finished: the session it went to, or why it failed.
     Sent(Result<Box<Session>, String>),
-    /// A session's history loaded.
+    /// A session's whole history loaded.
     History(String, Result<Vec<Entry>, String>),
+    /// The end of a session's history loaded.
+    Recent(String, Result<Stretch, String>),
+    /// The history before a session's first row loaded: the session, where
+    /// that history started, and it.
+    Earlier(String, String, Result<Stretch, String>),
     /// A session's timeline reported something.
     Timeline(String, timeline::Event),
     /// The server connection reported something.
@@ -1063,7 +1068,9 @@ impl App {
             | Message::PickModel(_)
             | Message::PickVariant(_)
             | Message::Sent(_)
-            | Message::History(..)) => return self.session_action(message),
+            | Message::History(..)
+            | Message::Recent(..)
+            | Message::Earlier(..)) => return self.session_action(message),
             message @ (Message::TogglePicker(_)
             | Message::ClosePicker
             | Message::PickerFilter(_)
@@ -1136,6 +1143,7 @@ impl App {
             crate::timeline::Event::Review { tool, file } => {
                 return self.review_edit(&id, &tool, file);
             }
+            crate::timeline::Event::NearStart => return self.load_earlier(&id),
             _ => {}
         }
         match self.timelines.get_mut(&id) {
@@ -1234,7 +1242,17 @@ impl App {
                 self.unsend();
                 self.send_error = Some(reason);
             }
-            Message::History(id, result) => return self.loaded(&id, result),
+            Message::History(id, result) => return self.loaded(&id, result.map(Stretch::from)),
+            Message::Recent(id, result) => return self.loaded(&id, result),
+            Message::Earlier(id, from, result) => {
+                if let Some(timeline) = self.timelines.get_mut(&id) {
+                    match result {
+                        Ok(stretch) => timeline.add_earlier(&from, stretch),
+                        Err(_) => timeline.earlier_failed(),
+                    }
+                }
+                return self.fill_screen(&id);
+            }
             Message::Stop => {
                 return self.act(|client, id| async move { client.interrupt(&id).await });
             }
@@ -1537,7 +1555,8 @@ impl App {
         ])
     }
 
-    /// Loads a session's history into its timeline.
+    /// Loads the end of a session's history into its timeline: what a
+    /// reader opening it sees. The rest loads as they go back.
     fn load_history(&self, id: String) -> Task<Message> {
         let Some(client) = self.client.clone() else {
             return Task::none();
@@ -1545,14 +1564,48 @@ impl App {
         Task::perform(
             async move {
                 let result = client
-                    .messages(&id)
+                    .recent_messages(&id, HISTORY_PAGE)
                     .await
-                    .map(|messages| entries(&messages))
+                    .map(|history| stretch(&history))
                     .map_err(|e| e.to_string());
                 (id, result)
             },
-            |(id, result)| Message::History(id, result),
+            |(id, result)| Message::Recent(id, result),
         )
+    }
+
+    /// Loads the history before a session's first row, if there is any
+    /// and it isn't on its way.
+    fn load_earlier(&mut self, id: &str) -> Task<Message> {
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        let Some(from) = self.timelines.get_mut(id).and_then(Timeline::fetch_earlier) else {
+            return Task::none();
+        };
+        let id = id.to_owned();
+        Task::perform(
+            async move {
+                let result = client
+                    .earlier_messages(&id, &from, HISTORY_PAGE)
+                    .await
+                    .map(|history| stretch(&history))
+                    .map_err(|e| e.to_string());
+                (id, from, result)
+            },
+            |(id, from, result)| Message::Earlier(id, from, result),
+        )
+    }
+
+    /// Loads more history while a session's rows are too few to scroll:
+    /// with nothing to scroll, a reader can't go back for it.
+    fn fill_screen(&mut self, id: &str) -> Task<Message> {
+        let few = (self.timelines.get(id)).is_some_and(|t| t.len() < SCREENFUL && t.has_earlier());
+        if few {
+            self.load_earlier(id)
+        } else {
+            Task::none()
+        }
     }
 
     /// Switches to another server, keeping the tabs of the one left for later.
@@ -1746,17 +1799,17 @@ impl App {
     }
 
     /// Puts a loaded history, or the reason it failed, into its session's timeline.
-    fn loaded(&mut self, id: &str, result: Result<Vec<Entry>, String>) -> Task<Message> {
+    fn loaded(&mut self, id: &str, result: Result<Stretch, String>) -> Task<Message> {
         let busy = self.workspace.is_busy(id);
         let Some(timeline) = self.timelines.get_mut(id) else {
             return Task::none();
         };
         timeline.set_busy(busy);
         match result {
-            Ok(rows) => timeline.set(rows),
+            Ok(stretch) => timeline.set_end(stretch),
             Err(reason) => timeline.fail(reason),
         }
-        self.check_undo(id)
+        Task::batch([self.check_undo(id), self.fill_screen(id)])
     }
 
     /// Sends the composer: to the open session, or as the start of a new one.
@@ -2472,6 +2525,22 @@ async fn pick_folder() -> Option<PathBuf> {
 /// The user's home folder, where new sessions start unless another is chosen.
 fn home_folder() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_owned())
+}
+
+/// How many of a session's messages are read at a time: its newest when
+/// it opens, and that many more each time the reader comes to the start.
+const HISTORY_PAGE: usize = 100;
+
+/// Fewer rows than this may not fill the window.
+const SCREENFUL: usize = 40;
+
+/// A stretch of history as the timeline takes it.
+fn stretch(history: &harlo_core::workspace::History) -> Stretch {
+    Stretch {
+        entries: entries(&history.messages),
+        earlier: history.earlier.clone(),
+        opened_by: opening_agent(&history.messages).map(str::to_owned),
+    }
 }
 
 /// Asks for files to attach; an empty list when the dialog is cancelled.

@@ -1426,6 +1426,10 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
         app,
         TimelineEvent::ToggleDiff(key.to_string())
     ));
+    send_with!(on_timeline_near_start, |app| in_session(
+        app,
+        TimelineEvent::NearStart
+    ));
     send_with!(on_undo, |app, key| in_session(
         app,
         TimelineEvent::Undo(key.to_string())

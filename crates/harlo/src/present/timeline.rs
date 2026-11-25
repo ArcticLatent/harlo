@@ -92,6 +92,10 @@ pub struct Rows {
     slots: Rc<RefCell<Slots>>,
     /// The list's fresh start the rows were built in.
     generation: u64,
+    /// The timeline's count of stretches put before its rows, as last shown.
+    above: u64,
+    /// How many rows came before the first one since the window was told.
+    came_above: Option<usize>,
 }
 
 impl std::fmt::Debug for Rows {
@@ -123,7 +127,16 @@ impl Rows {
             tokens: None,
             slots: Rc::new(RefCell::new(Slots::default())),
             generation: 0,
+            above: 0,
+            came_above: None,
         }
+    }
+
+    /// How many rows came before the one that was first, when history was
+    /// put above the rows since this last asked: the list keeps the
+    /// reader's place by it.
+    pub fn take_came_above(&mut self) -> Option<usize> {
+        self.came_above.take()
     }
 
     /// The thumbnails' list the rows point into.
@@ -179,7 +192,9 @@ impl Rows {
             self.clear();
             self.session = Some(id.to_owned());
             self.generation = generation;
+            self.above = timeline.above();
         }
+        let was_first = self.first_if_grown(timeline);
         let next = next_items(timeline);
         let turns = turns(&next, crew);
         let live = live_end(timeline, &next);
@@ -257,7 +272,27 @@ impl Rows {
         let tail = self.items.split_off(prefix);
         self.items.extend(fresh);
         self.items.extend(tail);
+        if let Some(key) = was_first {
+            self.came_above = self.rows_before(&key);
+        }
         self.mark_prompts();
+    }
+
+    /// The first item shown, when history was put above `timeline`'s rows
+    /// since they were last shown: the item to find again after.
+    fn first_if_grown(&mut self, timeline: &Timeline) -> Option<String> {
+        let grown = self.above != timeline.above();
+        self.above = timeline.above();
+        self.items
+            .first()
+            .filter(|_| grown)
+            .map(|item| item.key.clone())
+    }
+
+    /// How many rows come before the item `key`, if it's shown.
+    fn rows_before(&self, key: &str) -> Option<usize> {
+        let at = self.items.iter().position(|item| item.key == key)?;
+        Some(self.items[..at].iter().map(|item| item.rows.len()).sum())
     }
 
     fn clear(&mut self) {

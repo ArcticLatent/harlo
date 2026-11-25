@@ -104,7 +104,29 @@ pub(crate) struct Live {
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
     /// Where random web searches stand.
     pub(crate) searches: crate::search::Searches,
+    /// The parts of sessions' system prompts that are held still, by
+    /// session.
+    steady: HashMap<String, Steady>,
 }
+
+/// What a session's system prompt keeps saying while its conversation may
+/// be in a provider's cache: the notes and the date as they were.
+///
+/// A provider's cache holds a conversation from its start, system prompt
+/// first. A note kept in the session, or midnight, would change that
+/// start, and the whole conversation would be charged again as new.
+#[derive(Debug)]
+struct Steady {
+    notes: String,
+    date: String,
+    /// When a turn last used it, in Unix milliseconds.
+    used: i64,
+}
+
+/// How long after a session's last turn a provider may still hold its
+/// conversation in cache, in milliseconds: the longest any offers, an
+/// hour. A session idle for longer gets today's notes and date.
+const WARM_MS: i64 = 60 * 60 * 1000;
 
 /// The global config file as last read.
 #[derive(Debug)]
@@ -1008,7 +1030,9 @@ impl Server {
         } = chosen;
         let directory = session.location.directory.clone();
         let links = self.mcp_ready(&directory).await;
-        let mut system = self.system_prompt(&directory, &folder).await;
+        let mut system = self
+            .system_prompt(&directory, &folder, Some(&session.id))
+            .await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
@@ -1083,12 +1107,34 @@ impl Server {
                 .run_claude(session, model, &agent.id, rules, &history, stop)
                 .await;
         }
+        let mut chosen = chosen;
+        self.clear_cold(session, &mut chosen);
         let turn = self.turn_for(session, chosen).await;
         let hooks = Hooks::new(self, &session.id, &session.location.directory);
         match harlo_engine::run(turn, &hooks, &hooks, stop).await {
             Outcome::Succeeded => ("succeeded", None),
             Outcome::Interrupted => ("interrupted", None),
             Outcome::Failed(e) => ("failed", Some(e.to_string())),
+        }
+    }
+
+    /// Clears the old tool results of a session taken up again after its
+    /// provider's cache let go of it, unless the configuration says not
+    /// to, and stores the messages it changed.
+    fn clear_cold(&self, session: &Session, chosen: &mut Chosen) {
+        let after = match chosen.folder.config.prune {
+            harlo_engine::Prune::Never => return,
+            harlo_engine::Prune::After(rest) => rest,
+            harlo_engine::Prune::Cold => {
+                harlo_engine::compaction::cold_after(&chosen.provider.wire)
+            }
+        };
+        let now = harlo_engine::now();
+        let changed = harlo_engine::compaction::clear_cold(&mut chosen.history, now, after);
+        for at in changed {
+            if let Err(why) = self.store.put_message(&session.id, &chosen.history[at]) {
+                tracing::warn!(name: "clear.unsaved", %why, "couldn't store a cleared tool result");
+            }
         }
     }
 
@@ -1135,7 +1181,7 @@ impl Server {
             )
         })?;
         let mut system = self
-            .system_prompt(&session.location.directory, &folder)
+            .system_prompt(&session.location.directory, &folder, Some(&session.id))
             .await;
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
@@ -1185,9 +1231,55 @@ impl Server {
         .map_err(|e| Refusal::Bad(e.to_string()))
     }
 
-    /// The system prompt for a session in `directory`: the agent's prompt, the project's instructions, then the date
-    /// and environment.
-    async fn system_prompt(&self, directory: &str, folder: &crate::folder::Folder) -> String {
+    /// The notes section and the date for the system prompt of `session`
+    /// (none: a prompt of its own) in `project`.
+    ///
+    /// A session gets the ones its last turn got, while that turn is
+    /// recent enough for a provider to still hold the conversation.
+    fn steady_parts(&self, session: Option<&str>, project: &str) -> (String, String) {
+        let Some(session) = session else {
+            return (self.notes_prompt(project), today());
+        };
+        let time = now();
+        if let Some(kept) = lock(&self.live).steady.get_mut(session)
+            && time - kept.used < WARM_MS
+        {
+            kept.used = time;
+            return (kept.notes.clone(), kept.date.clone());
+        }
+        let (notes, date) = (self.notes_prompt(project), today());
+        lock(&self.live).steady.insert(
+            session.to_owned(),
+            Steady {
+                notes: notes.clone(),
+                date: date.clone(),
+                used: time,
+            },
+        );
+        (notes, date)
+    }
+
+    /// Lets session `id`'s next turn read the notes and the date afresh:
+    /// its conversation starts over (a summary), or it is gone.
+    pub(crate) fn refresh_prompt(&self, id: &str) {
+        lock(&self.live).steady.remove(id);
+    }
+
+    /// Lets every session's next turn read the notes afresh: a person
+    /// changed them, and means it for the sessions going too.
+    pub(crate) fn refresh_prompts(&self) {
+        lock(&self.live).steady.clear();
+    }
+
+    /// The system prompt for `session` (none: a prompt of its own) in
+    /// `directory`: the agent's prompt, the project's instructions, the
+    /// notes, then the environment and the date.
+    async fn system_prompt(
+        &self,
+        directory: &str,
+        folder: &crate::folder::Folder,
+        session: Option<&str>,
+    ) -> String {
         let root = git::toplevel(directory).await;
         let home = dirs::home_dir().unwrap_or_default();
         let search = harlo_engine::instructions::Search {
@@ -1205,7 +1297,7 @@ impl Server {
             prompt.push_str("\n\n");
             prompt.push_str(&harlo_engine::instructions::render(&found));
         }
-        let notes = self.notes_prompt(&git::project_id(directory).await);
+        let (notes, date) = self.steady_parts(session, &git::project_id(directory).await);
         if !notes.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(notes.trim_end());
@@ -1215,7 +1307,7 @@ impl Server {
             "\n\nWorking folder: {directory}\nIs a git repository: {}\nPlatform: {}\nToday's date: {}",
             if root.is_some() { "yes" } else { "no" },
             std::env::consts::OS,
-            today(),
+            date,
         );
         prompt
     }
@@ -1443,6 +1535,10 @@ impl Hooks {
         }
         self.server
             .add_usage(&self.session, &compaction.tokens, compaction.cost);
+        // (The conversation starts over from the summary.)
+        if compaction.status == "completed" {
+            self.server.refresh_prompt(&self.session);
+        }
         match (&compaction.summary, &compaction.error) {
             (Some(summary), _) if compaction.status == "completed" => self.send(
                 "session.compaction.ended",

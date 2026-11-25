@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[doc(inline)]
 pub use harlo_client::{
-    Event, EventKind, FileDiff, Form, InboxItem, Message, ModelRef, Part, Permission,
+    Event, EventKind, FileDiff, Form, History, InboxItem, Message, ModelRef, Part, Permission,
     Project as ServerProject, Report, Revert, Session, Tokens, ToolCall, ToolStatus,
 };
 

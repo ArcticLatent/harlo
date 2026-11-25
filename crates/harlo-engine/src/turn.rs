@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures_util::StreamExt as _;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -305,10 +306,39 @@ pub fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// The actions the calls of the tool named `tool` ask leave for.
+fn actions(tool: &str) -> Vec<&str> {
+    match tool {
+        "write" => vec!["edit"],
+        "remember" => vec!["remember", crate::rules::REMEMBER_USER],
+        other => vec![other],
+    }
+}
+
 /// The tools offered to the model this turn: the built-in ones, and those
 /// the turn's skills, memory, todos, Code Mode and subagents add, less what
 /// a rule denies.
+///
+/// A tool the rules refuse whatever it's called with is left out, so an
+/// agent that only reads isn't sent how to write on every request.
 pub(crate) fn offered(turn: &Turn) -> Vec<Value> {
+    let mut definitions = all(turn);
+    let layers: Vec<(&str, &[Rule])> = turn
+        .rules
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_slice()))
+        .collect();
+    definitions.retain(|tool| {
+        let name = tool["name"].as_str().unwrap_or_default();
+        actions(name)
+            .iter()
+            .any(|action| crate::rules::permits(&layers, action))
+    });
+    definitions
+}
+
+/// Every tool the turn has, whatever the rules say of it.
+fn all(turn: &Turn) -> Vec<Value> {
     let mut definitions = tools::definitions();
     definitions.push(crate::question::definition());
     // Skills a rule denies aren't offered.
@@ -520,9 +550,15 @@ async fn step(
     stop: &CancellationToken,
 ) -> Result<(Assistant, Next), Error> {
     let (mut assistant, calls) = ask_model(turn, definitions, sink, stop).await?;
-    // The files as the calls find them, and as they leave them.
-    let start = match (&turn.shadow, calls.is_empty()) {
-        (Some(shadow), false) => track(shadow).await,
+    // The files as the calls find them, and as they leave them. A step
+    // that only looks leaves them as they are: nothing of it to undo, so
+    // nothing is recorded, which on a large project is most of what a
+    // step of reading costs.
+    let changes = calls.iter().any(
+        |at| matches!(&assistant.content[*at], Part::Tool { name, .. } if !tools::only_looks(name)),
+    );
+    let start = match (&turn.shadow, changes) {
+        (Some(shadow), true) => track(shadow).await,
         _ => None,
     };
     let next = run_calls(turn, &mut assistant, calls, sink, gate, stop).await;
@@ -553,6 +589,9 @@ async fn track(shadow: &crate::snapshot::Shadow) -> Option<String> {
         }
     }
 }
+
+/// Characters of a call's unreadable arguments the model is shown back.
+const BAD_ARGUMENTS: usize = 300;
 
 /// How many times a step asks the model before its failure stands.
 const ATTEMPTS: u32 = 8;
@@ -724,7 +763,11 @@ fn fill(assistant: &mut Assistant, blocks: Vec<Block>, sink: &impl Sink) -> Vec<
                         failed(
                             Map::new(),
                             "tool",
-                            format!("The arguments weren't a JSON object: {arguments}"),
+                            // (Its start is enough to see what went wrong.)
+                            format!(
+                                "The arguments weren't a JSON object. They began: {}",
+                                arguments.chars().take(BAD_ARGUMENTS).collect::<String>()
+                            ),
                         ),
                     ),
                 };
@@ -749,8 +792,29 @@ fn fill(assistant: &mut Assistant, blocks: Vec<Block>, sink: &impl Sink) -> Vec<
     calls
 }
 
-/// Checks, asks for and runs the step's calls, in order; returns what
-/// follows the step.
+/// How many of a step's calls run at once.
+const TOGETHER: usize = 8;
+
+/// A checked call that only looks, waiting to run with those beside it.
+struct Waiting {
+    /// Its place in the step's content.
+    at: usize,
+    /// Its ID.
+    call: String,
+    /// What the model passed it.
+    input: Map<String, Value>,
+    /// What it does.
+    plan: Plan,
+}
+
+/// Checks, asks for and runs the step's calls; returns what follows the
+/// step.
+///
+/// Calls are checked, and a person asked, one at a time in the order the
+/// model made them. Calls beside each other that only look (a read, a
+/// search, a fetch) then run at once, [`TOGETHER`] at a time. Any other
+/// call runs alone, after those before it and before those after it, so
+/// a read after an edit still sees the edit.
 async fn run_calls(
     turn: &mut Turn,
     assistant: &mut Assistant,
@@ -766,54 +830,68 @@ async fn run_calls(
         Next::Model
     };
     let mut changed: Vec<String> = Vec::new();
+    let mut waiting: Vec<Waiting> = Vec::new();
     for at in calls {
         let Part::Tool {
-            id: call,
-            name,
-            state,
-            time,
-        } = &mut assistant.content[at]
+            id, name, state, ..
+        } = &assistant.content[at]
         else {
             continue;
         };
-        if !matches!(state, ToolState::Running { .. }) {
-            sink.emit(Event::ToolEnded {
-                message: message.clone(),
-                call: call.clone(),
-                state: state.clone(),
-            });
-            continue;
-        }
-        let input = state.input().clone();
-        let ended = if matches!(next, Next::Halt) {
-            failed(
-                input,
-                "skipped",
-                "Not run: an earlier call in this step was refused.".to_owned(),
-            )
+        let (call, name, input) = (id.clone(), name.clone(), state.input().clone());
+        let called = if !matches!(state, ToolState::Running { .. }) {
+            // (Its arguments couldn't be read: it has failed already.)
+            Called::Ran(state.clone(), Vec::new())
+        } else if matches!(next, Next::Halt) {
+            let why = "Not run: an earlier call in this step was refused.";
+            Called::Refused(failed(input, "skipped", why.to_owned()))
         } else if stop.is_cancelled() {
-            failed(input, "aborted", "Stopped before it ran.".to_owned())
+            let why = "Stopped before it ran.";
+            Called::Refused(failed(input, "aborted", why.to_owned()))
         } else {
-            match call_tool(turn, &message, call, name, input, time, gate, stop).await {
-                Called::Ran(state, files) => {
-                    changed.extend(files);
-                    state
-                }
-                Called::Refused(state) => state,
-                Called::Halted(state) => {
-                    next = Next::Halt;
-                    state
+            match planned(turn, &name, &input) {
+                Err(called) => called,
+                Ok(plan) => {
+                    let together = plan.together();
+                    if !together {
+                        // It may need what the calls before it found.
+                        run_waiting(turn, assistant, &mut waiting, sink, stop).await;
+                    }
+                    match admit(turn, plan, &input, &message, &call, gate, stop).await {
+                        Err(called) => called,
+                        Ok(plan) if together => {
+                            waiting.push(Waiting {
+                                at,
+                                call,
+                                input,
+                                plan,
+                            });
+                            continue;
+                        }
+                        Ok(plan) => {
+                            began(assistant, at, now());
+                            finish(turn, plan, input, &message, &call, gate, stop).await
+                        }
+                    }
                 }
             }
         };
-        time.completed = Some(now());
-        *state = ended;
-        sink.emit(Event::ToolEnded {
-            message: message.clone(),
-            call: call.clone(),
-            state: state.clone(),
-        });
+        // (The calls before this one end before it does.)
+        run_waiting(turn, assistant, &mut waiting, sink, stop).await;
+        let state = match called {
+            Called::Ran(state, files) => {
+                changed.extend(files);
+                state
+            }
+            Called::Refused(state) => state,
+            Called::Halted(state) => {
+                next = Next::Halt;
+                state
+            }
+        };
+        ended(assistant, at, state, now(), sink);
     }
+    run_waiting(turn, assistant, &mut waiting, sink, stop).await;
     changed.dedup();
     assistant.time.completed = Some(now());
     assistant.snapshot = Some(Snapshot {
@@ -822,6 +900,76 @@ async fn run_calls(
         files: changed,
     });
     next
+}
+
+/// Notes that the call at `at` began to run at `time`.
+fn began(assistant: &mut Assistant, at: usize, time: i64) {
+    if let Part::Tool { time: times, .. } = &mut assistant.content[at] {
+        times.ran = Some(time);
+    }
+}
+
+/// Records how the call at `at` ended, at `time`, and reports it.
+fn ended(assistant: &mut Assistant, at: usize, ended: ToolState, time: i64, sink: &impl Sink) {
+    let message = assistant.id.clone();
+    let Part::Tool {
+        id,
+        state,
+        time: times,
+        ..
+    } = &mut assistant.content[at]
+    else {
+        return;
+    };
+    // (A call that failed before running keeps the state it has.)
+    if matches!(state, ToolState::Running { .. }) {
+        times.completed = Some(time);
+        *state = ended;
+    }
+    sink.emit(Event::ToolEnded {
+        message,
+        call: id.clone(),
+        state: state.clone(),
+    });
+}
+
+/// Runs the calls waiting, at once, and records how each ended, in the
+/// order the model made them.
+async fn run_waiting(
+    turn: &Turn,
+    assistant: &mut Assistant,
+    waiting: &mut Vec<Waiting>,
+    sink: &impl Sink,
+    stop: &CancellationToken,
+) {
+    if waiting.is_empty() {
+        return;
+    }
+    let message = assistant.id.clone();
+    let start = now();
+    for call in waiting.iter() {
+        began(assistant, call.at, start);
+    }
+    let mut results = futures_util::stream::iter(waiting.drain(..))
+        .map(|call| run_one(turn, call, &message, stop))
+        .buffered(TOGETHER);
+    while let Some((at, state, time)) = results.next().await {
+        ended(assistant, at, state, time, sink);
+    }
+}
+
+/// Runs one waiting call; returns its place, how it ended and when.
+async fn run_one(
+    turn: &Turn,
+    waiting: Waiting,
+    message: &str,
+    stop: &CancellationToken,
+) -> (usize, ToolState, i64) {
+    let result = run_noted(turn, waiting.plan, message, &waiting.call, stop).await;
+    // (A call that only looks changes no file.)
+    let (Called::Ran(state, _) | Called::Refused(state) | Called::Halted(state)) =
+        ran(waiting.input, result);
+    (waiting.at, state, now())
 }
 
 /// How one call went.
@@ -906,10 +1054,7 @@ async fn run_external(
         v = catalog.call(namespace, tool, input) => v?,
         () = stop.cancelled() => return Err("Stopped.".to_owned()),
     };
-    let text = match value {
-        Value::String(text) => text,
-        other => serde_json::to_string_pretty(&other).unwrap_or_default(),
-    };
+    let text = tools::outside_result(&value, &crate::web::saved_pages());
     Ok(tools::Output {
         text,
         metadata: Map::new(),
@@ -918,41 +1063,41 @@ async fn run_external(
     })
 }
 
-/// Checks, asks for and runs one call.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one call's whole context, passed down from the step"
-)]
-async fn call_tool(
+/// The plan for a call of `name`; the error is how the call ends when
+/// there is no such tool here or its input is wrong.
+fn planned(turn: &Turn, name: &str, input: &Map<String, Value>) -> Result<Plan, Called> {
+    let fail = |why: String| Called::Ran(failed(input.clone(), "tool", why), Vec::new());
+    match plan_for(turn, name, input) {
+        Ok(Plan::TodoWrite { .. }) if !turn.todo => {
+            Err(fail(format!("There is no tool called `{name}`.")))
+        }
+        Ok(Plan::Remember { .. } | Plan::SearchSessions { .. }) if turn.memory.is_none() => Err(
+            fail(format!("There is no tool called `{name}`. Notes are off.")),
+        ),
+        Ok(plan) => Ok(plan),
+        Err(why) => Err(fail(why)),
+    }
+}
+
+/// Decides whether a planned call may run, asking the person where the
+/// rules say to; the error is how the call ends when it may not.
+async fn admit(
     turn: &mut Turn,
+    plan: Plan,
+    input: &Map<String, Value>,
     message: &str,
     call: &str,
-    name: &str,
-    input: Map<String, Value>,
-    time: &mut ToolTime,
     gate: &impl Gate,
     stop: &CancellationToken,
-) -> Called {
-    let plan = match plan_for(turn, name, &input) {
-        Ok(Plan::TodoWrite { .. }) if !turn.todo => {
-            let why = format!("There is no tool called `{name}`.");
-            return Called::Ran(failed(input, "tool", why), Vec::new());
-        }
-        Ok(Plan::Remember { .. } | Plan::SearchSessions { .. }) if turn.memory.is_none() => {
-            let why = format!("There is no tool called `{name}`. Notes are off.");
-            return Called::Ran(failed(input, "tool", why), Vec::new());
-        }
-        Ok(plan) => plan,
-        Err(why) => return Called::Ran(failed(input, "tool", why), Vec::new()),
-    };
+) -> Result<Plan, Called> {
     let plan = match plan.sealing(&turn.sealed) {
         Ok(plan) => plan.guarded(&turn.rules),
-        Err(why) => return Called::Refused(failed(input, "denied", why)),
+        Err(why) => return Err(Called::Refused(failed(input.clone(), "denied", why))),
     };
     if let (Some(ledger), Some((path, shown, now))) = (&turn.files, changing(&plan))
         && let Err(why) = crate::stale::check(ledger.as_ref(), path, shown, now.as_bytes())
     {
-        return Called::Ran(failed(input, "stale", why), Vec::new());
+        return Err(Called::Ran(failed(input.clone(), "stale", why), Vec::new()));
     }
     // Reaching outside the project is decided first, then the call itself.
     let outside = {
@@ -966,11 +1111,21 @@ async fn call_tool(
         .chain(plan.reads(&turn.cwd))
         .chain([plan.permission()]);
     for permission in asked {
-        if let Err(refused) = permit(turn, &permission, &input, message, call, gate, stop).await {
-            return refused;
-        }
+        permit(turn, &permission, input, message, call, gate, stop).await?;
     }
-    time.ran = Some(now());
+    Ok(plan)
+}
+
+/// Runs a call that may run.
+async fn finish(
+    turn: &Turn,
+    plan: Plan,
+    input: Map<String, Value>,
+    message: &str,
+    call: &str,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Called {
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
     }

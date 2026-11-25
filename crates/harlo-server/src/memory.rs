@@ -31,6 +31,7 @@ impl Server {
     pub(crate) fn set_memory(&self, on: bool) -> Result<(), Refusal> {
         self.store
             .put_setting(SETTING, if on { "on" } else { "off" })?;
+        self.refresh_prompts();
         Ok(())
     }
 
@@ -50,12 +51,14 @@ impl Server {
         }
         text.trim().clone_into(&mut note.text);
         self.store.put_note(&note)?;
+        self.refresh_prompts();
         Ok(note)
     }
 
     /// Forgets note `id`. Notes it replaced stay replaced.
     pub(crate) fn forget_note(&self, id: &str) -> Result<(), Refusal> {
         if self.store.delete_note(id)? {
+            self.refresh_prompts();
             Ok(())
         } else {
             Err(Refusal::NotFound(format!("No note {id}.")))

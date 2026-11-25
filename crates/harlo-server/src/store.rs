@@ -657,6 +657,44 @@ impl Store {
             .collect()
     }
 
+    /// Up to `limit` of a session's messages, and whether more lie beyond.
+    ///
+    /// Oldest first, from the start or from after the message `past`; with
+    /// `newest_first`, newest first, from the end or from before `past`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn message_page(
+        &self,
+        session: &str,
+        newest_first: bool,
+        past: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<Message>, bool), Error> {
+        // (Every ID sorts after the empty one.)
+        let (side, from) = match past {
+            Some(id) if newest_first => ("<", id),
+            Some(id) => (">", id),
+            None => (">", ""),
+        };
+        let order = if newest_first { "DESC" } else { "ASC" };
+        // One more than asked for says whether the page is the last.
+        let wanted = i64::try_from(limit).unwrap_or(i64::MAX).saturating_add(1);
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT body FROM message WHERE session = ?1 AND id {side} ?2
+             ORDER BY id {order} LIMIT ?3"
+        ))?;
+        let mut page = stmt
+            .query_map(params![session, from, wanted], |r| r.get::<_, String>(0))?
+            .map(|b| serde_json::from_str(&b?).map_err(json_error))
+            .collect::<Result<Vec<Message>, Error>>()?;
+        let more = page.len() > limit;
+        page.truncate(limit);
+        Ok((page, more))
+    }
+
     /// A session's newest message, if it has any.
     ///
     /// # Errors

@@ -391,6 +391,20 @@ export component SessionView inherits Rectangle {
             timeline.to-end();
         }
     }
+    // Earlier history came above the rows: the reader keeps their place.
+    property <int> above-serial: State.timeline-above-serial;
+    changed above-serial => {
+        timeline.rows-came-above(State.timeline-above);
+        settle.running = true;
+    }
+    settle := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            timeline.settle-above();
+        }
+    }
     // Another session opens at its end, however far up the last was read.
     property <string> session: State.session-id;
     changed session => {
