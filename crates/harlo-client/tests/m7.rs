@@ -10,20 +10,24 @@ mod support;
 use harlo_client::PtyOutput;
 use support::{Sandbox, WAIT};
 
-/// Reads output until it holds `text`, returning everything read.
-async fn read_until(output: &mut PtyOutput, text: &str) -> String {
+/// Reads output until it holds every one of `texts`, returning everything
+/// read.
+///
+/// Asked for together because output comes in pieces of any size: two
+/// answers may arrive in one piece, or one answer in two.
+async fn read_until(output: &mut PtyOutput, texts: &[&str]) -> String {
     let mut seen = String::new();
     tokio::time::timeout(WAIT, async {
-        while !seen.contains(text) {
+        while !texts.iter().all(|text| seen.contains(text)) {
             match output.next().await {
                 Some(Ok(bytes)) => seen.push_str(&String::from_utf8_lossy(&bytes)),
                 Some(Err(error)) => panic!("the connection broke: {error}"),
-                None => panic!("the shell ended before {text:?}: {seen:?}"),
+                None => panic!("the shell ended before {texts:?}: {seen:?}"),
             }
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("no {text:?} in {seen:?}"));
+    .unwrap_or_else(|_| panic!("no {texts:?} in {seen:?}"));
     seen
 }
 
@@ -46,16 +50,14 @@ async fn a_shell_on_the_server_answers_and_ends() {
         .await
         .expect("connected");
     input.send(b"echo $((6 * 7)); pwd\n").await.expect("typed");
-    let seen = read_until(&mut output, "42").await;
-    let seen = seen + &read_until(&mut output, &project).await;
-    assert!(seen.contains(&project), "{seen:?}");
+    let _ = read_until(&mut output, &["42", &project]).await;
 
     client
         .resize_pty(&project, &pty.id, 100, 30)
         .await
         .expect("resized");
     input.send(b"stty size\n").await.expect("typed");
-    let _ = read_until(&mut output, "30 100").await;
+    let _ = read_until(&mut output, &["30 100"]).await;
 
     // A second connection starts with what came before.
     input.close().await.expect("closed");
@@ -63,7 +65,7 @@ async fn a_shell_on_the_server_answers_and_ends() {
         .connect_pty(&project, &pty.id)
         .await
         .expect("reconnected");
-    let _ = read_until(&mut again, "42").await;
+    let _ = read_until(&mut again, &["42"]).await;
 
     client.remove_pty(&project, &pty.id).await.expect("removed");
     let ended = tokio::time::timeout(WAIT, async {
