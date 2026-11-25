@@ -92,6 +92,14 @@ PROMPTS = [
     "block over the whole of both sequences, as a Match.",
 ]
 
+# `--task jobs`: the three changes and a question, each in a session of its own, with nothing read
+# beforehand. This is where reading less of a long file can show.
+JOBS = [
+    *PROMPTS[1:],
+    "Which two methods of the class ArgumentParser in argparse.py are the longest, counted in lines? "
+    "Write their names and their lengths to LONGEST.md. Change no other file.",
+]
+
 # What the scripted model does for each prompt with --fake.
 FAKE = [
     'tool read {"path":"argparse.py"} ;; tool read {"path":"difflib.py"} ;; '
@@ -100,6 +108,10 @@ FAKE = [
     "say Changed.",
     "say Changed.",
 ]
+
+
+FAKE_JOBS = ['tool read {"path":"textwrap.py"} ;; say Changed.', "say Changed.", "say Changed.",
+             'tool read {"path":"argparse.py","outline":true} ;; say Found.']
 
 
 def load(path, name):
@@ -130,7 +142,13 @@ def check_difflib(project):
     return tuple(m.SequenceMatcher(None, "abxcd", "abcd").longest()) == (0, 0, 2)
 
 
+def check_longest(project):
+    found = (project / "LONGEST.md").read_text()
+    return "_parse_known_args" in found and "__init__" in found
+
+
 CHECKS = [("textwrap", check_textwrap), ("argparse", check_argparse), ("difflib", check_difflib)]
+JOB_CHECKS = [*CHECKS, ("longest", check_longest)]
 
 
 class Server:
@@ -303,16 +321,25 @@ def run(server, arm, args):
     config["compaction"] = {"prune": prune}
     if args.compare in SWITCHES:
         config["experimental"] = {SWITCHES[args.compare]: arm == "on"}
+    if args.compare == "files":
+        # Scripts in both arms, as a session has them; the on arm adds the files to them.
+        config["permissions"].append({"action": "execute", "resource": "*", "effect": "allow"})
     server.configure(config)
     project = server.project()
     session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
     history = []
-    for number, text in enumerate(FAKE if args.fake else PROMPTS):
-        if number and args.wait:
-            time.sleep(args.wait)
-        history = turn(server, session, text, args.limit)
+    if args.task == "jobs":
+        for number, text in enumerate(FAKE_JOBS if args.fake else JOBS):
+            if number:
+                session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
+            history += turn(server, session, text, args.limit)
+    else:
+        for number, text in enumerate(FAKE if args.fake else PROMPTS):
+            if number and args.wait:
+                time.sleep(args.wait)
+            history = turn(server, session, text, args.limit)
     passed = {}
-    for name, check in CHECKS:
+    for name, check in (JOB_CHECKS if args.task == "jobs" else CHECKS):
         try:
             passed[name] = bool(check(project))
         except Exception as why:  # a change that doesn't load is a failed change
@@ -321,8 +348,16 @@ def run(server, arm, args):
     cleared = sum(1 for m in history for p in m.get("content", []) if isinstance(p, dict)
                   and "cleared" in ((p.get("state") or {}).get("metadata") or {}))
     failed = [str(m.get("error"))[:160] for m in history if m.get("type") == "assistant" and m.get("error")]
+    tools = {}
+    for m in history:
+        for p in m.get("content", []) if m.get("type") == "assistant" else []:
+            if isinstance(p, dict) and p.get("type") == "tool":
+                name = p.get("name")
+                if name == "read" and ((p.get("state") or {}).get("input") or {}).get("outline"):
+                    name = "outline"
+                tools[name] = tools.get(name, 0) + 1
     return {"arm": arm, "turns": measure(history, args.prices), "passed": passed, "cleared": cleared,
-            "failed": failed}
+            "failed": failed, "tools": tools, "checks": JOB_CHECKS if args.task == "jobs" else CHECKS}
 
 
 def offered(server, provider):
@@ -358,7 +393,7 @@ def total(result, key):
 
 
 def line(result):
-    passed = "".join("+" if result["passed"].get(name) else "-" for name, _ in CHECKS)
+    passed = "".join("+" if result["passed"].get(name) else "-" for name, _ in result["checks"])
     cached = 100 * total(result, "cached") // max(1, total(result, "prompt"))
     return (f"| {result['arm']:>3} | {passed} | {total(result, 'steps'):>5} | {total(result, 'reads'):>5} "
             f"| {result['cleared']:>7} | {total(result, 'prompt'):>10,} | {cached:>3}% | {total(result, 'output'):>7,} "
@@ -377,6 +412,9 @@ def main():
                         help="what the on arm turns on: clearing old tool output (the default), sending the "
                              "system prompt as the conversation's opening message (instructions), letting "
                              "scripts read and search files (files), or outlines of source files (outline)")
+    parser.add_argument("--task", choices=["session", "jobs"], default="session",
+                        help="one session of four prompts that starts by reading two long files (the default), "
+                             "or four jobs, each in a session of its own with nothing read beforehand")
     parser.add_argument("--wait", type=int, default=0, help="seconds of rest before each prompt")
     parser.add_argument("--limit", type=int, default=900, help="seconds a prompt may take")
     parser.add_argument("--prices", help="IN,WRITE,READ,OUT in dollars per million tokens")
@@ -440,10 +478,11 @@ def main():
         f"## {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · cold-cache · {args.model}",
         "",
         f"Revision {revision}{' with uncommitted changes' if dirty else ''}; paid by {paid}; rest before each prompt: "
-        f"{args.wait or 'none (every prompt counts as rested)'}; prices {args.prices}; the on arm turns on: {args.compare}."
+        f"{args.wait or 'none (every prompt counts as rested)'}; prices {args.prices}; the on arm turns on: {args.compare}; "
+        f"task: {args.task} ({', '.join(name for name, _ in (JOB_CHECKS if args.task == 'jobs' else CHECKS))})."
         + (f" {args.note}" if args.note else ""),
         "",
-        "| arm | changes work (textwrap, argparse, difflib) | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |",
+        "| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     rows = [line(r) for r in results]
@@ -451,6 +490,8 @@ def main():
     for r in results:
         cells = "; ".join(f"{t['steps']} / {t['reads']} / {t['prompt']:,} / {100 * t['cached'] // max(1, t['prompt'])}% / {t['cold']:.3f}" for t in r["turns"])
         detail.append(f"- {r['arm']}: {cells}")
+    detail += ["", "Tool calls:", ""]
+    detail += [f"- {r['arm']}: " + ", ".join(f"{name} {n}" for name, n in sorted(r["tools"].items())) for r in results]
     why = [f"- {r['arm']}: {k} {v}" for r in results for k, v in r["passed"].items() if k.endswith("_why")]
     why += [f"- {r['arm']}: a step failed: {f}" for r in results for f in r["failed"]]
     report = "\n".join([*head, *rows, *detail, *why, ""])

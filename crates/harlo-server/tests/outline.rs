@@ -1,6 +1,6 @@
-//! A file's outline: with `experimental.outline` on, `read` can list what
-//! a source file declares, and the lines each part spans, instead of its
-//! text.
+//! A file's outline: `read` can list what a source file declares, and the
+//! lines each part spans, instead of its text, unless
+//! `experimental.outline` is turned off.
 
 // Rust guideline compliant 2026-10-09
 
@@ -31,7 +31,7 @@ fn main() {
 }
 ";
 
-/// Turns outlines on or off in the sandbox's own config.
+/// Sets whether outlines are on in the sandbox's own config.
 fn configure(sandbox: &Sandbox, outline: bool) {
     let path = sandbox.dir.path().join("config/harlo/harlo.json");
     let mut config: serde_json::Value =
@@ -104,9 +104,8 @@ fn read_tool(sandbox: &Sandbox) -> serde_json::Value {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_read_lists_what_a_file_declares_when_outlines_are_on() {
+async fn a_read_lists_what_a_file_declares() {
     let sandbox = Sandbox::start().await;
-    configure(&sandbox, true);
     std::fs::write(sandbox.project().join("counter.rs"), SOURCE).expect("file");
     std::fs::write(sandbox.project().join("notes.md"), "# Notes\n").expect("file");
 
@@ -137,6 +136,7 @@ async fn a_read_lists_what_a_file_declares_when_outlines_are_on() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_read_gives_the_file_when_outlines_are_off() {
     let sandbox = Sandbox::start().await;
+    configure(&sandbox, false);
     std::fs::write(sandbox.project().join("counter.rs"), SOURCE).expect("file");
 
     // Not offered, so an `outline` the model sends anyway changes nothing.
