@@ -285,10 +285,18 @@ impl Repo {
             input.extend_from_slice(path.as_bytes());
             input.push(0);
         }
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&input).await.map_err(cant_run)?;
-        }
-        let output = child.wait_with_output().await.map_err(cant_run)?;
+        // Written while the answer is read: with many paths, git fills its
+        // output before it has taken them all in.
+        let stdin = child.stdin.take();
+        let write = async move {
+            if let Some(mut stdin) = stdin {
+                // Outside a repository git ends without reading, and the
+                // write fails; how git ended says so, below.
+                let _ = stdin.write_all(&input).await;
+            }
+        };
+        let (output, ()) = tokio::join!(child.wait_with_output(), write);
+        let output = output.map_err(cant_run)?;
         // 0: some are ignored; 1: none are; anything else: not a repository.
         if !matches!(output.status.code(), Some(0 | 1)) {
             return Ok(HashSet::new());

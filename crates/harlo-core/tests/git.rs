@@ -7,6 +7,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::path::Path;
+use std::time::Duration;
 
 use harlo_core::git::{FileState, Global, Identity, Repo, parse_status};
 
@@ -346,6 +347,34 @@ fn ignored_paths_follow_the_ignore_files() {
         )
         .expect("outside a repository");
     assert!(none.is_empty(), "nothing is ignored outside a repository");
+
+    // Many paths at once: more than git takes in before it answers, and,
+    // outside a repository, more than it reads before it ends.
+    let many: Vec<String> = (0..20_000)
+        .map(|i| format!("deep/folder/{i}.log"))
+        .collect();
+    let all = rt
+        .block_on(async {
+            tokio::time::timeout(Duration::from_secs(30), scratch.repo().ignored(&many)).await
+        })
+        .expect("git and Harlo didn't wait for each other")
+        .expect("checked");
+    assert_eq!(all.len(), many.len());
+    let none = rt
+        .block_on(
+            Repo::new(outside.path())
+                .env(
+                    "GIT_CEILING_DIRECTORIES",
+                    outside
+                        .path()
+                        .parent()
+                        .and_then(Path::to_str)
+                        .unwrap_or("/"),
+                )
+                .ignored(&many),
+        )
+        .expect("outside a repository, with much to ask");
+    assert!(none.is_empty());
 }
 
 #[tokio::test]
