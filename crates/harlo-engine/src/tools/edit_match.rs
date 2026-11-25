@@ -223,7 +223,7 @@ fn not_found(text: &str, lines: &[&str], want: &[&str], new: &str) -> String {
     }
     let end = (best.0 + want.len().clamp(1, 12)).min(lines.len());
     let shown: Vec<String> = (best.0..end)
-        .map(|k| format!("{:>5}  {}", k + 1, lines[k]))
+        .map(|k| format!("{}\t{}", k + 1, lines[k]))
         .collect();
     format!(
         "The old text isn't in the file. The closest lines are these; copy the text to replace from them exactly:\n{}",
@@ -324,7 +324,7 @@ mod tests {
         let f = "fn main() {\n    println!(\"one\");\n    println!(\"two\");\n}\n";
         let e = one(f, "    println!(\"three\");\n    println!(\"two\");", "x").unwrap_err();
         assert!(
-            e.contains("closest lines") && e.contains("    3      println!(\"two\");"),
+            e.contains("closest lines") && e.contains("3\t    println!(\"two\");"),
             "{e}"
         );
         assert!(

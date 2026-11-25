@@ -84,10 +84,18 @@ impl Server {
                     known.join(", ")
                 ));
             };
+            // Searching and reading need no more than the small model.
+            let small = folder
+                .config
+                .small_model
+                .clone()
+                .filter(|_| agent.id == harlo_engine::agents::EXPLORE)
+                .filter(|m| folder.config.resolve(m).is_some());
             let model = request
                 .model
                 .clone()
                 .or_else(|| agent.model.clone())
+                .or(small)
                 .or_else(|| parent.model.clone());
             if let Some(model) = model
                 .as_ref()

@@ -64,6 +64,13 @@ impl Mode {
     }
 }
 
+/// The ID of the built-in agent that only searches and reads.
+///
+/// Its work needs no more than the configuration's small model, when
+/// there is one: a task handed to it runs there unless the call, or the
+/// configuration, names a model for it.
+pub const EXPLORE: &str = "explore";
+
 /// An agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
@@ -177,7 +184,7 @@ pub fn builtins(plans: &Path) -> Vec<Agent> {
             hidden: false,
         },
         Agent {
-            id: "explore".into(),
+            id: EXPLORE.into(),
             name: "Explore".into(),
             description: "Finds things in the code quickly: files by pattern, code by keyword, \
                           or how something works. Say how thorough to be: quick, medium or very \

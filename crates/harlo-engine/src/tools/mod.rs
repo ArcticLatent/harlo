@@ -49,7 +49,7 @@ pub fn definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "read",
-            "description": "Reads a text file. Lines come numbered. Use offset and limit for part of a long file.",
+            "description": "Reads a text file. Each line comes after its number and a tab. Use offset and limit for part of a long file.",
             "parameters": { "type": "object", "properties": {
                 "path": { "type": "string", "description": "The file, relative to the project's folder or absolute." },
                 "offset": { "type": "integer", "description": "The first line to show, from 1." },
@@ -1004,7 +1004,9 @@ fn numbered(content: &str, offset: usize, limit: usize) -> String {
         if !out.is_empty() && out.len() + line.len() > READ_BYTES {
             break;
         }
-        let _ = writeln!(out, "{:>5}: {line}", i + 1);
+        // A number and a tab, as `cat -n` writes them and no wider:
+        // padding and a colon cost three more tokens on every line.
+        let _ = writeln!(out, "{}\t{line}", i + 1);
         shown_to = i + 1;
     }
     if shown_to < total && !out.is_empty() {
@@ -1085,13 +1087,13 @@ mod tests {
         let shown = numbered(&minified, 1, READ_LINES);
         assert!(shown.len() < 3_000, "{}", shown.len());
         assert!(shown.contains("more characters on this line)"));
-        assert!(shown.ends_with("    2: last\n"));
+        assert!(shown.ends_with("2\tlast\n"));
 
         // Many long lines: it stops at the size limit and says where to go on.
         let wide = format!("{}\n", "y".repeat(1_000)).repeat(150);
         let shown = numbered(&wide, 1, READ_LINES);
         assert!(shown.len() <= READ_BYTES + 100, "{}", shown.len());
-        let lines = shown.lines().filter(|l| l.contains(": y")).count();
+        let lines = shown.lines().filter(|l| l.contains("\ty")).count();
         assert!((90..150).contains(&lines), "{lines}");
         assert!(
             shown.ends_with(&format!(
@@ -1104,7 +1106,7 @@ mod tests {
         );
         // Reading on from there reaches the end.
         let rest = numbered(&wide, lines + 1, READ_LINES);
-        assert!(rest.contains("  150: y") && !rest.contains("more lines"));
+        assert!(rest.contains("\n150\ty") && !rest.contains("more lines"));
         assert_eq!(
             numbered("a\n", 5, 10),
             "(No lines there: the file is shorter.)\n"
@@ -1333,7 +1335,7 @@ mod tests {
     fn reads_are_numbered_and_say_what_is_left() {
         assert_eq!(
             numbered("a\nb\nc\n", 2, 1),
-            "    2: b\n(1 more lines; read on with offset 3)\n"
+            "2\tb\n(1 more lines; read on with offset 3)\n"
         );
     }
 }

@@ -200,7 +200,7 @@ pub fn grep(
                 header = true;
             }
             let line: String = line.chars().take(MAX_LINE).collect();
-            let _ = writeln!(out, "  {}: {line}", n + 1);
+            let _ = writeln!(out, "{}\t{line}", n + 1);
             count += 1;
         }
         if more {
@@ -357,11 +357,8 @@ mod tests {
         assert_eq!(glob("*.md", p, p, &[]).expect("glob"), "No files found.");
 
         let hits = grep(lines(r"hello\(", Some("*.rs")), p, p, &[], None).expect("grep");
-        assert!(hits.contains("src/main.rs:\n  2:     hello();"), "{hits}");
-        assert!(
-            hits.contains("src/lib.rs:\n  1: pub fn hello() {}"),
-            "{hits}"
-        );
+        assert!(hits.contains("src/main.rs:\n2\t    hello();"), "{hits}");
+        assert!(hits.contains("src/lib.rs:\n1\tpub fn hello() {}"), "{hits}");
         assert!(!hits.contains("target"), "{hits}");
         assert!(!hits.contains("notes.txt"), "{hits}");
         grep(lines("(", None), p, p, &[], None).expect_err("not a regular expression");

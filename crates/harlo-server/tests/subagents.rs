@@ -228,3 +228,98 @@ async fn a_subagents_subagent_starts_none_of_its_own() {
     assert!(!started, "{said}");
     assert!(said.contains("start none of their own"), "{said}");
 }
+
+/// Changes the sandbox's own config as `change` says.
+fn configure(sandbox: &Sandbox, change: impl FnOnce(&mut serde_json::Value)) {
+    let path = sandbox.dir.path().join("config/harlo/harlo.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("config")).expect("JSON");
+    change(&mut config);
+    std::fs::write(&path, config.to_string()).expect("config");
+}
+
+/// The model each child of a session ran on, by the words its task ended
+/// with, once all of `tasks` have been asked of a model.
+async fn models_of(sandbox: &Sandbox, tasks: &[&str]) -> Vec<String> {
+    for _ in 0..200 {
+        let requests = support::turn_requests(sandbox.dir.path());
+        let models: Vec<String> = tasks
+            .iter()
+            .filter_map(|task| {
+                requests
+                    .iter()
+                    .find(|r| {
+                        let said = r["messages"].to_string();
+                        said.contains("another session handed you") && said.contains(task)
+                    })
+                    .and_then(|r| r["model"].as_str().map(str::to_owned))
+            })
+            .collect();
+        if models.len() == tasks.len() {
+            return models;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the children never asked a model");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_is_handed_to_the_small_model_when_there_is_one() {
+    let sandbox = Sandbox::start().await;
+    configure(&sandbox, |config| {
+        config["small_model"] = "fake/fake-small".into();
+        config["providers"]["fake"]["models"]["fake-small"] =
+            serde_json::json!({ "name": "Fake Small" });
+    });
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+    // A search, a task of several steps, and a search the call names a
+    // model for.
+    let hand = |agent: &str, prompt: &str, model: Option<&str>| {
+        let mut call =
+            serde_json::json!({ "agent": agent, "description": "Look", "prompt": prompt });
+        if let Some(model) = model {
+            call["model"] = model.into();
+        }
+        format!("tool subagent {call}")
+    };
+    let script = [
+        hand("explore", "say Searched.", None),
+        hand("general", "say Worked.", None),
+        hand("explore", "say Named.", Some("fake/fake-coder")),
+    ]
+    .join(" | ");
+    client
+        .prompt(
+            &session.id,
+            &Prompt::new(format!("{script} ;; say Parent done."), Delivery::Queue),
+        )
+        .await
+        .expect("prompt");
+    let models = models_of(&sandbox, &["say Searched.", "say Worked.", "say Named."]).await;
+    assert_eq!(models, ["fake-small", "fake-coder", "fake-coder"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_runs_on_the_sessions_model_without_a_small_one() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+    let call = r#"{"agent":"explore","description":"Look","prompt":"say Searched."}"#;
+    client
+        .prompt(
+            &session.id,
+            &Prompt::new(
+                format!("tool subagent {call} ;; say Parent done."),
+                Delivery::Queue,
+            ),
+        )
+        .await
+        .expect("prompt");
+    assert_eq!(
+        models_of(&sandbox, &["say Searched."]).await,
+        ["fake-coder"]
+    );
+}
