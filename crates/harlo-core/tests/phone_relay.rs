@@ -377,3 +377,63 @@ async fn phones_reach_harlo_through_a_relay_and_get_notifications() {
     assert!(phone.offer().relay.is_empty());
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
+
+/// The phone hands its lock-screen activity over a moment after it sends a
+/// message, and a quick answer is there first. The activity must end as
+/// done, with the answer, not stay on the lock screen as still working.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_activity_handed_over_after_a_quick_answer_ends_as_done() {
+    let (relay, relay_address) = start_relay().await;
+    let sandbox = Sandbox::start().await;
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let phone = start_phone(&sandbox, folder.path()).await;
+    let hosting = phone
+        .relay(&format!("http://{relay_address}"))
+        .expect("a relay");
+    online(&hosting).await;
+    let key = Identity::generate();
+    let mut p = pair_through(&phone.offer(), &key).await;
+
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    run_to_end(&client, &session.id, "say I am well, thanks.").await;
+
+    let taken = p
+        .call(json!({ "op": "activity", "key": session.id, "token": "AB12CD", "sandbox": false }))
+        .await;
+    assert_eq!(taken["ok"], true, "{taken}");
+    let activity_pushes = || {
+        let pushes = relay.pushes.lock().expect("pushes").clone();
+        pushes
+            .into_iter()
+            .filter(|p| p["activity"] == true && p["token"] == "ab12cd")
+            .collect::<Vec<_>>()
+    };
+    let end = wait_for("the activity's end", || async {
+        activity_pushes()
+            .into_iter()
+            .find(|p| p["payload"]["aps"]["event"] == "end")
+    })
+    .await;
+    let aps = &end["payload"]["aps"];
+    assert_eq!(aps["content-state"]["phase"], "done", "{aps}");
+    let stays = aps["dismissal-date"].as_i64().unwrap_or_default()
+        - aps["timestamp"].as_i64().unwrap_or_default();
+    assert!(stays > 60, "the answer stays to be read: {aps}");
+    let harlo = key_bytes(&phone.public_key()).expect("key");
+    let sealed = aps["content-state"]["sealed"].as_str().expect("sealed");
+    let said: Value =
+        serde_json::from_slice(&key.channel(&harlo).open(sealed).expect("opens")).expect("JSON");
+    assert_eq!(said["now"], "I am well, thanks.");
+    // Nothing told the lock screen it was still at work.
+    assert!(
+        activity_pushes()
+            .iter()
+            .all(|p| p["payload"]["aps"]["content-state"]["phase"] == "done"),
+        "{:?}",
+        activity_pushes()
+    );
+}

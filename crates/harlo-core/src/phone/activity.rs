@@ -192,6 +192,28 @@ impl Tracker {
         }
     }
 
+    /// Takes a run that was over before the activity reached Harlo.
+    ///
+    /// The phone hands over its activity a moment after it sends its
+    /// message, and a quick answer is there first: no event says the
+    /// session worked, but the reply after the latest message does. Such
+    /// a run counts as worked and now idle, so it ends as done, unless the
+    /// session starts working again meanwhile.
+    fn catch_up(&mut self, entries: &[Entry]) {
+        if self.busy || self.worked {
+            return;
+        }
+        let replied = entries
+            .iter()
+            .rev()
+            .take_while(|e| !matches!(e, Entry::Prompt { .. }))
+            .any(|e| matches!(e, Entry::Answer { .. }));
+        if replied {
+            self.worked = true;
+            self.idle_since = Some(Instant::now());
+        }
+    }
+
     /// The run is over: idle a moment after working, nothing waiting.
     fn finished(&self) -> bool {
         self.asks.is_none() && self.idle_since.is_some_and(|t| t.elapsed() >= SETTLE)
@@ -278,9 +300,21 @@ impl Tracker {
     }
 }
 
+/// How an activity's update leaves it on the lock screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending {
+    /// It goes on.
+    No,
+    /// Ended, and kept a while for its result to be read.
+    Linger,
+    /// Ended and gone at once: it has no result to show.
+    Leave,
+}
+
 /// The activity's update, or its end, with what it's doing sealed for the
 /// phone.
-fn payload(state: &State, end: bool, channel: &Channel) -> Value {
+fn payload(state: &State, ending: Ending, channel: &Channel) -> Value {
+    let end = ending != Ending::No;
     let secs = now_ms() / 1000;
     let sealed = channel.seal(
         json!({ "now": state.now, "title": state.title })
@@ -303,10 +337,10 @@ fn payload(state: &State, end: bool, channel: &Channel) -> Value {
             "done": state.done, "total": state.total, "sealed": sealed,
         },
     });
-    if end {
-        aps["dismissal-date"] = json!(secs + DISMISS_AFTER);
-    } else {
-        aps["stale-date"] = json!(secs + STALE_AFTER);
+    match ending {
+        Ending::No => aps["stale-date"] = json!(secs + STALE_AFTER),
+        Ending::Linger => aps["dismissal-date"] = json!(secs + DISMISS_AFTER),
+        Ending::Leave => aps["dismissal-date"] = json!(secs),
     }
     json!({ "aps": aps })
 }
@@ -358,6 +392,7 @@ async fn follow(hub: Arc<Hub>, key: String, id: u64, mut inbox: mpsc::UnboundedR
         t.worked = t.busy;
     }
     let mut rows = load(&hub, &key).await;
+    t.catch_up(rows.as_ref().map(Rows::entries).unwrap_or_default());
     // What each phone got last, and when.
     let mut sent: HashMap<String, (State, Instant)> = HashMap::new();
     loop {
@@ -405,7 +440,16 @@ async fn follow(hub: Arc<Hub>, key: String, id: u64, mut inbox: mpsc::UnboundedR
         }
         let gone = server.is_some_and(|s| lock(&s.workspace).session(&key).is_none());
         // Over: the run ended, the session went, or the run never started.
-        let end = t.finished() || gone || (!t.worked && started.elapsed() > GRACE);
+        let never = !t.worked && started.elapsed() > GRACE;
+        let ending = if t.finished() {
+            Ending::Linger
+        } else if gone || never {
+            // Nothing to read: "Working" must not stay on a lock screen.
+            Ending::Leave
+        } else {
+            Ending::No
+        };
+        let end = ending != Ending::No;
         if !end && t.settling() {
             continue;
         }
@@ -413,7 +457,7 @@ async fn follow(hub: Arc<Hub>, key: String, id: u64, mut inbox: mpsc::UnboundedR
             continue;
         };
         let state = t.state(rows.as_ref().map(Rows::entries).unwrap_or_default());
-        let lost = send(&hub, &base, &regs, &mut sent, &state, end).await;
+        let lost = send(&hub, &base, &regs, &mut sent, &state, ending).await;
         regs.retain(|r| !lost.contains(&r.device));
         if end || regs.is_empty() {
             break;
@@ -430,16 +474,17 @@ async fn follow(hub: Arc<Hub>, key: String, id: u64, mut inbox: mpsc::UnboundedR
     }
 }
 
-/// Sends `state` to each phone in `regs` it's due for (`end`: the end, to
-/// all); returns the phones whose activity is gone.
+/// Sends `state` to each phone in `regs` it's due for (an end goes to all);
+/// returns the phones whose activity is gone.
 async fn send(
     hub: &Hub,
     base: &str,
     regs: &[Reg],
     sent: &mut HashMap<String, (State, Instant)>,
     state: &State,
-    end: bool,
+    ending: Ending,
 ) -> Vec<String> {
+    let end = ending != Ending::No;
     let paused = hub.paused.load(Ordering::Relaxed);
     let mut lost = Vec::new();
     for r in regs {
@@ -457,7 +502,7 @@ async fn send(
             || sent
                 .get(&r.device)
                 .is_none_or(|(last, _)| last.phase != state.phase);
-        let body = payload(state, end, &hub.identity.channel(&r.public));
+        let body = payload(state, ending, &hub.identity.channel(&r.public));
         match forward(base, &r.token, r.sandbox, &body, urgent).await {
             Sent::Gone => lost.push(r.device.clone()),
             // Tried: not again until the next change, or the gap.
@@ -543,12 +588,10 @@ fn left_ends(path: &Path, identity: &Identity) -> Vec<(String, bool, Value)> {
                 .filter(|t| *t > 0)
                 .unwrap_or_else(now_ms),
         };
-        let mut body = payload(&state, true, &identity.channel(&public));
-        body["aps"]["dismissal-date"] = json!(now_ms() / 1000);
         out.push((
             token.to_owned(),
             v["sandbox"].as_bool().unwrap_or(false),
-            body,
+            payload(&state, Ending::Leave, &identity.channel(&public)),
         ));
     }
     out
@@ -637,6 +680,37 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_that_beat_the_activity_ends_it_as_done() {
+        let answer = Entry::Answer {
+            key: "a".to_owned(),
+            text: "I'm well, thanks.".to_owned(),
+        };
+        // The session is idle again when the phone's activity arrives.
+        let mut t = Tracker::default();
+        let entries = vec![prompt(), answer.clone()];
+        t.catch_up(&entries);
+        assert!(t.worked && t.settling(), "taken as a run just over");
+        t.idle_since = Instant::now().checked_sub(SETTLE);
+        assert!(t.finished());
+        let s = t.state(&entries);
+        assert_eq!((s.phase, s.now.as_str()), ("done", "I'm well, thanks."));
+
+        // An earlier turn's reply says nothing about the message just sent.
+        let mut t = Tracker::default();
+        t.catch_up(&[prompt(), answer.clone(), prompt()]);
+        assert!(!t.worked && t.idle_since.is_none());
+
+        // A session at work is followed by its events, as before.
+        let mut t = Tracker {
+            busy: true,
+            worked: true,
+            ..Tracker::default()
+        };
+        t.catch_up(&[prompt(), answer]);
+        assert!(t.idle_since.is_none());
+    }
+
+    #[test]
     fn sealed_for_the_phone() {
         let harlo = Identity::generate();
         let phone = Identity::generate();
@@ -650,7 +724,7 @@ mod tests {
             total: 3,
             since: 1_700_000_000_000,
         };
-        let p = payload(&state, false, &harlo.channel(&phone_public));
+        let p = payload(&state, Ending::No, &harlo.channel(&phone_public));
         let text = p.to_string();
         assert!(
             !text.contains("rm -rf") && !text.contains("Fix it"),
@@ -679,11 +753,26 @@ mod tests {
                 phase: "done",
                 ..state
             },
-            true,
+            Ending::Linger,
             &harlo.channel(&phone_public),
         );
         assert_eq!(end["aps"]["event"], "end");
         assert!(end["aps"]["dismissal-date"].is_i64() && end["aps"].get("stale-date").is_none());
+        let stays = end["aps"]["dismissal-date"].as_i64().unwrap_or_default()
+            - end["aps"]["timestamp"].as_i64().unwrap_or_default();
+        assert_eq!(stays, DISMISS_AFTER, "a result stays to be read");
+        // One with nothing to show goes at once.
+        let state = State {
+            phase: "working",
+            now: "Working".to_owned(),
+            title: String::new(),
+            done: 0,
+            total: 0,
+            since: 1_700_000_000_000,
+        };
+        let gone = payload(&state, Ending::Leave, &harlo.channel(&phone_public));
+        assert_eq!(gone["aps"]["event"], "end");
+        assert_eq!(gone["aps"]["dismissal-date"], gone["aps"]["timestamp"]);
     }
 
     #[test]
