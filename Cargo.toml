@@ -154,7 +154,9 @@ flate2 = { version = "1.1.11", default-features = false, features = ["rust_backe
 tar = { version = "0.4.46", default-features = false }
 ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 transcribe-rs = { version = "0.3.12", default-features = false }
-cpal = { version = "0.18.2", default-features = false }
+# Sound in and out. Its PulseAudio host (which PipeWire also answers) names
+# the microphones as the desktop does; without one it falls back to ALSA.
+cpal = { version = "0.18.2", default-features = false, features = ["pulseaudio"] }
 # Reading the hosts named in ~/.ssh/config, Include lines and all.
 ssh2-config = { version = "0.9.0", default-features = false }
 # Event sounds: MP3 decoding (Symphonia) and playback through cpal.

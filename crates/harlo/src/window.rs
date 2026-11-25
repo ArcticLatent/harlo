@@ -681,6 +681,9 @@ pub const STOP_VOICE_DOWNLOAD: i32 = 60;
 /// The Settings button that opens the menu of dictation's languages.
 pub const CHOOSE_VOICE_LANGUAGE: i32 = 61;
 
+/// The Settings button that opens the menu of microphones.
+pub const CHOOSE_MICROPHONE: i32 = 92;
+
 /// The Settings button that installs or updates the engine numbered by
 /// its item.
 pub const INSTALL_ENGINE: i32 = 62;
@@ -992,6 +995,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
+        CHOOSE_MICROPHONE => Some(Message::TogglePicker(Picker::Microphone)),
         INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST => local_action(number, item),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         EDIT_NOTE => Some(Message::Memory(app::MemoryEvent::Edit(

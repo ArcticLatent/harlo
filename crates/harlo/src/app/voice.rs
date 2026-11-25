@@ -1,17 +1,18 @@
 //! Dictation into the composer: Ctrl+Shift+D (or the microphone button)
 //! starts recording, and again stops it; whisper.cpp turns it into text on
 //! this computer, which goes in at the cursor. Settings → Voice downloads
-//! the speech model and picks the language.
+//! the speech model and picks the language and the microphone.
 
 // Rust guideline compliant 2026-10-09
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use harlo_core::voice::{Download, Model, Models, Transcriber, to_whisper_input};
+use harlo_core::voice::{Download, Model, Models, Transcriber, silent, to_whisper_input};
 
 use super::sheets::{Event as SheetEvent, Section};
 use super::{App, Message};
-use crate::audio::Recording;
+use crate::audio::{Captured, Microphones, Recording};
+use crate::model::Picker;
 use crate::task::{Handle, Task};
 
 /// Something that happened to dictation.
@@ -29,6 +30,10 @@ pub enum VoiceEvent {
     StopDownload,
     /// A step of the download.
     Downloading(Download),
+    /// The sound system's microphones, asked for when their menu opens.
+    Microphones(Microphones),
+    /// Record this microphone (its ID), or the system's default when empty.
+    Microphone(String),
 }
 
 /// Where dictation stands.
@@ -60,6 +65,8 @@ pub struct Voice {
     download: Option<Handle>,
     /// Why the last download failed.
     pub download_error: Option<String>,
+    /// The microphones to choose from, once their menu asked for them.
+    pub microphones: Option<Microphones>,
     /// whisper.cpp, keeping the last model loaded.
     transcriber: Arc<Mutex<Transcriber>>,
     /// For tests: what the microphone "hears", so nothing is recorded and
@@ -77,10 +84,50 @@ impl Default for Voice {
             progress: None,
             download: None,
             download_error: None,
+            microphones: None,
             transcriber: Arc::default(),
             heard: None,
         }
     }
+}
+
+/// How Settings names the system's default microphone before its name is
+/// known.
+pub const DEFAULT_MICROPHONE: &str = "System default";
+
+/// The system's default microphone, called `name`, as Settings names it.
+#[must_use]
+pub fn default_named(name: &str) -> String {
+    format!("{DEFAULT_MICROPHONE} ({name})")
+}
+
+/// The words in the recording `heard`, which `transcribe` reads from
+/// 16 kHz mono samples.
+///
+/// # Errors
+///
+/// When the microphone gave no sound at all, naming it so another can be
+/// chosen, or when `transcribe` fails.
+pub fn spoken(
+    heard: &Captured,
+    transcribe: impl FnOnce(&[f32]) -> Result<String, String>,
+) -> Result<String, String> {
+    // Whisper hears a silent recording as nothing, or makes up a word.
+    if !heard.samples.is_empty() && silent(&heard.samples) {
+        let microphone = if heard.microphone.is_empty() {
+            "The microphone"
+        } else {
+            &heard.microphone
+        };
+        return Err(format!(
+            "{microphone} gave no sound. Choose another microphone in Settings → Voice."
+        ));
+    }
+    transcribe(&to_whisper_input(
+        &heard.samples,
+        heard.rate,
+        heard.channels,
+    ))
 }
 
 impl App {
@@ -139,7 +186,59 @@ impl App {
                 self.voice.download_error = result.err();
                 Task::none()
             }
+            VoiceEvent::Microphones(microphones) => {
+                self.voice.microphones = Some(microphones);
+                // The menu that asked for them highlights the chosen one.
+                if self.picker == Some(Picker::Microphone) {
+                    self.picker_index = crate::model::items(self, Picker::Microphone)
+                        .iter()
+                        .position(|item| item.selected)
+                        .unwrap_or(0);
+                }
+                Task::none()
+            }
+            VoiceEvent::Microphone(id) => {
+                // Chosen from a menu, which closes.
+                self.picker = None;
+                self.voice.error = None;
+                self.preferences.voice_microphone = id;
+                self.save_preferences()
+            }
         }
+    }
+
+    /// Asks the sound system for its microphones, off the UI's thread.
+    ///
+    /// Asked each time the menu opens: microphones come and go.
+    pub(super) fn list_microphones(&self) -> Task<Message> {
+        // A scripted microphone stands in for the sound system.
+        if self.voice.heard.is_some() {
+            return Task::none();
+        }
+        Task::perform(
+            async {
+                tokio::task::spawn_blocking(Microphones::list)
+                    .await
+                    .unwrap_or_default()
+            },
+            |microphones| Message::Voice(VoiceEvent::Microphones(microphones)),
+        )
+    }
+
+    /// The name of the microphone dictation records, for Settings: the
+    /// chosen one's, or the system's default.
+    #[must_use]
+    pub fn microphone_name(&self) -> String {
+        let chosen = &self.preferences.voice_microphone;
+        let known = self.voice.microphones.as_ref();
+        if chosen.is_empty() {
+            return known
+                .and_then(|m| m.default.as_deref())
+                .map_or_else(|| DEFAULT_MICROPHONE.to_owned(), default_named);
+        }
+        known
+            .and_then(|m| m.all.iter().find(|one| one.id == *chosen))
+            .map_or_else(|| chosen.clone(), |one| one.name.clone())
     }
 
     /// Starts recording, or sends to Settings → Voice when there's no model.
@@ -151,7 +250,7 @@ impl App {
             return self.update(Message::Sheet(SheetEvent::Open(Section::Voice)));
         }
         if self.voice.heard.is_none() {
-            match Recording::start() {
+            match Recording::start(&self.preferences.voice_microphone) {
                 Ok(recording) => self.voice.recording = Some(recording),
                 Err(why) => {
                     self.voice.error = Some(why);
@@ -183,11 +282,12 @@ impl App {
             async move {
                 tokio::task::spawn_blocking(move || {
                     let heard = recording.finish()?;
-                    let input = to_whisper_input(&heard.samples, heard.rate, heard.channels);
-                    transcriber
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .transcribe(&path, &input, &language)
+                    spoken(&heard, |input| {
+                        transcriber
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .transcribe(&path, input, &language)
+                    })
                 })
                 .await
                 .map_err(|e| format!("Transcription stopped: {e}"))?

@@ -15,6 +15,11 @@ use transcribe_rs::whisper_cpp::{WhisperEngine, WhisperInferenceParams};
 /// Whisper's input: 16 kHz mono.
 pub const SAMPLE_RATE: u32 = 16_000;
 
+/// The loudest a silent recording gets (−80 dB of full scale). A
+/// microphone that is muted, unplugged or not the one spoken into gives
+/// zeros or a bit of noise below this; quiet speech is far above it.
+const SILENCE: f32 = 0.0001;
+
 /// Where the models download from, unless a test points elsewhere.
 const SOURCE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
@@ -227,6 +232,13 @@ impl Transcriber {
             .map_err(|e| format!("Transcription failed: {e}"))?;
         Ok(transcript_text(&result.text))
     }
+}
+
+/// Whether `samples` hold no sound at all: the microphone gave nothing,
+/// which is not the same as nobody speaking near a working one.
+#[must_use]
+pub fn silent(samples: &[f32]) -> bool {
+    samples.iter().all(|s| s.abs() < SILENCE)
 }
 
 /// Interleaved `samples` at `rate` with `channels` as 16 kHz mono: the

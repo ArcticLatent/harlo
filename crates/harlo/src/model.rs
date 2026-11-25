@@ -16,7 +16,8 @@ use harlo_core::theme::Rgba;
 use lucide_icons::Icon;
 
 use crate::app::{
-    App, Load, Message, ProviderEvent, ScheduleEvent, SheetEvent, Status, capitalized,
+    App, DEFAULT_MICROPHONE, Load, Message, ProviderEvent, ScheduleEvent, SheetEvent, Status,
+    VoiceEvent, capitalized, default_named,
 };
 
 /// Rows a menu shows before it scrolls.
@@ -73,6 +74,8 @@ pub enum Picker {
     Provider,
     /// The language dictation listens for, from Settings → Voice.
     VoiceLanguage,
+    /// The microphone dictation records, from Settings → Voice.
+    Microphone,
     /// The interface's font, from Settings → Appearance.
     InterfaceFont,
     /// The font for code, diffs and the terminal.
@@ -105,6 +108,7 @@ impl Picker {
             Self::InterfaceFont => 12,
             Self::CodeFont => 13,
             Self::Sound(kind) => 14 + kind_number(kind),
+            Self::Microphone => MICROPHONE,
             Self::SessionMenu => SESSION_MENU,
             Self::DeleteSession => SESSION_MENU + 1,
         }
@@ -143,6 +147,7 @@ impl Picker {
             11 => Self::VoiceLanguage,
             12 => Self::InterfaceFont,
             13 => Self::CodeFont,
+            MICROPHONE => Self::Microphone,
             SESSION_MENU => Self::SessionMenu,
             DELETE_SESSION => Self::DeleteSession,
             14.. => Self::Sound(*Kind::ALL.get(usize::try_from(index - 14).ok()?)?),
@@ -246,6 +251,9 @@ fn shield_items(app: &App) -> Vec<Item> {
         .collect()
 }
 
+/// The microphones' menu's number in the UI: the last one that shows over
+/// Settings, after the sounds' menus.
+const MICROPHONE: i32 = 99;
 /// The open session's menu's number in the UI; the window's own menus
 /// from here on show over the session, not Settings.
 const SESSION_MENU: i32 = 100;
@@ -406,6 +414,7 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
         Picker::SessionMenu => session_menu_items(app),
         Picker::DeleteSession => delete_items(),
         Picker::VoiceLanguage => language_items(app),
+        Picker::Microphone => microphone_items(app),
         Picker::Sound(kind) => sound_items(app, kind),
         Picker::InterfaceFont | Picker::CodeFont => font_items(app, picker),
         Picker::Agent => {
@@ -589,6 +598,32 @@ fn language_items(app: &App) -> Vec<Item> {
             message: Message::Sheet(SheetEvent::Choose(SettingChoice::VoiceLanguage, index)),
         })
         .collect()
+}
+
+/// The microphones dictation can record: the system's default first.
+fn microphone_items(app: &App) -> Vec<Item> {
+    let chosen = &app.preferences.voice_microphone;
+    let item = |label: String, id: &str| Item {
+        selected: chosen == id,
+        label,
+        detail: None,
+        below: None,
+        dot: None,
+        glyph: None,
+        message: Message::Voice(VoiceEvent::Microphone(id.to_owned())),
+    };
+    let known = app.voice.microphones.as_ref();
+    let default = known
+        .and_then(|m| m.default.as_deref())
+        .map_or_else(|| DEFAULT_MICROPHONE.to_owned(), default_named);
+    let mut items = vec![item(default, "")];
+    items.extend(
+        known
+            .into_iter()
+            .flat_map(|m| &m.all)
+            .map(|one| item(one.name.clone(), &one.id)),
+    );
+    items
 }
 
 /// The menu of a new schedule's project or session.

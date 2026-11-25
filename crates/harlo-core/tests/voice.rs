@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use harlo_core::voice::{
-    Download, Model, Models, SAMPLE_RATE, Transcriber, to_whisper_input, transcript_text,
+    Download, Model, Models, SAMPLE_RATE, Transcriber, silent, to_whisper_input, transcript_text,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -150,6 +150,18 @@ fn recordings_become_16k_mono() {
     let out = to_whisper_input(&ramp, 44_100, 1);
     assert_eq!(out.len(), 16_000);
     assert!((out[8_000] - 0.5).abs() < 0.001);
+}
+
+#[test]
+fn a_dead_microphone_is_silent_and_a_quiet_voice_is_not() {
+    // A muted or unplugged microphone: zeros, or noise far below speech.
+    assert!(silent(&[0.0; 1_600]));
+    assert!(silent(&[0.000_03, -0.000_05, 0.0]));
+    assert!(silent(&[]));
+    // One syllable of quiet speech in a second of nothing.
+    let mut quiet = vec![0.0_f32; 16_000];
+    quiet[8_000] = 0.004;
+    assert!(!silent(&quiet));
 }
 
 #[test]

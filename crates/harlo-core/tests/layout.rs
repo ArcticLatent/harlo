@@ -138,6 +138,7 @@ fn preferences_load_back_beside_the_layout() {
         models: std::collections::BTreeMap::from([("openai/gpt-5".to_owned(), false)]),
         voice_model: "small".to_owned(),
         voice_language: "de".to_owned(),
+        voice_microphone: "pulseaudio:usb-mic".to_owned(),
         check_updates: false,
         update_announced: "2.1.0".to_owned(),
         local_engine: "llamacpp".to_owned(),

@@ -516,6 +516,9 @@ impl Presenter {
             Picker::InterfaceFont | Picker::CodeFont if app.system_fonts.is_none() => {
                 "Looking for this computer's fonts…".to_owned()
             }
+            Picker::Microphone => {
+                "The system's default is the one its sound settings pick.".to_owned()
+            }
             // Each mode says what it means on its own row.
             Picker::InterfaceFont
             | Picker::CodeFont

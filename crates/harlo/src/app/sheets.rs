@@ -844,6 +844,8 @@ impl App {
                 self.sheets.memory.error = None;
                 self.load_memory()
             }
+            // The sound system's: for the name of its default microphone.
+            Section::Voice => self.list_microphones(),
             _ => Task::none(),
         }
     }

@@ -1,5 +1,5 @@
-//! Settings → Voice: dictation's speech model, its download, and the
-//! language it listens for.
+//! Settings → Voice: dictation's speech model, its download, the language
+//! it listens for and the microphone it records.
 
 // Rust guideline compliant 2026-10-09
 
@@ -41,6 +41,10 @@ pub(super) fn voice_rows(app: &App) -> Vec<SheetRow> {
     let mut row = pair("Language", language, 3);
     row.action = "Change".into();
     row.setting = window::CHOOSE_VOICE_LANGUAGE;
+    rows.push(row);
+    let mut row = pair("Microphone", &app.microphone_name(), 3);
+    row.action = "Change".into();
+    row.setting = window::CHOOSE_MICROPHONE;
     rows.push(row);
     rows.push(pair(
         "Models are kept in",

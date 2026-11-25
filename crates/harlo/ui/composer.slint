@@ -26,6 +26,8 @@ export global Pickers {
     out property <int> code-font: 13;
     /// The sound of an event; one per event, from 14 on.
     out property <int> first-sound: 14;
+    /// The microphone dictation records.
+    out property <int> microphone: 99;
     /// Menus from 5 on open from Settings, so they show above it.
     out property <int> first-in-settings: 5;
     /// The open session's menu, and its delete confirmation: the window's
@@ -630,7 +632,7 @@ export component PickerMenu inherits Rectangle {
         ? Size.menu-row + Size.two-line-extra : Size.menu-row) + 2px;
     property <length> card-width: State.picker == Pickers.variant
         || State.picker == Pickers.voice-language
-        || (State.picker >= Pickers.first-sound && State.picker < Pickers.session-menu) ? 200px
+        || (State.picker >= Pickers.first-sound && State.picker < Pickers.microphone) ? 200px
         : State.picker == Pickers.agent || State.picker == Pickers.folder
         || State.picker == Pickers.session-menu ? 260px : 320px;
 

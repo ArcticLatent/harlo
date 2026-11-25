@@ -1,15 +1,18 @@
 //! Dictation: Settings → Voice downloads the speech model (from a local web
-//! server, into a scratch folder), then the composer's microphone records
-//! and puts the words in at the cursor. The microphone is scripted, so
-//! nothing is recorded and whisper.cpp doesn't run here; `harlo-core`'s
-//! tests run it on real speech.
+//! server, into a scratch folder) and picks the microphone, then the
+//! composer's microphone records and puts the words in at the cursor. The
+//! microphone and the sound system's list are scripted, so nothing is
+//! recorded and whisper.cpp doesn't run here; `harlo-core`'s tests run it
+//! on real speech.
 
 // Rust guideline compliant 2026-10-09
 
 mod support;
 
-use harlo::app::{Listening, Message, SettingChoice, SheetEvent, VoiceEvent, shortcut};
+use harlo::app::{Listening, Message, SettingChoice, SheetEvent, VoiceEvent, shortcut, spoken};
+use harlo::audio::{Captured, Microphone, Microphones};
 use harlo::keys::KeyPress;
+use harlo::model::Picker;
 use harlo::text::TextBox;
 use harlo::window::window_key;
 use harlo_core::voice::Models;
@@ -138,4 +141,85 @@ fn the_model_and_language_are_saved_choices() {
     assert_eq!(ui.app().preferences.voice_model, "small");
     ui.send(Message::Sheet(SheetEvent::Open(harlo::app::Section::Voice)));
     assert!(ui.shows("Download 488 MB"), "the small model's size");
+}
+
+#[test]
+fn a_microphone_that_gave_no_sound_is_named_instead_of_transcribed() {
+    let recording = |samples: Vec<f32>| Captured {
+        samples,
+        rate: 16_000,
+        channels: 1,
+        microphone: "BTD 700 Mono".to_owned(),
+    };
+    // All zeros, as a muted or idle microphone gives: whisper isn't asked.
+    let dead = spoken(&recording(vec![0.0; 48_000]), |_| Ok("made up".to_owned()));
+    assert_eq!(
+        dead,
+        Err(
+            "BTD 700 Mono gave no sound. Choose another microphone in Settings → Voice.".to_owned()
+        )
+    );
+    // Any sound at all goes to whisper, at 16 kHz mono.
+    let mut voiced = vec![0.0; 48_000];
+    voiced[24_000] = 0.2;
+    let heard = spoken(&recording(voiced), |input| {
+        Ok(format!("{} samples", input.len()))
+    });
+    assert_eq!(heard, Ok("48000 samples".to_owned()));
+}
+
+#[test]
+fn the_microphone_is_chosen_from_the_sound_systems_list() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let ui = window(scratch.path(), "hello", "");
+    ui.send(Message::Sheet(SheetEvent::Open(harlo::app::Section::Voice)));
+    assert!(ui.shows("System default"));
+
+    // Language's Change, then the microphone's.
+    let change = ui
+        .find("Change")
+        .into_iter()
+        .rfind(|e| e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button))
+        .expect("the microphone's Change");
+    change.invoke_accessible_default_action();
+    assert_eq!(ui.app().picker, Some(Picker::Microphone));
+    // The sound system answers: its default is named, on the page too.
+    ui.send(Message::Voice(VoiceEvent::Microphones(Microphones {
+        all: vec![
+            Microphone {
+                id: "pulseaudio:btd".to_owned(),
+                name: "BTD 700 Mono".to_owned(),
+            },
+            Microphone {
+                id: "pulseaudio:scarlett".to_owned(),
+                name: "Scarlett Solo".to_owned(),
+            },
+        ],
+        default: Some("BTD 700 Mono".to_owned()),
+    })));
+    let labels: Vec<String> = harlo::model::items(&ui.app(), Picker::Microphone)
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "System default (BTD 700 Mono)",
+            "BTD 700 Mono",
+            "Scarlett Solo"
+        ]
+    );
+
+    // Choosing one closes the menu, is kept, and shows on the page.
+    ui.press("Scarlett Solo");
+    assert_eq!(ui.app().picker, None);
+    assert_eq!(ui.app().preferences.voice_microphone, "pulseaudio:scarlett");
+    assert!(ui.app().sheets.open.is_some(), "Settings stays open");
+    assert!(ui.shows("Scarlett Solo"));
+    assert!(!ui.shows("System default (BTD 700 Mono)"));
+
+    // Back to the system's default.
+    ui.send(Message::Voice(VoiceEvent::Microphone(String::new())));
+    assert_eq!(ui.app().preferences.voice_microphone, "");
+    assert!(ui.shows("System default (BTD 700 Mono)"));
 }

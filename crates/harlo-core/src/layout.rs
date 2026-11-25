@@ -98,6 +98,9 @@ pub struct Preferences {
     pub voice_model: String,
     /// The language dictation listens for, as Whisper's code, or "auto".
     pub voice_language: String,
+    /// The microphone dictation records, as the sound system calls it;
+    /// empty for the system's default one.
+    pub voice_microphone: String,
     /// The engine Settings → Local models gets models for: "ollama" or
     /// "llamacpp".
     pub local_engine: String,
@@ -154,6 +157,7 @@ impl Default for Preferences {
             own_tools: true,
             voice_model: crate::voice::Model::Base.name().to_owned(),
             voice_language: "auto".to_owned(),
+            voice_microphone: String::new(),
             local_engine: crate::local_models::Engine::Ollama.id().to_owned(),
             local_servers: Vec::new(),
             llamacpp_model: String::new(),

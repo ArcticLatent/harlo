@@ -6,7 +6,7 @@
 // Rust guideline compliant 2026-10-09
 
 pub mod app;
-mod audio;
+pub mod audio;
 mod clipboard;
 pub mod file_icons;
 pub mod fit;

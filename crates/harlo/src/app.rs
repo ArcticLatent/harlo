@@ -101,7 +101,7 @@ pub use subagents::Child;
 pub use terminal::{Event as TerminalEvent, Shell, Terminals};
 pub use undo::StagedUndo;
 pub use updates::{Phase as UpdatePhase, ServerRestart, UpdateEvent, Updates, VERSION};
-pub use voice::{Listening, Voice, VoiceEvent};
+pub use voice::{DEFAULT_MICROPHONE, Listening, Voice, VoiceEvent, default_named, spoken};
 mod waiting;
 pub(crate) use claude::{epoch_seconds, resets_in};
 pub(crate) use waiting::capitalized;
@@ -1990,6 +1990,8 @@ impl App {
                         },
                         |fonts| Message::Sheet(SheetEvent::SystemFonts(fonts)),
                     )
+                } else if picker == Picker::Microphone {
+                    self.list_microphones()
                 } else {
                     Task::none()
                 };
