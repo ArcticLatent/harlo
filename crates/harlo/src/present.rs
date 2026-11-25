@@ -697,20 +697,21 @@ fn session_rows(
     true
 }
 
-/// The logo of a session's model maker, by the server provider ID, and its
-/// tone. Providers that serve one maker's models under several IDs, such
-/// as `zai` and `zai-coding-plan`, share a logo.
+/// The logo of a session's model maker, by the server provider ID, as its
+/// number in the sidebar (0 when Harlo has none), and its tone: the
+/// maker's own colour where it has one, else the text's.
 fn maker(t: &Tokens, provider: Option<&str>) -> (i32, Rgba) {
-    let is = |key: &str| provider.is_some_and(|id| id == key || id.starts_with(&format!("{key}-")));
-    if is("anthropic") {
-        (1, Rgba::parse("#e99b73").unwrap_or(t.text_base))
-    } else if is("openai") {
-        (2, t.text_base)
-    } else if is("zai") {
-        (3, Rgba::parse("#849cff").unwrap_or(t.text_base))
-    } else {
-        (0, t.text_base)
-    }
+    let logo = provider.and_then(harlo_core::makers::logo);
+    let tone = match logo {
+        Some("anthropic" | "claude-code") => Rgba::parse("#e99b73"),
+        Some("zai-coding-plan") => Rgba::parse("#849cff"),
+        _ => None,
+    };
+    let number = provider.map_or(0, harlo_core::makers::logo_number);
+    (
+        i32::try_from(number).unwrap_or(0),
+        tone.unwrap_or(t.text_base),
+    )
 }
 
 /// The agent, reasoning level and model chips.

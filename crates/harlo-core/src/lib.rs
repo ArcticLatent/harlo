@@ -19,6 +19,7 @@ pub mod hosting;
 pub mod instructions;
 pub mod layout;
 pub mod local_models;
+pub mod makers;
 pub mod mcp_catalog;
 pub mod model_menu;
 pub mod notes;

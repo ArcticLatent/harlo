@@ -250,6 +250,13 @@ fn status(server: &Server, id: &str) -> &'static str {
     }
 }
 
+/// The logo the phone shows for a session's model, by the server's
+/// provider `id`: the phone app's images are named as Harlo's logos are.
+/// A provider without one goes as it is, and the phone shows its own mark.
+fn maker(id: &str) -> String {
+    crate::makers::logo(id).unwrap_or(id).to_owned()
+}
+
 /// A folder as the phone shows it: under the home folder as `~/…`.
 fn tilde(directory: &str) -> String {
     match dirs::home_dir().and_then(|h| {
@@ -319,7 +326,7 @@ fn summaries(hub: &Hub, server: &Server) -> Vec<Value> {
                 "requests": waiting(server, &summary.id),
                 "pinned": hub.pinned(&summary.id),
                 "modelName": model.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
-                "maker": model.map(|m| m.provider_id).unwrap_or_default(),
+                "maker": model.map(|m| maker(&m.provider_id)).unwrap_or_default(),
             }));
         }
     }
@@ -377,7 +384,7 @@ fn meta(server: &Server, key: &str, context: ContextFill) -> Value {
         "title": session.title.clone().unwrap_or_default(),
         "model": model.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
         "modelId": model.as_ref().map(|m| format!("{}/{}", m.provider_id, m.id)).unwrap_or_default(),
-        "maker": model.as_ref().map(|m| m.provider_id.clone()).unwrap_or_default(),
+        "maker": model.as_ref().map(|m| maker(&m.provider_id)).unwrap_or_default(),
         "thinking": model.and_then(|m| m.variant).unwrap_or_default(),
         "cost": session.cost,
     })

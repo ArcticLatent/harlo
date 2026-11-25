@@ -12,10 +12,31 @@ global Inset {
     out property <length> side: 14px;
 }
 
-/// The tile showing who made a session's model.
+/// The tile showing who made a session's model: the maker's logo, or a
+/// chat mark while the model isn't known or Harlo has no logo for it.
 component Maker inherits Rectangle {
+    /// The logo's number, from 1 (`harlo_core::makers::LOGOS`), or 0.
     in property <int> maker;
     in property <color> tone;
+    /// The logos, in `LOGOS`' order.
+    property <[image]> logos: [
+        @image-url("images/providers/anthropic.svg"),
+        @image-url("images/providers/openai.svg"),
+        @image-url("images/providers/zai-coding-plan.svg"),
+        @image-url("images/providers/claude-code.svg"),
+        @image-url("images/providers/google.svg"),
+        @image-url("images/providers/xai.svg"),
+        @image-url("images/providers/deepseek.svg"),
+        @image-url("images/providers/mistral.svg"),
+        @image-url("images/providers/minimax-coding-plan.svg"),
+        @image-url("images/providers/kimi-for-coding.svg"),
+        @image-url("images/providers/groq.svg"),
+        @image-url("images/providers/cerebras.svg"),
+        @image-url("images/providers/together.svg"),
+        @image-url("images/providers/fireworks.svg"),
+        @image-url("images/providers/openrouter.svg"),
+        @image-url("images/providers/opencode.svg"),
+    ];
     width: 18px;
     height: 26px;
 
@@ -24,22 +45,10 @@ component Maker inherits Rectangle {
         font-size: 15px;
         color: Theme.icon-quiet;
     }
-    if root.maker == 1: Image {
+    if root.maker > 0 && root.maker <= root.logos.length: Image {
         width: 15px;
         height: 15px;
-        source: @image-url("images/providers/anthropic.svg");
-        colorize: root.tone;
-    }
-    if root.maker == 2: Image {
-        width: 15px;
-        height: 15px;
-        source: @image-url("images/providers/openai.svg");
-        colorize: root.tone;
-    }
-    if root.maker == 3: Image {
-        width: 15px;
-        height: 15px;
-        source: @image-url("images/providers/zai-coding-plan.svg");
+        source: root.logos[root.maker - 1];
         colorize: root.tone;
     }
 }
