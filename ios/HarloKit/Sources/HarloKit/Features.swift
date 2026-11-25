@@ -72,54 +72,6 @@ public struct RemoteMachine: Equatable, Sendable, Identifiable {
     }
 }
 
-/// A model server harlo set up (its Model servers), on a machine.
-public struct ModelServer: Equatable, Sendable, Identifiable {
-    public var url: String
-    public var name: String
-    /// "llama.cpp", "Ollama", "Strata", …
-    public var engine: String
-    public var models: [String]
-    public var running: Bool
-
-    public var id: String { url }
-
-    public init(url: String, name: String, engine: String = "", models: [String] = [], running: Bool = false) {
-        self.url = url
-        self.name = name
-        self.engine = engine
-        self.models = models
-        self.running = running
-    }
-
-    public init(_ v: JSON) {
-        url = v["url"].text
-        name = v["name"].text
-        engine = v["engine"].text
-        models = (v["models"].array ?? []).compactMap(\.string)
-        running = v["running"].bool ?? false
-    }
-}
-
-/// The model servers on one machine ("" harlo's computer).
-public struct ModelServers: Equatable, Sendable, Identifiable {
-    public var host: String
-    public var servers: [ModelServer]
-    /// Why that machine's couldn't be listed.
-    public var error: String
-
-    public var id: String { host }
-
-    public init(host: String, servers: [ModelServer], error: String = "") {
-        self.host = host
-        self.servers = servers
-        self.error = error
-    }
-
-    public static func list(_ v: JSON) -> [ModelServers] {
-        (v["machines"].array ?? []).map { ModelServers(host: $0["host"].text, servers: ($0["servers"].array ?? []).map(ModelServer.init), error: $0["error"].text) }
-    }
-}
-
 /// Where a new session starts: a machine's home folder, or a project.
 public enum SessionPlace: Hashable, Sendable {
     case home(String)
@@ -327,21 +279,28 @@ public struct ModelChoice: Equatable, Sendable, Identifiable {
     public var name: String
     /// It thinks (thinking levels apply).
     public var reasoning: Bool
-    /// The model server it's on, when that's stopped (harlo starts it with
-    /// the next message); "" otherwise.
-    public var stoppedServer: String
     /// Its provider as the provider names itself ("Anthropic"); the id
     /// when it has no other.
     public var providerName: String
 
     public var id: String { provider + "/" + modelId }
 
+    /// A model's id as people say it: the provider off the front, and a
+    /// Claude id as its picker names it ("claude-opus-5-5" → "Opus 5.5").
+    public static func said(_ id: String) -> String {
+        let last = id.split(separator: "/").last.map(String.init) ?? id
+        let parts = last.split(separator: "-").map(String.init)
+        guard parts.count >= 3, parts[0] == "claude", let major = Int(parts[2]) else { return last }
+        let family = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
+        let minor = parts.count > 3 ? Int(parts[3]) : nil
+        return minor.map { "\(family) \(major).\($0)" } ?? "\(family) \(major)"
+    }
+
     public init(_ v: JSON) {
         provider = v["provider"].text
         modelId = v["id"].text
         name = v["name"].string.flatMap { $0.isEmpty ? nil : $0 } ?? v["id"].text
         reasoning = v["reasoning"].bool ?? false
-        stoppedServer = v["stoppedServer"].text
         providerName = v["providerName"].string.flatMap { $0.isEmpty ? nil : $0 } ?? v["provider"].text
     }
 }

@@ -6,7 +6,7 @@ import UIKit
 /// scrolled past it: rows folding, a card or the keyboard resizing can
 /// leave it showing only empty space below the last row (iOS 18 and later,
 /// which say where it's scrolled). Content growing under it while it's at
-/// the end (rows coming in as it opens, a reply, a picture or a diagram
+/// the end (rows coming in as it opens, a reply, a picture
 /// drawn) keeps it there: only scrolling up leaves the end.
 struct FollowsTheEnd: ViewModifier {
     @Binding var atBottom: Bool

@@ -100,8 +100,8 @@ public struct Row: Equatable, Sendable, Identifiable {
     public var code: ToolCode?
     /// Tool rows: the command highlighted as shell ("" none: it shows plain).
     public var commandSpans: [Span]
-    /// Tool rows: the call's id (a pi extension may draw the call: its
-    /// `ExtView` has this `toolCallId`).
+    /// Tool rows: the call's id (a running command is sent to the
+    /// background by it).
     public var callId = ""
 
     public var id: String { key }
@@ -163,8 +163,7 @@ public struct Row: Equatable, Sendable, Identifiable {
 }
 
 extension Row {
-    /// A message harlo sent the agent (a workflow's note, the answer to a
-    /// split, …): a notice titled "harlo", the session it's about in
+    /// A message harlo sent the agent: a notice titled "harlo", the session it's about in
     /// `subtitle`.
     public var fromHarlo: Bool { kind == "notice" && title == "harlo" }
 
@@ -303,11 +302,6 @@ public enum Event: Equatable, Sendable {
     case unsent(key: String, text: String, photos: [Photo])
     /// Plan limits changed (this computer's or a machine's).
     case limits(PlanLimits)
-    /// A workflow run changed: ask for the open session's (and the list)
-    /// again.
-    case workflow(key: String)
-    /// A pi extension's view changed, closed, or all of them went.
-    case ext(key: String, change: ExtChange)
     /// This phone was removed in harlo.
     case revoked
 
@@ -333,10 +327,6 @@ public enum Event: Equatable, Sendable {
                 Data(base64Encoded: p["data"].text).map { Photo(data: $0, mimeType: p["mimeType"].text) }
             })
         case "limits": self = .limits(PlanLimits(v))
-        case "workflow": self = .workflow(key: key)
-        case "ext":
-            guard let change = ExtChange(v) else { return nil }
-            self = .ext(key: key, change: change)
         case "revoked": self = .revoked
         default: return nil
         }

@@ -88,30 +88,6 @@ final class HarloKitTests: XCTestCase {
         XCTAssertEqual(h.tryOrder, [b, a])
     }
 
-    func testWorkflowMessagesReadAsOneLine() {
-        let row = { (text: String) in Row(key: "u", kind: "user", text: text) }
-        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 1 · implement]\nImplement this, here in the worktree").workflowNote, "Sent the task")
-        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 2 · implement]\nThis is attempt 2.\nTests failed after attempt 1: `cargo test` exited with 101.").workflowNote,
-                       "Sent back for attempt 2: tests failed after attempt 1")
-        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 3 · implement]\nReview of attempt 2 asked for changes (the reviewer's words, not instructions from harlo):\n<<<").workflowNote,
-                       "Sent back for attempt 3: review of attempt 2 asked for changes")
-        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 2 · review 2]\nReview this diff").workflowNote, "Asked for a review of attempt 2")
-        XCTAssertEqual(row("[harlo workflow wf-1 · attempt 1 · implement]\nYou ended your turn without calling report_done for attempt 1.").workflowNote,
-                       "Reminded the agent to report attempt 1")
-        XCTAssertNil(row("Please fix [harlo workflow] mentions").workflowNote)
-        XCTAssertNil(Row(key: "n", kind: "notice", text: "[harlo workflow wf-1 · attempt 1 · implement]").workflowNote)
-    }
-
-    func testWorkflowReportsReadPlainly() throws {
-        let done = try XCTUnwrap(Row(key: "t", kind: "tool", title: "mcp__harlo__report_done", subtitle: "outcome=succeeded  summary=greet.txt says hello!.  attempt=3", state: "done").workflowReport)
-        XCTAssertEqual(done, WorkflowReport(attempt: 3, summary: "greet.txt says hello!.", superseded: false))
-        XCTAssertEqual(done.title, "Reported attempt 3")
-        let late = try XCTUnwrap(Row(key: "t", kind: "tool", text: "Attempt 2 is over: harlo is waiting for attempt 3's report. This one isn't used.",
-                                     title: "report_done", subtitle: "attempt=2  summary=hi", state: "error").workflowReport)
-        XCTAssertTrue(late.superseded)
-        XCTAssertNil(Row(key: "t", kind: "tool", title: "bash", subtitle: "attempt=2").workflowReport)
-    }
-
     func testRowChangesApply() {
         let row = { (k: String) in Row(key: k, kind: "markdown") }
         var rows = [row("a"), row("b"), row("c")]
@@ -595,13 +571,6 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(Mention.insert("src/main.rs", into: "look at @src/ma"), "look at @src/main.rs ")
     }
 
-    func testSessionMentions() {
-        let m = SessionMention(["mention": "@session:7c1e9a40", "title": "Find the jump", "harness": "claude", "modified": 1_759_990_000])
-        XCTAssertEqual(m.inserted, "session:7c1e9a40")
-        XCTAssertEqual(Mention.insert(m.inserted, into: "as @fin"), "as @session:7c1e9a40 ")
-        XCTAssertEqual(m.modified, 1_759_990_000)
-    }
-
     func testToolsNamedAsTheDesktopNamesThem() {
         // Harlo's and Claude Code's own.
         XCTAssertEqual(ToolName.words("bash", running: false), "Ran command")
@@ -627,10 +596,6 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertEqual(ToolName.words("mcp__harlo__read_session", running: false), "harlo: read a session")
         XCTAssertEqual(ToolName.words("harlo_list_sessions", running: false), "harlo: list sessions")
         XCTAssertEqual(ToolName.symbol("harlo_read_session"), "person.2")
-        // The wiki session's tool, by Harlo's name and Claude's.
-        XCTAssertEqual(ToolName.words("wiki_check", running: false), "Check the wiki")
-        XCTAssertEqual(ToolName.words("mcp__harlo__wiki_check", running: true), "Check the wiki")
-        XCTAssertEqual(ToolName.symbol("wiki_check"), "book")
         // An MCP server's.
         XCTAssertEqual(ToolName.words("mcp__context-mode__ctx_execute", running: false), "context-mode ctx execute")
         XCTAssertEqual(ToolName.symbol("mcp__context-mode__ctx_execute"), "puzzlepiece.extension")
@@ -1014,215 +979,9 @@ final class MachinesTests: XCTestCase {
         XCTAssertTrue(Palette.modelFirst(harness: "pi", maker: "anthropic"))
         XCTAssertFalse(Palette.modelFirst(harness: "pi", maker: ""))
     }
-
-    func testModelsOnAStoppedServer() {
-        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q", "stoppedServer": "llama.cpp"]).stoppedServer, "llama.cpp")
-        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q"]).stoppedServer, "")
-        // Whose it is, as harlo says it; the id when it doesn't.
-        XCTAssertEqual(ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-opus-5-5"]).providerName, "Anthropic")
-        XCTAssertEqual(ModelChoice(["provider": "llama", "id": "q"]).providerName, "llama")
-        // A coding plan's model (Claude Code on it): under the plan's name,
-        // and its id is the one harlo gives the session on it.
-        let plan = ModelChoice(["provider": "glm-coding", "providerName": "GLM Coding Plan", "id": "glm-5.3[1m]", "name": "GLM 5.3", "reasoning": true])
-        XCTAssertEqual(plan.providerName, "GLM Coding Plan")
-        XCTAssertEqual(plan.id, "glm-coding/glm-5.3[1m]")
-        XCTAssertEqual(plan.modelId, "glm-5.3[1m]")
-        // OpenCode Go's (Harlo's agent on it): under its name, whatever
-        // API each model is asked on.
-        let go = ModelChoice(["provider": "opencode-go", "providerName": "OpenCode Go", "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "reasoning": true])
-        XCTAssertEqual(go.providerName, "OpenCode Go")
-        XCTAssertEqual(go.id, "opencode-go/claude-haiku-5-5")
-    }
-
-    func testModelServersFromHarlo() {
-        let v = try! JSON.parse(#"""
-        { "machines": [
-            { "host": "", "servers": [{ "url": "http://127.0.0.1:8080/v1", "name": "llama.cpp", "engine": "llama.cpp", "models": ["qwen"], "running": true }] },
-            { "host": "nas", "servers": [], "error": "It didn't answer." } ] }
-        """#)
-        let list = ModelServers.list(v)
-        XCTAssertEqual(list.map(\.host), ["", "nas"])
-        XCTAssertEqual(list[0].servers.first?.models, ["qwen"])
-        XCTAssertEqual(list[0].servers.first?.running, true)
-        XCTAssertEqual(list[1].error, "It didn't answer.")
-    }
-
-    @MainActor func testDemoStartsAndStopsServers() async {
-        let m = HarloModel(store: MemoryStore(), deviceName: "iPhone")
-        m.startDemo()
-        let before = await m.modelServers()
-        XCTAssertEqual(before?.first?.servers.map(\.running), [true, false])
-        let now = await m.setServer(host: "", url: "http://127.0.0.1:11434/v1", running: true)
-        XCTAssertEqual(now, true)
-        let after = await m.modelServers()
-        XCTAssertEqual(after?.first?.servers.map(\.running), [true, true])
-        XCTAssertNotNil(m.sessions.first { !$0.settled.isEmpty }, "a settled sample")
-    }
 }
 
 final class HelperTests: XCTestCase {
-    func testARunWhoseSessionAsksNeedsYou() {
-        let run = WorkflowRun(["id": "wf-4", "workflow": "W", "state": "running", "attempt": 1, "asking": true, "askingKey": "s-review",
-                               "waiting": "The review needs you: it asks to run a command",
-                               "stages": [["label": "Implement", "status": "done"], ["label": "Review", "status": "active"]]])
-        XCTAssertTrue(run.needsYou)
-        XCTAssertEqual(run.askingKey, "s-review")
-        XCTAssertEqual(run.stages.map(\.status), ["done", "asking"], "the stage under way waits on you")
-        XCTAssertEqual(run.statusLine, "The review needs you: it asks to run a command")
-        let working = WorkflowRun(["id": "wf-5", "workflow": "W", "state": "running", "stages": [["label": "Implement", "status": "active"]]])
-        XCTAssertFalse(working.needsYou)
-        XCTAssertEqual(working.stages.map(\.status), ["active"])
-    }
-
-    func testAWorkflowRunAsHarloSendsIt() throws {
-        let run = WorkflowRun(try JSON.parse(#"""
-        {"id":"wf-1","title":"Add a CSV export","workflow":"Implement and verify","doneText":"Tests passed · Review approved",
-         "project":"shipyard","createdAt":1763380000,"state":"running","why":"","attempt":2,
-         "stages":[{"label":"Implement","status":"done","kind":"implement","what":"Harlo"},
-                   {"label":"Tests","status":"active","kind":"check","what":"`cargo test`"},
-                   {"label":"Review","status":"todo","kind":"review","what":"Claude Code","agent":"claude","model":"claude-opus-5-5"}],
-         "waiting":"Running `cargo test`","role":"implementation","branch":"harlo/add-a-csv-export","base":"main",
-         "implementer":"Harlo","reviewer":"Claude Code","testCommand":"cargo test",
-         "lastCheck":{"name":"Tests","attempt":1,"passed":false,"exit":101,"seconds":12,"tail":"test export ... FAILED"},
-         "liveCheck":{"name":"Tests","output":"running 4 tests\n","seconds":3},
-         "log":[{"at":1763380001,"attempt":1,"tone":"bad","text":"Tests failed after attempt 1"}],
-         "host":"","merged":false,"published":false,"removed":false}
-        """#))
-        XCTAssertEqual(run.heading, "Implement and verify · attempt 2")
-        XCTAssertEqual(run.stages.map(\.status), ["done", "active", "todo"])
-        XCTAssertEqual(run.stages[1].what, "`cargo test`")
-        // A stage's model, when one was picked, named as people say it.
-        XCTAssertEqual(run.stages[0].doer, "Harlo")
-        XCTAssertEqual(run.stages[2].doer, "Claude Code · Opus 5.5")
-        XCTAssertEqual(WorkflowStage.modelName("fake/fake-helper"), "fake-helper")
-        XCTAssertEqual(WorkflowStage.modelName("anthropic/claude-sonnet-5"), "Sonnet 5")
-        XCTAssertEqual(run.statusLine, "Running `cargo test`")
-        XCTAssertEqual(run.lastCheck?.exit, 101)
-        XCTAssertEqual(run.lastCheck?.passed, false)
-        // Attempt 1's check, shown while attempt 2 is under way, says so.
-        XCTAssertEqual(run.lastCheck?.title(runAttempt: run.attempt), "Attempt 1 · Tests failed (exit 101) in 12 s")
-        XCTAssertEqual(run.lastCheck?.title(runAttempt: 1), "Tests failed (exit 101) in 12 s")
-        XCTAssertEqual(run.liveCheck?.output, "running 4 tests\n")
-        XCTAssertEqual(run.log.first?.tone, "bad")
-        XCTAssertEqual(run.project, "shipyard")
-        XCTAssertTrue(run.running)
-        XCTAssertFalse(run.finishable)
-        // Paused says why; done says how it ended, and can be finished until
-        // its worktree is removed; a check killed by a signal has no exit.
-        let paused = WorkflowRun(["id": "wf-2", "workflow": "W", "state": "paused", "why": "Tests failed. Resume sends it back to the implementation", "attempt": 1,
-                                  "lastCheck": ["passed": false, "exit": nil], "liveCheck": nil])
-        XCTAssertEqual(paused.heading, "W", "a first attempt isn't counted")
-        XCTAssertEqual(paused.statusLine, "Tests failed. Resume sends it back to the implementation")
-        XCTAssertNil(paused.lastCheck?.exit)
-        XCTAssertEqual(paused.lastCheck?.name, "Tests")
-        XCTAssertNil(paused.liveCheck)
-        var done = WorkflowRun(["id": "wf-3", "workflow": "W", "doneText": "Tests passed", "state": "done", "merged": true])
-        XCTAssertEqual(done.statusLine, "Done: Tests passed")
-        XCTAssertTrue(done.finishable && done.merged)
-        done.removed = true
-        XCTAssertFalse(done.finishable)
-        // Its event, about the open session.
-        XCTAssertEqual(Event(["ev": "workflow", "key": "k"]), .workflow(key: "k"))
-        XCTAssertEqual(Event(["ev": "workflow", "key": "k"])?.sessionKey, "k")
-        XCTAssertEqual(WorkflowAction.allCases.map(\.rawValue), ["pause", "resume", "stop", "merge", "publish", "remove"], "as harlo names them")
-    }
-
-    func testWikiAndThePlanEvent() throws {
-        let iso = ISO8601DateFormatter()
-        let now = iso.date(from: "2026-11-11T12:00:00Z")!
-        let wiki = Wiki(["project": 3, "enabled": true, "exists": true, "root": "/home/me/shop",
-                         "pages": [["path": "overview.md", "title": "Overview", "description": "Where to start.", "type": "Overview", "links": ["architecture/jobs.md"], "edited": true],
-                                   ["path": "architecture/jobs.md", "title": "Jobs", "type": "Architecture", "links": [], "owes": 2]],
-                         "work": ["count": 3, "stale": 1, "new": 2, "unowned": 0, "broken": 0], "last": "2026-11-08T12:00:00Z"])
-        XCTAssertTrue(wiki.inProject && wiki.enabled && wiki.exists)
-        XCTAssertEqual(wiki.pages.map(\.title), ["Overview", "Jobs"])
-        XCTAssertEqual(wiki.pages.map(\.group), ["", "Architecture"], "grouped by folder")
-        XCTAssertEqual(wiki.pages[0].links, ["architecture/jobs.md"])
-        XCTAssertEqual(wiki.pages.map(\.mark), ["Edited, not checked yet", "2 things to do"])
-        XCTAssertEqual(wiki.freshness(now: now), ["1 footnote's code changed", "2 new declarations no page mentions"])
-        XCTAssertTrue(wiki.wantsUpdate, "owing the code: Update is the thing to do")
-        var up = wiki
-        up.work = Wiki.Work()
-        XCTAssertEqual(up.freshness(now: now), ["Up to date", "written 3 days ago"])
-        XCTAssertFalse(up.wantsUpdate)
-        XCTAssertEqual(Wiki(["project": 3, "exists": true, "checking": true]).freshness(now: now), ["Checking what changed…"])
-        XCTAssertEqual(Wiki(["project": 3, "exists": true, "running": true, "session": "live:9"]).freshness(now: now), ["A session is writing the wiki."])
-        XCTAssertEqual(Wiki(["project": 3, "exists": true, "work": ["unowned": 1, "broken": 2, "count": 3]]).freshness(now: now),
-                       ["1 file no page covers", "2 footnotes find no code"])
-        XCTAssertEqual(Wiki(["project": 3, "exists": false, "error": "nas: SSH connection failed."]).error, "nas: SSH connection failed.")
-        XCTAssertEqual(Wiki(["project": 3, "exists": true]).error, "")
-        // Its graph, as the desktop draws it; files in the repository.
-        XCTAssertEqual(wiki.mermaid, "flowchart LR\n  p0[\"Overview\"]\n  p1[\"Jobs\"]\n  p0 --> p1\n")
-        XCTAssertEqual(Wiki(["project": 3, "pages": [["path": "a.md", "title": "A"]]]).mermaid, "", "one page: no graph")
-        // An overview linking every page of a bigger wiki: its links left
-        // out, unless it was read last.
-        let hub = Wiki(["project": 3, "pages": .array([["path": "overview.md", "title": "O", "type": "Overview", "links": ["a.md", "b.md", "c.md", "d.md", "e.md"]]]
-                                                      + ["a", "b", "c", "d", "e"].map { ["path": .string("\($0).md"), "title": .string($0), "links": $0 == "a" ? ["b.md"] : []] })])
-        XCTAssertEqual(hub.mermaid.components(separatedBy: "-->").count - 1, 1, "only a → b")
-        XCTAssertTrue(hub.mermaid.contains("p1 --> p2"))
-        XCTAssertEqual(hub.graph(readLast: "overview.md").components(separatedBy: "-->").count - 1, 6, "read last: its links too")
-        XCTAssertEqual(wiki.file("src/a.rs"), "/home/me/shop/src/a.rs")
-        let big = Wiki(["project": 3, "pages": .array([["path": "overview.md", "title": "O", "links": ["p1.md"]]] + (1...45).map { ["path": .string("p\($0).md"), "title": .string("P\($0)"), "links": $0 == 2 ? ["overview.md"] : []] })])
-        XCTAssertEqual(big.graphPages.map(\.path), ["overview.md", "p1.md", "p2.md"], "a big wiki: the overview and its neighbours")
-        XCTAssertEqual(big.graphPage("p2")?.path, "p2.md", "a graph box is its page among those shown")
-        XCTAssertNil(big.graphPage("p3"), "past those shown: none")
-        XCTAssertNil(big.graphPage("overview"), "an id not like p<n>: none")
-        let sent: JSON = [["id": "p0", "x": .double(0.1), "y": .double(0.2), "w": .double(0.3), "h": .double(0.1)], ["id": "", "x": .double(0.0), "y": .double(0.0), "w": .double(1.0), "h": .double(1.0)], ["id": "p1", "x": .double(0.5), "y": .double(0.5), "w": .double(0.0), "h": .double(0.1)]]
-        let boxes = DiagramPicture.boxes(sent)
-        XCTAssertEqual(boxes, [DiagramPicture.Box(id: "p0", x: 0.1, y: 0.2, w: 0.3, h: 0.1)], "boxes without an id or a size are left out")
-        XCTAssertFalse(Wiki(["project": -1, "pages": []]).inProject)
-        XCTAssertEqual(Wiki.ago("2026-11-11T11:59:00Z", now: now), "just now")
-        XCTAssertEqual(Wiki.ago("2026-11-10T12:00:00Z", now: now), "yesterday")
-        XCTAssertEqual(Wiki.ago("2026-11-11T07:00:00.000Z", now: now), "5 hours ago")
-
-        // A page: what it is, who wrote and reviewed it, what it owes, its
-        // blocks and footnotes, and where its links go.
-        let page = WikiPageText(["path": "architecture/jobs.md", "title": "Jobs", "type": "Architecture", "description": "How jobs run.",
-                                 "generated": ["by": "claude/claude-opus-5-5", "at": "2026-11-09T12:00:00Z"],
-                                 "verified": [["by": "human:sam", "at": "2026-11-01T10:00:00Z"], ["by": "human:me", "at": "2026-11-11T11:59:30Z"]],
-                                 "you": "human:me", "edited": false,
-                                 "blocks": [["kind": "prose", "html": "<h1>Jobs</h1>", "anchor": "jobs"], ["kind": "mermaid", "code": "flowchart LR\n a --> b"],
-                                            ["kind": "code", "html": "<pre><code>run</code></pre>", "code": "run", "lang": "sh"]],
-                                 "footnotes": [["n": 1, "label": "retry", "path": "src/jobs.rs", "locator": "fn retry", "start": 1, "end": 3, "state": "stale", "signature": "pub fn retry(n: u32)"],
-                                               ["n": 2, "label": "all", "path": "src/queue.rs", "locator": .null, "start": 0, "end": 0, "state": "gone"]],
-                                 "items": ["Footnote 1: its code changed since the page was written (src/jobs.rs, fn retry)"],
-                                 "backlinks": [["path": "overview.md", "title": "Overview"]]])
-        XCTAssertEqual(page.meta(now: now), "Architecture · written by Claude Code with Opus 5.5 2 days ago · reviewed by you just now")
-        XCTAssertEqual(page.actor("human:sam"), "sam")
-        XCTAssertEqual(page.actor("harlo/qwen3-coder"), "Harlo with qwen3-coder")
-        var edited = page
-        edited.edited = true
-        XCTAssertTrue(edited.meta(now: now).hasSuffix(" · edited since"))
-        XCTAssertEqual(WikiPageText(["path": "a.md", "type": "Concept", "edited": true]).meta(now: now), "Concept · not checked yet")
-        XCTAssertEqual(page.owes.count, 1)
-        XCTAssertEqual(page.footnotes.map(\.place), ["src/jobs.rs, fn retry", "src/queue.rs"])
-        XCTAssertEqual(page.footnotes.map(\.lines), ["lines 1–3", ""])
-        XCTAssertEqual(page.footnotes.map(\.note), ["its code changed since the page was written", "the file isn't there"])
-        XCTAssertEqual(page.footnotes.map(\.signature), ["pub fn retry(n: u32)", ""], "the index's signature, none for a file")
-        XCTAssertEqual(page.backlinks.map(\.title), ["Overview"])
-        XCTAssertEqual(page.blocks.map(\.kind), ["prose", "mermaid", "code"])
-        XCTAssertEqual(page.blocks[0].anchor, "jobs")
-        XCTAssertEqual(page.target(of: "/overview.md"), .page(path: "overview.md", section: ""))
-        XCTAssertEqual(page.target(of: "../workflows/release.md#steps"), .page(path: "workflows/release.md", section: "steps"))
-        XCTAssertEqual(page.target(of: "#retry-control"), .page(path: "architecture/jobs.md", section: "retry-control"), "a section of this page")
-        XCTAssertEqual(page.target(of: "../../README.md"), .file(path: "README.md"), "out of .okf/: the repository's file")
-        XCTAssertEqual(page.target(of: "../../src/job%20runner.rs"), .file(path: "src/job runner.rs"))
-        XCTAssertEqual(page.target(of: "okf-fn:retry"), .footnote(page.footnotes[0]))
-        XCTAssertNil(page.target(of: "okf-fn:nothing"))
-        XCTAssertNil(page.target(of: "https://example.com/a.md"))
-        XCTAssertEqual(WikiPageText(["path": "x.md", "error": "There's no such page."]).error, "There's no such page.")
-
-        // A search: sections, best first.
-        let hits = WikiHits(["hits": [["page": "architecture/jobs.md", "section": "retry-control", "heading": "Retry control", "snippet": "retried three times"]]])
-        XCTAssertEqual(hits.hits.first?.heading, "Retry control")
-        XCTAssertEqual(hits.hits.first?.id, "architecture/jobs.md#retry-control")
-        XCTAssertEqual(hits.code, [], "no code hits from a desktop without the index")
-        let code = WikiHits(["hits": [], "code": [["path": "src/jobs.rs", "name": "Queue::retry", "kind": "fn", "line": 12, "signature": "pub fn retry(&self)", "doc": "Runs it again."]]]).code
-        XCTAssertEqual(code.map(\.id), ["src/jobs.rs#Queue::retry"])
-        XCTAssertEqual(code.first?.place, "src/jobs.rs:12")
-        XCTAssertEqual(code.first?.doc, "Runs it again.")
-        XCTAssertNil(Event(["ev": "plan", "key": "live:1"]), "harlo has no shared plan to tell of")
-    }
 
     func testHarlosMessagesAreHarlos() throws {
         let v: JSON = ["key": "m3:u", "kind": "notice", "title": "harlo", "subtitle": "live:3",
@@ -1249,30 +1008,6 @@ final class HelperTests: XCTestCase {
         XCTAssertEqual(plain.tool, "write")
         XCTAssertEqual(plain.note, "")
         XCTAssertEqual(UIRequest(["id": "4", "method": "select", "title": "Split into helpers?"]).tool, "")
-    }
-
-    @MainActor func testExtensionViewsCome() {
-        let s = OpenSession(key: "live:1")
-        s.opened(liveKey: "live:1", harness: "pi")
-        let widget: JSON = ["ev": "ext", "key": "live:1", "op": "view",
-                            "view": ["id": "widget:w", "kind": "widget", "lines": ["one"], "placement": "belowEditor"]]
-        s.take(Event(widget)!)
-        s.take(Event(["ev": "ext", "key": "live:1", "op": "view", "view": ["id": "screen:1", "kind": "screen", "lines": []]])!)
-        s.take(Event(["ev": "ext", "key": "live:1", "op": "view",
-                      "view": ["id": "tool:c1", "kind": "tool", "lines": ["call"], "result": ["4"], "toolCallId": "c1"]])!)
-        XCTAssertEqual(s.extViews.map(\.id), ["widget:w", "screen:1", "tool:c1"])
-        XCTAssertEqual(s.extViews[0].placement, "belowEditor")
-        XCTAssertTrue(s.extViews[1].interactive)
-        XCTAssertEqual(s.extViews[2].result, ["4"])
-        // A change keeps its place; a close takes it away; a new binding, all.
-        s.take(Event(["ev": "ext", "key": "live:1", "op": "view", "view": ["id": "widget:w", "kind": "widget", "lines": ["two"]]])!)
-        XCTAssertEqual(s.extViews.first?.lines, ["two"])
-        s.take(Event(["ev": "ext", "key": "live:1", "op": "close", "id": "screen:1"])!)
-        XCTAssertEqual(s.extViews.map(\.id), ["widget:w", "tool:c1"])
-        s.take(Event(["ev": "ext", "key": "live:1", "op": "clear"])!)
-        XCTAssertTrue(s.extViews.isEmpty)
-        XCTAssertNil(Event(["ev": "ext", "key": "live:1", "op": "spin"]), "an op it doesn't know")
-        XCTAssertEqual(Row(["key": "r", "kind": "tool", "callId": "c1"]).callId, "c1")
     }
 
     @MainActor func testOpeningAgainShowsOnlyWhatsCurrent() {
@@ -1317,7 +1052,7 @@ final class HelperTests: XCTestCase {
 final class ReplayTests: XCTestCase {
     /// A recording as harlo-probe writes one.
     static let recording = [
-        #"{"ready":{"name":"workstation","features":["sessionMentions","limits"]}}"#,
+        #"{"ready":{"name":"workstation","features":["pictures","limits"]}}"#,
         #"{"call":"sessions","args":{},"reply":{"sessions":[{"key":"live:1","title":"Fix the scrolling","harness":"harlo","status":"input"}]}}"#,
         #"{"call":"open","args":{"key":"live:1"},"reply":{"key":"live:1","harness":"harlo"}}"#,
         #"{"ev":{"ev":"reset","key":"live:1","rows":[{"key":"u1","kind":"user","text":"Fix the scrolling"},{"key":"t1","kind":"tool","title":"bash","label":"Run the tests","command":"cargo test"}]}}"#,
@@ -1335,7 +1070,7 @@ final class ReplayTests: XCTestCase {
         XCTAssertThrowsError(try Replay(recording: Self.recording, scene: "nope"))
         let r = try Replay(recording: Self.recording, scene: "approval")
         XCTAssertEqual(r.harloName, "workstation")
-        XCTAssertTrue(r.features.contains("sessionMentions"))
+        XCTAssertTrue(r.features.contains("pictures"))
         XCTAssertEqual(r.events(of: "live:1").map { $0["ev"].text }, ["reset", "request"], "only up to the scene")
         // A request made only after the scene still answers; one never made says so.
         XCTAssertEqual(r.answer("files", ["key": "live:1", "query": "other"])["files"].array?.count, 1)
@@ -1359,20 +1094,6 @@ final class ReplayTests: XCTestCase {
         XCTAssertEqual(r.answer("sessions", ["since": 1_794_890_000_000])["sessions"][0]["modified"].int, 1_800_000_000)
     }
 
-    func testDiagramsAnswerTheirOwnSource() throws {
-        let rec = [
-            ##"{"call":"diagram","args":{"source":"flowchart LR\n  a --> b","light":true,"colors":{"background":"#ffffff"}},"reply":{"png":"light-ab"}}"##,
-            ##"{"call":"diagram","args":{"source":"flowchart LR\n  a --> b","light":false,"colors":{"background":"#212227"}},"reply":{"png":"dark-ab"}}"##,
-            #"{"scene":"one"}"#,
-        ].joined(separator: "\n")
-        let r = try Replay(recording: rec, scene: "one")
-        // The phone's own colours: the same diagram, in its mode.
-        XCTAssertEqual(r.answer("diagram", ["source": "flowchart LR\n  a --> b", "light": false, "colors": ["background": "#1a1b1f"]])["png"].text, "dark-ab")
-        XCTAssertEqual(r.answer("diagram", ["source": "flowchart LR\n  a --> b", "light": true, "colors": [:]])["png"].text, "light-ab")
-        // Another diagram never gets this one's picture.
-        XCTAssertNotNil(r.answer("diagram", ["source": "flowchart TD\n  x --> y", "light": true, "colors": [:]])["error"].string)
-    }
-
     func testAWikiPageKeepsItsOwnLinks() {
         let html = #"<p>See <a href="../quickstart.md">the start</a>, <a href="repo://src/a.rs#L4-L9">a.rs</a> and <a href="javascript:x()">this</a>.</p>"#
         let links = { (blocks: [RichBlock]) -> [String] in
@@ -1382,34 +1103,6 @@ final class ReplayTests: XCTestCase {
         // A reply keeps web links only; a wiki page its own too.
         XCTAssertEqual(links(RichText.parse(html)), [])
         XCTAssertEqual(links(RichText.parse(html, keepingAnyLink: true)), ["../quickstart.md", "repo://src/a.rs#L4-L9"])
-    }
-
-    func testAWikiPageDoesNotRepeatItsTitle() {
-        XCTAssertEqual(WikiPageText.withoutTitle("<h1 id=\"sidebar\">Sidebar</h1>\n<p>Rows.</p>"), "<p>Rows.</p>")
-        XCTAssertEqual(WikiPageText.withoutTitle("<h2>Rows</h2><p>x</p>"), "<h2>Rows</h2><p>x</p>")
-        XCTAssertEqual(WikiPageText.withoutTitle("<p>No heading.</p>"), "<p>No heading.</p>")
-    }
-
-    func testSearchMarksSkipFillerWords() {
-        XCTAssertEqual(Wiki.markWords("How is a job retried?"), ["job", "retried"])
-        XCTAssertEqual(Wiki.markWords("how to"), ["how", "to"])
-        XCTAssertEqual(Wiki.markWords(""), [])
-    }
-
-    func testADiagramDrawnAcrossCanRunDown() {
-        XCTAssertEqual(DiagramPicture.down("flowchart LR\n  a --> b"), "flowchart TB\n  a --> b")
-        XCTAssertEqual(DiagramPicture.down("%% the pages\ngraph RL\n  a --> b"), "%% the pages\ngraph TB\n  a --> b")
-        XCTAssertNil(DiagramPicture.down("flowchart TD\n  a --> b"))
-        XCTAssertNil(DiagramPicture.down("sequenceDiagram\n  a ->> b: hi"))
-        // (A label saying LR further down isn't the direction.)
-        XCTAssertNil(DiagramPicture.down("flowchart TB\n  a[graph LR] --> b"))
-        let wide = DiagramPicture(png: Data(), width: 1100, height: 120)
-        let tall = DiagramPicture(png: Data(), width: 300, height: 600)
-        // Down fits 360 points at full size; across at a third.
-        XCTAssertTrue(DiagramPicture.showsDown(across: wide, down: tall, width: 360))
-        // Both fit a wide screen whole: across stays.
-        XCTAssertFalse(DiagramPicture.showsDown(across: wide, down: tall, width: 1200))
-        XCTAssertFalse(DiagramPicture.showsDown(across: wide, down: nil, width: 360))
     }
 
     func testFailedAnswerRemainsAvailableForRetry() async throws {
@@ -1558,39 +1251,6 @@ final class RecordingTests: XCTestCase {
     }
 }
 
-final class VisualsTests: XCTestCase {
-    func testOptions() {
-        let o = Visuals.options("## Match rows by key (recommended)\nRows are updated in place.\n+ nothing to restore\n+ no redraw\n- more code\n\n## Remember the offset\nSmaller.\nStill redraws.\n- the list flickers\n")
-        XCTAssertEqual(o, [
-            Choice(name: "Match rows by key", recommended: true, about: "Rows are updated in place.", pros: ["nothing to restore", "no redraw"], cons: ["more code"]),
-            Choice(name: "Remember the offset", about: "Smaller. Still redraws.", cons: ["the list flickers"]),
-        ])
-        XCTAssertNil(Visuals.options("### One ★\n+ x"))
-        XCTAssertNil(Visuals.options("Just prose."))
-    }
-
-    func testOptionLinesDrawTheirMarkdown() {
-        XCTAssertEqual(Visuals.spans("every report gets `--format csv`"), [Span("every report gets "), Span("--format csv", code: true)])
-        XCTAssertEqual(Visuals.spans("**fast**, [docs](https://x.dev)"), [Span("fast", bold: true), Span(", "), Span("docs", link: "https://x.dev")])
-        XCTAssertEqual(Visuals.spans("no marks here"), [Span("no marks here")])
-        XCTAssertEqual(Visuals.plain("A `csv` format"), "A csv format")
-        XCTAssertEqual(Visuals.spans("2 * 3 * 4, an `open tick, snake_case_name"), [Span("2 * 3 * 4, an `open tick, snake_case_name")])
-        XCTAssertEqual(Visuals.spans("*quick* and ~~old~~"), [Span("quick", italic: true), Span(" and "), Span("old", strike: true)])
-        XCTAssertEqual(Visuals.spans("[file](src/a.rs)"), [Span("[file](src/a.rs)")])
-    }
-
-    func testMockupPictures() {
-        let png = Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString()
-        let m = MockupPictures(["title": "Settings", "after": ["png": .string(png), "width": 640, "height": 400], "before": ["error": "mockups/old.html isn't there."]])
-        XCTAssertEqual(m.title, "Settings")
-        XCTAssertEqual(m.after?.width, 640)
-        XCTAssertTrue(m.hasBefore)
-        XCTAssertNil(m.before)
-        XCTAssertEqual(m.beforeWhy, "mockups/old.html isn't there.")
-        XCTAssertFalse(MockupPictures(["after": ["png": .string(png)]]).hasBefore)
-    }
-}
-
 final class QueuedMessageTests: XCTestCase {
     /// A steer sent leaves the queue; the rows after it keep their ids, so
     /// the list doesn't hand one row's state to the next.
@@ -1622,33 +1282,6 @@ final class QueuedMessageTests: XCTestCase {
         XCTAssertEqual(HarloModel.mode(busy: true, steer: false, stopping: false), .followUp)
         XCTAssertEqual(HarloModel.mode(busy: false, steer: true, stopping: true), .normal)
         XCTAssertEqual(SendMode.stopAndSend.rawValue, "stopAndSend", "the name harlo's phone server reads")
-    }
-
-    /// An extension's view: its Markdown and pictures in blocks among its
-    /// lines, each block of lines its own rows.
-    func testExtensionBlocks() throws {
-        let v = ExtView(try JSON.parse(#"""
-        {"id": "tool:1", "kind": "tool", "lines": ["call"], "result": ["# Hi", "", "pic", "more", "end"],
-         "resultBlocks": [
-           {"kind": "markdown", "text": "# Hi", "rows": 2, "parts": [{"kind": "prose", "html": "<h1>Hi</h1>"}, {"kind": "code", "html": "<pre>x</pre>", "code": "x", "lang": "rust"}]},
-           {"kind": "image", "data": "aGk=", "mime": "image/png", "rows": 1},
-           {"kind": "image", "tooBig": true, "rows": 0},
-           {"kind": "lines", "row": 3, "rows": 2},
-           {"kind": "lines", "row": 4, "rows": 9}
-         ]}
-        """#))
-        XCTAssertEqual(v.blocks, [], "the call's lines: none")
-        XCTAssertEqual(v.resultBlocks.count, 5)
-        guard case .markdown(let parts) = v.resultBlocks[0] else { return XCTFail("markdown first") }
-        XCTAssertEqual(parts.map(\.isCode), [false, true])
-        XCTAssertEqual([parts[1].code, parts[1].lang], ["x", "rust"])
-        XCTAssertEqual(v.resultBlocks[1], .picture(data: Data("hi".utf8), mime: "image/png"))
-        XCTAssertEqual(v.resultBlocks[2], .pictureTooBig)
-        XCTAssertEqual(v.resultBlocks[3], .lines(["more", "end"]))
-        XCTAssertEqual(v.resultBlocks[4], .lines(["end"]), "rows past the end: the lines there are")
-        // An extension's own entry: its view says whose.
-        let entry = ExtView(try JSON.parse(#"{"id": "entry:a1", "kind": "message", "lines": ["stamp"], "timestamp": 5, "entryId": "a1"}"#))
-        XCTAssertEqual([entry.entryId, v.entryId], ["a1", ""])
     }
 }
 

@@ -2,7 +2,7 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// harlo's message to the agent (a workflow's note): harlo's mark, folded
+/// harlo's message to the agent: harlo's mark, folded
 /// to its first lines (tap for the rest). Not yours: no bubble.
 struct HarloMessage: View {
     @Environment(\.palette) private var p

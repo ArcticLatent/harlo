@@ -312,64 +312,6 @@ public actor HarloClient {
         try check(await call("pin", ["key": .string(key), "pinned": .bool(pinned)]))
     }
 
-    /// The wiki of a session's repository: its pages and how fresh it is.
-    public func wiki(_ key: String) async throws -> Wiki {
-        Wiki(try check(await call("wiki", ["key": .string(key)])))
-    }
-
-    /// A page of that wiki ("architecture/jobs.md"), to read.
-    public func wikiPage(_ key: String, page: String) async throws -> WikiPageText {
-        WikiPageText(try check(await call("wikiPage", ["key": .string(key), "page": .string(page)])))
-    }
-
-    /// A search of that wiki's pages.
-    public func wikiSearch(_ key: String, query: String) async throws -> WikiHits {
-        WikiHits(try check(await call("wikiSearch", ["key": .string(key), "query": .string(query)])))
-    }
-
-    /// A declaration's card from that repository's code index (what it
-    /// calls, what calls it), as text.
-    public func wikiLookup(_ key: String, name: String, path: String) async throws -> String {
-        try check(await call("wikiLookup", ["key": .string(key), "name": .string(name), "path": .string(path)]))["text"].text
-    }
-
-    /// Marks a page of that wiki reviewed by the person at the computer:
-    /// read against its code, its changed footnotes count as checked.
-    public func wikiReview(_ key: String, page: String) async throws {
-        try check(await call("wikiReview", ["key": .string(key), "page": .string(page)]))
-    }
-
-    /// Starts a session on the computer that writes the wiki ("create",
-    /// "update", or "page:<path>" to check one page against its code).
-    public func wikiRun(_ key: String, mode: String) async throws {
-        try check(await call("wikiRun", ["key": .string(key), "mode": .string(mode)]))
-    }
-
-    /// The workflow run a session is part of (nil: none).
-    public func workflow(_ key: String) async throws -> WorkflowRun? {
-        let run = try check(await call("workflow", ["key": .string(key)]))["run"]
-        return run.object == nil ? nil : WorkflowRun(run)
-    }
-
-    /// Every workflow run harlo keeps, newest first.
-    public func workflows() async throws -> [WorkflowRun] {
-        (try check(await call("workflows", [:]))["runs"].array ?? []).map(WorkflowRun.init)
-    }
-
-    /// Pauses, resumes or stops a run, or merges, publishes or removes a
-    /// finished run's work.
-    public func workflowAction(_ id: String, _ action: WorkflowAction) async throws {
-        try check(await call("workflowAction", ["id": .string(id), "action": .string(action.rawValue)]))
-    }
-
-    /// A Mermaid diagram drawn by harlo, in these colours (`background`,
-    /// `surface`, `text`, `muted`, `accent` as `#rrggbb`).
-    public func diagram(_ source: String, light: Bool, colors: [String: String]) async throws -> DiagramPicture {
-        let r = try check(await call("diagram", ["source": .string(source), "light": .bool(light), "colors": .object(colors.mapValues { .string($0) })]))
-        guard let png = Data(base64Encoded: r["png"].text), !png.isEmpty else { throw HarloError.closed("harlo sent no picture.") }
-        return DiagramPicture(png: png, width: r["width"].double ?? 0, height: r["height"].double ?? 0, boxes: DiagramPicture.boxes(r["boxes"]))
-    }
-
     /// A picture a session shows (`Row.images`), or a picture file in its
     /// folder: a thumbnail, or fitted to a phone's screen.
     public func picture(_ path: String, of key: String, thumb: Bool) async throws -> Picture {
@@ -378,40 +320,11 @@ public actor HarloClient {
         return Picture(data: data, type: r["type"].text, width: r["width"].double ?? 0, height: r["height"].double ?? 0)
     }
 
-    /// A ```mockup block of a session: its pictures, taken by harlo.
-    public func mockup(_ source: String, of key: String) async throws -> MockupPictures {
-        let r = try check(await call("mockup", ["source": .string(source), "key": .string(key)]))
-        return MockupPictures(r)
-    }
-
-    /// A settled session back among its project's others.
-    public func putBack(_ key: String) async throws {
-        try check(await call("putBack", ["key": .string(key)]))
-    }
-
     /// Connects harlo to one of its other machines (as picking it in harlo
     /// does): what's there.
     public func connect(_ host: String) async throws -> RemoteMachine {
         let r = try check(await call("connect", ["host": .string(host)]))
         return RemoteMachine(host: r["host"].string ?? host, connected: true, home: r["home"].text, agents: (r["agents"].array ?? []).compactMap(\.string))
-    }
-
-    /// Which of an agent's models (`provider/model`) are on a model server
-    /// that's stopped: model → that server's name.
-    public func stoppedModels(agent: String, host: String = "", models: [String]) async throws -> [String: String] {
-        let r = try check(await call("stoppedModels", ["agent": .string(agent), "host": .string(host), "models": .array(models.map { .string($0) })]))
-        return (r["stopped"].object ?? [:]).compactMapValues(\.string)
-    }
-
-    /// The model servers harlo set up, on its computer and each machine
-    /// connected.
-    public func modelServers() async throws -> [ModelServers] {
-        ModelServers.list(try check(await call("servers")))
-    }
-
-    /// Starts one (until it serves) or stops it: whether it runs now.
-    public func setServer(host: String, url: String, running: Bool) async throws -> Bool {
-        try check(await call(running ? "startServer" : "stopServer", ["host": .string(host), "url": .string(url)]))["running"].bool ?? false
     }
 
     /// Your messages in the open session a turn can be undone to: row key →
@@ -449,12 +362,6 @@ public actor HarloClient {
     /// The session folder's files matching `query` (`@` mentions), best first.
     public func files(_ key: String, query: String) async throws -> [String] {
         (try check(await call("files", ["key": .string(key), "query": .string(query)]))["files"].array ?? []).compactMap(\.string)
-    }
-
-    /// The folder's other sessions matching `query` (`@` mentions), newest
-    /// first (harlo with `sessionMentions` among its features).
-    public func sessionMentions(_ key: String, query: String) async throws -> [SessionMention] {
-        (try check(await call("sessionMentions", ["key": .string(key), "query": .string(query)]))["sessions"].array ?? []).map(SessionMention.init)
     }
 
     /// A file of the session's folder, to read.

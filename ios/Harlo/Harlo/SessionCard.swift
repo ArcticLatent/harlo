@@ -30,7 +30,7 @@ struct SessionCard: View {
     /// Its model as people say it ("claude-opus-5-5" → "Opus 5.5"); ""
     /// when it isn't known (its tile shows the agent either way).
     var model: String {
-        session.modelName.isEmpty ? "" : WorkflowStage.modelName(session.modelName)
+        session.modelName.isEmpty ? "" : ModelChoice.said(session.modelName)
     }
 
     /// Its project and the machine it's on (grouped by project, the group

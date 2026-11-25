@@ -14,8 +14,6 @@ struct Composer: View {
     @State private var levels: [String] = []
     /// Files matching the `@` being typed.
     @State private var fileMatches: [String] = []
-    /// The folder's other sessions matching it (`@session:…`).
-    @State private var sessionMatches: [SessionMention] = []
     @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
     /// At the largest text sizes the model (or Steer | Queue) gets a row of
@@ -44,9 +42,8 @@ struct Composer: View {
                 SlashList(commands: Array(commands.prefix(6))) { c in
                     session.draft = "/" + c.name + " "
                 }
-            } else if focused && mention != nil && !(fileMatches.isEmpty && sessionMatches.isEmpty) {
-                let sessions = Array(sessionMatches.prefix(fileMatches.isEmpty ? 6 : 3))
-                FileList(files: Array(fileMatches.prefix(6 - sessions.count)), sessions: sessions) { f in
+            } else if focused && mention != nil && !fileMatches.isEmpty {
+                FileList(files: Array(fileMatches.prefix(6))) { f in
                     session.draft = Mention.insert(f, into: session.draft)
                 }
             }
@@ -94,22 +91,16 @@ struct Composer: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        // `@`: the session folder's files, and its other sessions (the
-        // agent gets what one said), as you type.
+        // `@`: the session folder's files, as you type.
         .task(id: mention) {
             guard let q = mention else {
                 fileMatches = []
-                sessionMatches = []
                 return
             }
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             let f = await model.files(matching: q)
-            let s = await model.sessionMentions(matching: q)
-            if !Task.isCancelled {
-                fileMatches = f
-                sessionMatches = s
-            }
+            if !Task.isCancelled { fileMatches = f }
         }
         // The thinking levels its model has (for the options menu).
         .task(id: session.liveKey + "|" + session.info.modelId) {

@@ -16,8 +16,6 @@ struct NewSessionView: View {
     @State private var place: SessionPlace = .home("")
     /// The machine being connected to.
     @State private var connecting: String?
-    /// The agent's models on a stopped model server: model → its server.
-    @State private var stopped: [String: String] = [:]
     @State private var agent = ""
     /// `provider/model`; "": the agent's default.
     @State private var modelId = ""
@@ -105,11 +103,6 @@ struct NewSessionView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollDismissesKeyboard(.interactively)
-        // Which of this computer's models wait on a stopped server.
-        .task(id: "\(agent)|\(host)|\(choices != nil)") {
-            guard let c = choices, host.isEmpty, !agent.isEmpty else { stopped = [:]; return }
-            stopped = await model.stoppedModels(agent: agent, models: c.modelChoices(for: agent).map(\.id))
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let c = choices { composer(c) }
         }
@@ -175,15 +168,6 @@ struct NewSessionView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .card(p, radius: 22, fill: p.background)
-            if let server = stopped[modelId] {
-                HStack(spacing: 4) {
-                    Image(systemName: "pause.circle")
-                    Text("\(server) is stopped: harlo starts it before your message")
-                }
-                .scaledFont(12.5)
-                .foregroundStyle(Color(p.warning))
-                .padding(.horizontal, 6)
-            }
         }
         .padding(10)
         .card(p, radius: 26)
@@ -203,7 +187,7 @@ struct NewSessionView: View {
     }
 
     func agentModel(_ c: NewSessionChoices) -> AgentModelMenu {
-        AgentModelMenu(choices: c, place: place, agent: $agent, modelId: $modelId, stopped: stopped, defaultModel: defaultModel(c), big: big)
+        AgentModelMenu(choices: c, place: place, agent: $agent, modelId: $modelId, defaultModel: defaultModel(c), big: big)
     }
 
     func apply(_ t: SessionTemplate, _ c: NewSessionChoices) {

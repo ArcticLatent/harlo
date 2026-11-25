@@ -112,16 +112,6 @@ extension HarloModel {
     }
 }
 
-extension HarloModel {
-    /// Model servers for the samples: one running here, one stopped.
-    static let sampleServers = [
-        ModelServers(host: "", servers: [
-            ModelServer(url: "http://127.0.0.1:8080/v1", name: "llama.cpp", engine: "llama.cpp", models: ["qwen3-coder-30b"], running: true),
-            ModelServer(url: "http://127.0.0.1:11434/v1", name: "ollama", engine: "Ollama", models: ["gpt-oss:20b"], running: false),
-        ]),
-    ]
-}
-
 /// What a sample model answers instead of asking harlo.
 public struct Samples: Sendable {
     public var choices: NewSessionChoices
@@ -136,10 +126,6 @@ public struct Samples: Sendable {
     ]])
     public var markdown = "# Fix the session list's scrolling\n\n*Harlo · GPT-5 · `~/Projects/harlo`*\n\n---\n\n## You\n\nThe session list jumps to the top when a session's status changes. Keep the scroll position.\n\n## Harlo\n\n- **read** `crates/harlo-core/src/sidebar.rs` → 214 lines\n- **edit** `crates/harlo-core/src/sidebar.rs` → +8 −2\n\nThe list is now updated in place, so it keeps its position.\n"
     public var files: [String] = ["crates/harlo-core/src/sidebar.rs", "crates/harlo-app/qml/Sidebar.qml", "crates/harlo-core/src/listdiff.rs", "README.md"]
-    public var sessionMentions: [SessionMention] = [
-        SessionMention(["mention": "@session:7c1e9a40", "title": "Find why the sidebar jumps", "harness": "pi", "modified": 1_759_990_000]),
-        SessionMention(["mention": "@session:2b84d0f3", "title": "Phone photos in the composer", "harness": "pi", "modified": 1_759_900_000]),
-    ]
     public var file = FileText(["path": "crates/harlo-core/src/sidebar.rs", "total": 4, "lines": [
         "<span class=\"s2\">pub</span> <span class=\"s2\">fn</span> <span class=\"s5\">build</span>(input: <span class=\"s8\">&amp;</span><span class=\"s7\">SidebarInput</span>) -&gt; <span class=\"s7\">Vec</span>&lt;<span class=\"s7\">SidebarRow</span>&gt; {",
         "    <span class=\"s2\">let</span> <span class=\"s2\">mut</span> rows <span class=\"s8\">=</span> <span class=\"s7\">Vec</span>::<span class=\"s5\">new</span>();",
@@ -164,7 +150,7 @@ public struct Samples: Sendable {
         models: [ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "reasoning": true]),
                  ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5", "name": "GPT-5", "reasoning": true]),
-                 ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false, "stoppedServer": "ollama"])],
+                 ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false])],
         changes: Changes(["branch": "main", "ahead": 1, "files": [
             ["path": "crates/harlo-core/src/sidebar.rs", "status": "M"],
             ["path": "crates/harlo-app/qml/Sidebar.qml", "status": "M"],

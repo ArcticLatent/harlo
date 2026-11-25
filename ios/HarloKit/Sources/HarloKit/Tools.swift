@@ -14,11 +14,6 @@ public enum ToolName {
         "ask_parent": "harlo: ask the session that started it",
     ]
 
-    /// The project wiki's tool (a wiki session's).
-    static let wiki: [String: String] = [
-        "wiki_check": "Check the wiki",
-    ]
-
     /// A tool's name without harlo's prefix (`mcp__harlo__x`, `harlo_x`;
     /// Harlo calls them by their own names).
     static func harloTool(_ name: String) -> String {
@@ -42,7 +37,7 @@ public enum ToolName {
     /// "context-mode ctx execute", "harlo: start a session".
     public static func words(_ tool: String, running: Bool) -> String {
         let h = harloTool(tool)
-        if let said = wiki[h] ?? harlo[h] { return said }
+        if let said = harlo[h] { return said }
         if let m = mcp(tool) { return m.server + " " + m.tool.replacing("_", with: " ") }
         let pick = { (now: String, done: String) in running ? now : done }
         switch tool.lowercased() {
@@ -89,7 +84,6 @@ public enum ToolName {
     /// Its SF Symbol.
     public static func symbol(_ tool: String) -> String {
         let h = harloTool(tool)
-        if wiki[h] != nil { return "book" }
         if harlo[h] != nil { return "person.2" }
         if mcp(tool) != nil { return "puzzlepiece.extension" }
         switch tool.lowercased() {
@@ -132,7 +126,7 @@ public enum ToolName {
         }
     }
 
-    /// One of harlo's own tools (read a session, report a workflow stage, …).
+    /// One of harlo's own tools (read a session, list sessions, …).
     public static func isHarlo(_ tool: String) -> Bool { harlo[harloTool(tool)] != nil }
 
     /// The line under a tool's name, and whether it's words: harlo's own

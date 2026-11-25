@@ -18,7 +18,6 @@ extension HarloModel {
         host = PairedHarlo(key: sample.host?.key ?? "", name: Self.demoName, endpoints: [])
         sessions = sample.sessions
         limits = sample.limits
-        demoServers = Self.sampleServers
         session = nil
         answered = []
         state = .connected
@@ -117,48 +116,5 @@ extension HarloModel {
     /// A demo session's state on the list.
     func demoStatus(_ key: String, _ status: String) {
         if let i = sessions.firstIndex(where: { $0.key == key }) { sessions[i].status = status }
-    }
-}
-
-extension HarloModel {
-    nonisolated static let sampleWiki = Wiki(pages: [
-        WikiPage(path: "overview.md", title: "Overview", summary: "Where to start: what harlo is and how its parts fit.", kind: "Overview",
-                 links: ["architecture/sessions.md"]),
-        WikiPage(path: "architecture/sessions.md", title: "Sessions", summary: "How a session runs an agent and streams its transcript.", kind: "Architecture",
-                 links: ["overview.md"], owes: 1),
-        WikiPage(path: "workflows/release.md", title: "Releasing", summary: "How a release is built, signed and published.", kind: "Workflow",
-                 links: ["architecture/sessions.md"]),
-    ], work: Wiki.Work(count: 1, stale: 1), written: ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-3 * 86400)))
-
-    nonisolated static func sampleWikiPage(_ path: String) -> WikiPageText {
-        let page = sampleWiki.pages.first { $0.path == path } ?? sampleWiki.pages[0]
-        let written = JSON.string(ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-3 * 86400)))
-        let text: [String: JSON] = [
-            "overview.md": ["path": "overview.md", "title": "Overview", "type": "Overview", "description": "Where to start: what harlo is and how its parts fit.",
-                            "generated": ["by": "claude/claude-opus-5-5", "at": written],
-                            "blocks": [["kind": "prose", "html": "<h1>Overview</h1><p>harlo runs coding agents in <a href=\"/architecture/sessions.md\">sessions</a>, each streaming its transcript to the desktop and the phone.</p>"],
-                                       ["kind": "mermaid", "code": "flowchart LR\n  phone --> desktop --> agent"]],
-                            "backlinks": [["path": "architecture/sessions.md", "title": "Sessions"]]],
-            "architecture/sessions.md": ["path": "architecture/sessions.md", "title": "Sessions", "type": "Architecture", "description": .string(page.summary),
-                                         "generated": ["by": "claude/claude-opus-5-5", "at": written],
-                                         "blocks": [["kind": "prose", "html": "<h1>Sessions</h1><p>A session starts its agent and keeps its rows by key.<a href=\"okf-fn:start\">[1]</a> Back to the <a href=\"/overview.md\">overview</a>.</p>", "anchor": "sessions"],
-                                                    ["kind": "code", "html": "<pre><code>let key = registry::start(kind, cwd);</code></pre>", "code": "let key = registry::start(kind, cwd);", "lang": "rust"]],
-                                         "footnotes": [["n": 1, "label": "start", "path": "crates/harlo-core/src/session.rs", "locator": "fn start", "start": 31, "end": 40, "state": "stale"]],
-                                         "items": ["Footnote 1: its code changed since the page was written (crates/harlo-core/src/session.rs, fn start)"],
-                                         "backlinks": [["path": "overview.md", "title": "Overview"], ["path": "workflows/release.md", "title": "Releasing"]]],
-        ]
-        return WikiPageText(text[page.path] ?? ["path": .string(page.path), "title": .string(page.title), "type": .string(page.kind), "description": .string(page.summary),
-                                                "edited": true, "blocks": [["kind": "prose", "html": .string("<h1>\(page.title)</h1><p>\(page.summary)</p>")]]])
-    }
-
-    nonisolated static func sampleWikiHits(_ query: String) -> WikiHits {
-        WikiHits(["hits": [["page": "architecture/sessions.md", "section": "sessions", "heading": "Sessions",
-                            "snippet": "A session starts its agent and keeps its rows by key."]],
-                  "code": [["path": "src/session.rs", "name": "Session::start", "kind": "fn", "line": 42,
-                            "signature": "pub fn start(&mut self, agent: Agent) -> Result<()>", "doc": "Starts the session's agent."]]])
-    }
-
-    nonisolated static func sampleCodeCard(_ code: WikiHits.Code) -> String {
-        "\(code.signature)\n\(code.doc)\ncalls: Agent::spawn (src/agent.rs:20)\ncalled by:\n  Workspace::open (src/workspace.rs:88)"
     }
 }

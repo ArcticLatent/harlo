@@ -75,9 +75,6 @@ public final class OpenSession {
     /// The call of the command its agent waits for ("" none): it can be
     /// sent to the background.
     public internal(set) var backgroundCall = ""
-    /// pi extensions' views (widgets, footer, a screen open on the
-    /// computer, their drawing of tool calls and messages), oldest first.
-    public internal(set) var extViews: [ExtView] = []
     /// "busy", "idle", "input", …
     public internal(set) var status = ""
     public internal(set) var rows: [Row] = []
@@ -152,10 +149,6 @@ public final class OpenSession {
     /// When it continues on its own after its limit resets (unix ms, 0 if
     /// it isn't going to).
     public internal(set) var resumesAt: Int64 = 0
-    /// Its repository's wiki (nil: not asked yet).
-    public internal(set) var wiki: Wiki?
-    /// The workflow run it's part of (nil: none, or harlo hasn't said).
-    public internal(set) var workflow: WorkflowRun?
     /// Your messages a turn can be undone to (row key → snapshot).
     public internal(set) var undoable: [String: String] = [:]
     /// Its folder is a git repository (or holds some): its changes have
@@ -280,8 +273,6 @@ public final class OpenSession {
         case .jobs(_, let rows, let call):
             jobs = rows
             backgroundCall = call
-        case .ext(_, let change):
-            extViews.apply(change)
         case .unsent(_, let text, let photos):
             // Above what's typed meanwhile, not over it.
             if !text.isEmpty {
@@ -345,7 +336,6 @@ public final class HarloModel {
     /// connected, whatever the app's state or the network.
     @ObservationIgnored public internal(set) var replaying = false
     @ObservationIgnored var demoCount = 0
-    @ObservationIgnored var demoServers: [ModelServers] = []
     /// Sessions marked unread here (kept), until opened.
     public private(set) var unreadMarks: Set<String> = []
 
@@ -598,9 +588,6 @@ public final class HarloModel {
         case .limits(let l):
             limits = l
             if let s = session { Task { await refreshLimit(s) } }
-        case .workflow(let key):
-            if let s = session, s.liveKey == key { Task { await refreshWorkflow(s) } }
-            if watchingRuns { Task { await loadWorkflows() } }
         case .meta(_, let info):
             // Another model can be another plan's.
             let before = session?.info.modelId
@@ -786,7 +773,6 @@ public final class HarloModel {
             s.opened(liveKey: r.key, harness: r.harness)
             s.modes = try? await c.modes(r.key)
             await refreshLimit(s)
-            await refreshWorkflow(s)
         } catch {
             s.error = Self.describe(error)
             s.loading = false
@@ -842,11 +828,6 @@ public final class HarloModel {
         }
     }
 
-    // ---- diagrams and helpers ------------------------------------------------------
-
-    /// harlo draws diagrams for the phone (an older one doesn't).
-    public var drawsDiagrams: Bool { demo || samples != nil || features.contains("diagrams") }
-
     /// Opens a session by its key (false: it isn't in the list).
     @discardableResult
     public func openSession(_ key: String) -> Bool {
@@ -855,133 +836,7 @@ public final class HarloModel {
         return true
     }
 
-    // ---- workflow runs ------------------------------------------------------------
-
-    /// harlo runs workflows and shows them to the phone.
-    public var hasWorkflows: Bool { features.contains("workflows") }
-
-    /// Every run harlo keeps, newest first (for the Runs list).
-    public internal(set) var workflowRuns: [WorkflowRun] = []
-    /// Views on screen that list runs: while there's one, a change reloads
-    /// the list.
-    @ObservationIgnored var runWatchers = 0
-    var watchingRuns: Bool { runWatchers > 0 }
-
-    /// A view listing runs came (true) or went (false).
-    public func watchRuns(_ on: Bool) {
-        runWatchers = max(0, runWatchers + (on ? 1 : -1))
-    }
-
-    /// A run by its id: the open session's, or one in the list.
-    public func workflowRun(_ id: String) -> WorkflowRun? {
-        if let r = session?.workflow, r.id == id { return r }
-        return workflowRuns.first { $0.id == id }
-    }
-
-    /// The run the open session is part of, from harlo.
-    func refreshWorkflow(_ s: OpenSession) async {
-        guard hasWorkflows, let c = client, !s.liveKey.isEmpty else { return }
-        // (nil is no run: a run that's gone leaves the card; a failed call
-        // keeps it.)
-        guard let run = try? await Optional(c.workflow(s.liveKey)), session === s, run != s.workflow else { return }
-        s.workflow = run
-    }
-
-    /// Every run, from harlo.
-    public func loadWorkflows() async {
-        guard hasWorkflows, let c = client, let runs = try? await c.workflows(), runs != workflowRuns else { return }
-        workflowRuns = runs
-    }
-
-    /// Pauses, resumes or stops a run, or merges, publishes or removes its
-    /// work: true when harlo did (else `alert` says why).
-    @discardableResult
-    public func workflowAction(_ run: WorkflowRun, _ action: WorkflowAction) async -> Bool {
-        guard await with(session: false, { c, _ in try await c.workflowAction(run.id, action) }) != nil else { return false }
-        if let s = session { await refreshWorkflow(s) }
-        if watchingRuns { await loadWorkflows() }
-        return true
-    }
-
-    /// harlo has the project wiki for the phone.
-    public var hasWiki: Bool { demo || samples != nil || features.contains("wiki") }
-
-    /// The open session's repository's wiki. Quietly: it's extra on the
-    /// plan's sheet, and an alert there (a wiki on a host that's gone, say)
-    /// could close the sheet it opens with.
-    public func loadWiki() async {
-        guard let s = session else { return }
-        if demo || samples != nil { s.wiki = Self.sampleWiki; return }
-        guard features.contains("wiki"), let c = client, !s.liveKey.isEmpty else { return }
-        if let wiki = try? await c.wiki(s.liveKey), session === s { s.wiki = wiki }
-    }
-
-    /// A page of the open session's wiki (nil: it couldn't be asked; a
-    /// page that can't be read says why in its `error`).
-    /// The wiki page read last, by wiki (its root): its graph rings it.
-    public var wikiReadLast: [String: String] = [:]
-
-    public func wikiPage(_ path: String) async -> WikiPageText? {
-        if demo || samples != nil { return Self.sampleWikiPage(path) }
-        guard features.contains("wiki") else { return nil }
-        return await with { c, k in try await c.wikiPage(k, page: path) }
-    }
-
-    /// A search of the open session's wiki.
-    public func searchWiki(_ query: String) async -> WikiHits? {
-        if demo || samples != nil { return Self.sampleWikiHits(query) }
-        guard features.contains("wiki") else { return nil }
-        return await with { c, k in try await c.wikiSearch(k, query: query) }
-    }
-
-    /// A declaration's card from the open session's code index (nil: it
-    /// couldn't be asked).
-    public func lookupCode(_ code: WikiHits.Code) async -> String? {
-        if demo || samples != nil { return Self.sampleCodeCard(code) }
-        guard features.contains("wiki") else { return nil }
-        return await with { c, k in try await c.wikiLookup(k, name: code.name, path: code.path) }
-    }
-
-    /// Marks a page of the open session's wiki reviewed by the person at
-    /// the computer: true when it was (an alert says why not).
-    public func reviewWiki(_ page: String) async -> Bool {
-        if demo || samples != nil { return true }
-        guard await with({ c, k in try await c.wikiReview(k, page: page) }) != nil else { return false }
-        await loadWiki()
-        return true
-    }
-
-    /// Starts a wiki session on the computer ("create", "update", or
-    /// "page:<path>"): true when it started (or harlo found nothing to do).
-    public func runWiki(_ mode: String) async -> Bool {
-        if demo || samples != nil {
-            session?.wiki?.running = true
-            return true
-        }
-        guard await with({ c, k in try await c.wikiRun(k, mode: mode) }) != nil else { return false }
-        await loadWiki()
-        return true
-    }
-
-    /// Diagrams drawn this run (by source, mode and colours).
-    @ObservationIgnored var diagrams: [String: DiagramPicture] = [:]
-
-    /// A Mermaid diagram drawn by harlo in these colours (nil: it can't be,
-    /// `why` says why).
-    public func diagram(_ source: String, light: Bool, colors: [String: String]) async -> (picture: DiagramPicture?, why: String) {
-        let key = "\(light)|\(colors.sorted { $0.key < $1.key })|\(source)"
-        if let d = diagrams[key] { return (d, "") }
-        if demo || samples != nil { return (nil, "harlo draws diagrams on your computer.") }
-        guard features.contains("diagrams") else { return (nil, "This harlo doesn't draw diagrams for the phone.") }
-        guard let c = client else { return (nil, "Not connected to harlo.") }
-        do {
-            let d = try await c.diagram(source, light: light, colors: colors)
-            diagrams[key] = d
-            return (d, "")
-        } catch {
-            return (nil, Self.describe(error))
-        }
-    }
+    // ---- pictures -----------------------------------------------------------------
 
     /// harlo sends the conversation's pictures to the phone (an older one
     /// doesn't).
@@ -1023,30 +878,6 @@ public final class HarloModel {
             }
         }
         return got
-    }
-
-    /// harlo shows mockups to the phone (an older one doesn't).
-    public var showsMockups: Bool { features.contains("visuals") }
-
-    /// Mockups' pictures taken lately (by session and source): looked at
-    /// again after a while, since the agent may have changed the file.
-    @ObservationIgnored var mockups: [String: (at: Date, pictures: MockupPictures)] = [:]
-
-    /// A ```mockup block of the open session, as harlo shows it (nil: it
-    /// can't, `why` says why).
-    public func mockup(_ source: String) async -> (pictures: MockupPictures?, why: String) {
-        if demo || samples != nil { return (nil, "harlo shows mockups on your computer.") }
-        guard showsMockups else { return (nil, "This harlo doesn't show mockups on the phone.") }
-        guard let c = client, let key = session?.liveKey, !key.isEmpty else { return (nil, "Not connected to harlo.") }
-        let id = key + "|" + source
-        if let m = mockups[id], Date.now.timeIntervalSince(m.at) < 10 { return (m.pictures, "") }
-        do {
-            let m = try await c.mockup(source, of: key)
-            mockups[id] = (Date.now, m)
-            return (m, "")
-        } catch {
-            return (nil, Self.describe(error))
-        }
     }
 
     // ---- plan limits ------------------------------------------------------------
@@ -1242,16 +1073,6 @@ public final class HarloModel {
         return (try? await c.files(k, query: query)) ?? []
     }
 
-    /// The open session folder's other sessions matching what's typed after
-    /// `@` (none from a harlo too old to have them).
-    public func sessionMentions(matching query: String) async -> [SessionMention] {
-        if let s = samples {
-            return s.sessionMentions.filter { query.isEmpty || $0.title.localizedStandardContains(query) || $0.mention.dropFirst(9).hasPrefix(query.lowercased()) }
-        }
-        guard features.contains("sessionMentions"), let c = client, let k = session?.liveKey, !k.isEmpty else { return [] }
-        return (try? await c.sessionMentions(k, query: query)) ?? []
-    }
-
     /// A file the open session's replies mention (nil: the alert says why).
     public func file(_ path: String) async -> FileText? {
         if let s = samples { return s.file }
@@ -1310,21 +1131,10 @@ public final class HarloModel {
         _ = await with(session: false) { c, _ in try await c.pin(s.key, on) }
     }
 
-    /// harlo can put a settled session back (an older one can't).
-    public var canPutBack: Bool { demo || samples != nil || features.contains("putBack") }
+    // ---- other machines --------------------------------------------------------------
 
-    /// A settled session back among its project's others.
-    public func putBack(_ s: SessionSummary) async {
-        if demo, let i = sessions.firstIndex(where: { $0.key == s.key }) { sessions[i].settled = ""; return }
-        _ = await with(session: false) { c, _ in try await c.putBack(s.key) }
-    }
-
-    // ---- other machines and model servers --------------------------------------------
-
-    /// harlo can connect its machines and start its model servers from here
-    /// (an older one can't).
+    /// harlo can connect its machines from here (an older one can't).
     public var canConnect: Bool { demo || samples != nil || features.contains("connect") }
-    public var hasModelServers: Bool { demo || samples != nil || features.contains("modelServers") }
 
     /// Connects harlo to one of its other machines: what's there (nil: it
     /// didn't connect, and `alert` says why).
@@ -1334,35 +1144,6 @@ public final class HarloModel {
             return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["pi"])
         }
         return await with(session: false) { c, _ in try await c.connect(host) }
-    }
-
-    /// Which of an agent's models on harlo's computer are on a model server
-    /// that's stopped: model → that server's name (none from an older harlo).
-    public func stoppedModels(agent: String, models: [String]) async -> [String: String] {
-        guard !models.isEmpty else { return [:] }
-        if demo || samples != nil { return models.contains("openai/gpt-5") ? ["openai/gpt-5": "ollama"] : [:] }
-        guard features.contains("stoppedModels"), let c = client else { return [:] }
-        return (try? await c.stoppedModels(agent: agent, models: models)) ?? [:]
-    }
-
-    /// The model servers on harlo's computer and each machine connected.
-    public func modelServers() async -> [ModelServers]? {
-        if demo { return demoServers }
-        if samples != nil { return Self.sampleServers }
-        return await with(session: false) { c, _ in try await c.modelServers() }
-    }
-
-    /// Starts a model server (until it serves) or stops it: whether it runs
-    /// now (nil: it went wrong, and `alert` says why).
-    public func setServer(host: String, url: String, running: Bool) async -> Bool? {
-        if demo {
-            try? await Task.sleep(for: .seconds(1))
-            for (i, m) in demoServers.enumerated() where m.host == host {
-                for (j, s) in m.servers.enumerated() where s.url == url { demoServers[i].servers[j].running = running }
-            }
-            return running
-        }
-        return await with(session: false) { c, _ in try await c.setServer(host: host, url: url, running: running) }
     }
 
     /// Unread: finished since you looked (harlo says), or marked so here.
@@ -1426,8 +1207,7 @@ extension Event {
     public var sessionKey: String? {
         switch self {
         case .reset(let k, _, _), .rows(let k, _), .status(let k, _), .meta(let k, _), .request(let k, _), .cleared(let k, _),
-             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .jobs(let k, _, _), .unsent(let k, _, _), .workflow(let k),
-             .ext(let k, _): return k
+             .commands(let k, _), .queue(let k, _, _), .todos(let k, _), .jobs(let k, _, _), .unsent(let k, _, _): return k
         case .sessions, .limits, .revoked: return nil
         }
     }

@@ -25,7 +25,7 @@ enum Style {
     }
 
     static func harnessLabel(_ id: String) -> String {
-        ["pi": "pi", "demo": "Demo"][id] ?? id
+        ["pi": "pi", "demo": "Demo", "harlo": "Harlo"][id] ?? id
     }
 
     /// "now", "3m", "2h", "5d", "4mo" from unix seconds.

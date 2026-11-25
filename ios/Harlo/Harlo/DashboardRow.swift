@@ -59,13 +59,6 @@ struct DashboardRow: View {
             } label: {
                 Label(unread ? "Mark as read" : "Mark as unread", systemImage: unread ? "envelope.open" : "envelope.badge")
             }
-            if !s.settled.isEmpty && model.canPutBack {
-                Button {
-                    Task { await model.putBack(s) }
-                } label: {
-                    Label("Put back", systemImage: "arrow.uturn.backward")
-                }
-            }
             Button {
                 Task { await model.archive(s) }
             } label: {

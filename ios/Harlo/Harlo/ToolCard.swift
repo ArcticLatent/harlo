@@ -26,13 +26,6 @@ struct ToolCard: View {
     }
 
     var running: Bool { row.state == "running" }
-    /// A pi extension's drawing of the call and its result.
-    var ext: ExtView? {
-        guard !row.callId.isEmpty else { return nil }
-        return model.session?.extViews.first { $0.kind == "tool" && $0.toolCallId == row.callId }
-    }
-    /// A workflow's report, said in words.
-    var report: WorkflowReport? { row.workflowReport }
     var symbol: String { Style.toolSymbol(row.title) }
     var canOpen: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
     /// The command, shown opened when its line says what it's for instead.
@@ -50,15 +43,10 @@ struct ToolCard: View {
                 HStack(spacing: 12) {
                     IconSquare(symbol: symbol, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(report?.title ?? Style.toolWords(row.title, running: running))
+                        Text(Style.toolWords(row.title, running: running))
                             .scaledFont(16, .medium)
                             .lineLimit(1)
-                        if let report, !report.summary.isEmpty {
-                            Text(report.summary)
-                                .scaledFont(14)
-                                .foregroundStyle(Color(p.muted))
-                                .lineLimit(2)
-                        } else if !row.label.isEmpty {
+                        if !row.label.isEmpty {
                             // What it's for, in the agent's words (the
                             // command itself is in it, opened).
                             Text(row.label)
@@ -92,18 +80,6 @@ struct ToolCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if let ext, !(ext.lines + ext.result).isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    if !ext.lines.isEmpty {
-                        ExtBlocks(lines: ext.lines, blocks: ext.blocks)
-                    }
-                    if !ext.result.isEmpty {
-                        ExtBlocks(lines: ext.result, blocks: ext.resultBlocks)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            }
             if !row.images.isEmpty && model.showsPictures {
                 PictureStrip(paths: row.images, side: 72)
                     .padding(.horizontal, 12)
@@ -129,17 +105,11 @@ struct ToolCard: View {
     }
 
     var failed: Bool {
-        report?.superseded != true && (row.result.hasSuffix("failed") || row.result.hasPrefix("exit") || row.state == "error")
+        row.result.hasSuffix("failed") || row.result.hasPrefix("exit") || row.state == "error"
     }
 
     @ViewBuilder var trailing: some View {
-        if report?.superseded == true {
-            // (Its attempt is over: a later one is under way.)
-            Text("Not used")
-                .scaledFont(13)
-                .foregroundStyle(Color(p.muted))
-                .fixedSize()
-        } else if diffResult {
+        if diffResult {
             ResultBadge(text: row.result)
         } else if running {
             EmptyView()

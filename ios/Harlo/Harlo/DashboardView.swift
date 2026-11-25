@@ -25,16 +25,6 @@ struct DashboardView: View {
 
     /// The projects whose Settled shelf is open.
     @State private var openShelves: Set<String> = []
-    /// The workflow run shown in full.
-    @State private var openRun: WorkflowRun?
-    @State private var showRuns = false
-
-    /// Runs under way or waiting for you (paused, or done with work not
-    /// merged), at most three.
-    var currentRuns: [WorkflowRun] {
-        Array(model.workflowRuns.filter { $0.running || $0.paused || ($0.finishable && !$0.merged) }.prefix(3))
-    }
-
     struct SessionGroup: Identifiable {
         let id: String
         var name: String
@@ -123,39 +113,6 @@ struct DashboardView: View {
                 PlanLimitsCard(limits: model.limits)
                     .plainRow()
             }
-            if model.hasWorkflows && !all && !model.workflowRuns.isEmpty {
-                HStack {
-                    Text("Workflow runs")
-                        .scaledFont(21, .semibold)
-                    Spacer()
-                    // (A button, not a NavigationLink: in a List row a link
-                    // takes the whole row and adds its own chevron.)
-                    Button {
-                        showRuns = true
-                    } label: {
-                        Text("View All")
-                            .scaledFont(15, .medium)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 38)
-                            .card(p, radius: 12)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("All workflow runs")
-                }
-                .plainRow(top: 14, bottom: 4)
-                if currentRuns.isEmpty {
-                    Text("None under way.")
-                        .scaledFont(14)
-                        .foregroundStyle(Color(p.muted))
-                        .plainRow()
-                }
-                ForEach(currentRuns) { run in
-                    Button { openRun = run } label: { WorkflowRunRow(run: run) }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("workflowRun")
-                        .plainRow()
-                }
-            }
             HStack {
                 Text(all ? "All sessions" : "Recent sessions")
                     .scaledFont(21, .semibold)
@@ -237,12 +194,6 @@ struct DashboardView: View {
             }
         }
         .refreshable { await model.reconnect() }
-        // (Its runs, kept up while it's on screen.)
-        .task(id: model.state == .connected && model.hasWorkflows) { await model.loadWorkflows() }
-        .onAppear { model.watchRuns(true) }
-        .onDisappear { model.watchRuns(false) }
-        .sheet(item: $openRun) { run in WorkflowSheet(id: run.id) }
-        .navigationDestination(isPresented: $showRuns) { WorkflowRunsView() }
         .alert("Rename session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}

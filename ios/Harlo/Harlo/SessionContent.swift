@@ -159,12 +159,10 @@ struct SessionContent: View {
                         RequestCard(request: req)
                             .id(req.id)
                     }
-                    ExtPanel(session: session, below: false)
                     Composer(session: session, openSheet: { sheet = $0 }) {
                         atBottom = true
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
-                    ExtPanel(session: session, below: true)
                 }
                 // (Solid, with a hairline: nothing of the conversation shows through.)
                 .background(Color(p.background).ignoresSafeArea(edges: .bottom))
@@ -281,13 +279,6 @@ struct SessionContent: View {
                     } label: {
                         Label("Share as Markdown", systemImage: "square.and.arrow.up")
                     }
-                    if model.hasWiki && session.wiki?.inProject != false {
-                        Button {
-                            sheet = .wiki
-                        } label: {
-                            Label("Wiki", systemImage: "book")
-                        }
-                    }
                     if let last = session.rows.last(where: { !$0.images.isEmpty })?.images.last {
                         Button {
                             picture = PictureOpening(path: last, grid: true)
@@ -373,8 +364,6 @@ struct SessionContent: View {
                 case .file(let path, let line): FileView(path: path, line: line)
                 case .branches: BranchesView(busy: session.busy) { branch = $0 }
                 case .changes: ChangesView()
-                case .wiki: WikiSheet(session: session)
-                case .workflow(let id): WorkflowSheet(id: id)
                 case .activity: ActivityView(session: session)
                 case .actions: ActionLogView(session: session)
                 case .share(let url): ShareSheet(items: [url])
@@ -407,7 +396,7 @@ extension SessionContent {
         }
     }
 
-    /// A message sent to the agent: yours, or harlo's (a workflow's note).
+    /// A message sent to the agent: yours, or harlo's.
     static func isSent(_ item: TranscriptItem) -> Bool {
         if case .row(let r) = item { return r.isSent }
         return false

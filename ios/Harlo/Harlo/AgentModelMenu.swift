@@ -10,8 +10,6 @@ struct AgentModelMenu: View {
     let place: SessionPlace
     @Binding var agent: String
     @Binding var modelId: String
-    /// The agent's models on a stopped model server: model → its server.
-    let stopped: [String: String]
     /// "Default model", or the project's own for this agent.
     let defaultModel: String
     /// At the largest text sizes: a row of its own, the name uncut.
@@ -34,7 +32,7 @@ struct AgentModelMenu: View {
             Picker(selection: $modelId) {
                 Text(defaultModel).tag("")
                 ForEach(remote ? [] : c.modelChoices(for: agent), id: \.id) { m in
-                    Text(stopped[m.id].map { "\(m.name) (\($0) stopped)" } ?? m.name).tag(m.id)
+                    Text(m.name).tag(m.id)
                 }
             } label: {
                 Label("Model: \(modelName)", systemImage: "cpu")

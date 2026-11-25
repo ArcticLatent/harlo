@@ -7,13 +7,6 @@ struct RowView: View {
     @Environment(\.palette) private var p
     let row: Row
 
-    /// What you wrote after this row (an ```options block's question): nil
-    /// while nothing has followed.
-    var answerAfter: String? {
-        guard let rows = model.session?.rows, let at = rows.firstIndex(where: { $0.key == row.key }) else { return nil }
-        return rows[(at + 1)...].first { $0.kind == "user" }?.text
-    }
-
     var body: some View {
         // (Your pictures are in your bubble, a tool's in its card, a reply's
         // in their place; the rest, files it names, under it.)
@@ -44,43 +37,20 @@ struct RowView: View {
     @ViewBuilder var content: some View {
         switch row.kind {
         case "user":
-            if let note = row.workflowNote {
-                WorkflowNoteRow(note: note, text: row.text)
-            } else {
-                UserBubble(row: row)
-            }
+            UserBubble(row: row)
         case "markdown":
             RichTextView(blocks: RichCache.blocks(row.html))
         // A long code block's later pieces: its first shows it.
         case "codePart":
             EmptyView()
         case "code":
-            if row.title.lowercased() == "mermaid" && model.drawsDiagrams {
-                DiagramBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
-            } else if row.title.lowercased() == "options", let choices = Visuals.options(row.text) {
-                let answer = answerAfter
-                OptionsBlock(choices: choices, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text),
-                             answer: answer,
-                             choosing: answer == nil && model.session.map { !$0.busy && $0.requests.isEmpty } == true) { name in
-                    Task { await model.send(name) }
-                }
-            } else if row.title.lowercased() == "mockup" && model.showsMockups {
-                MockupBlock(source: row.text, code: CodeBlock(spans: codeSpans, language: row.title, raw: row.text))
-            } else {
-                CodeBlock(spans: codeSpans, language: row.title, raw: row.text)
-            }
+            CodeBlock(spans: codeSpans, language: row.title, raw: row.text)
         case "thinking":
             ThinkingRow(row: row)
         case "tool":
             ToolCard(row: row)
         case "notice" where row.fromHarlo:
             HarloMessage(row: row)
-        case "notice" where extMessage != nil:
-            // A custom message a pi extension draws.
-            ExtBlocks(lines: extMessage?.lines ?? [], blocks: extMessage?.blocks ?? [])
-        case "notice" where row.title == "entry":
-            // An extension's own entry: nothing until it draws it.
-            EmptyView()
         case "images":
             // (Its pictures only: under it, the ones its reply doesn't show.)
             EmptyView()
@@ -90,16 +60,6 @@ struct RowView: View {
                 .foregroundStyle(Color(row.title == "error" ? p.error : row.title == "warning" ? p.warning : p.muted))
                 .textSelection(.enabled)
         }
-    }
-
-    /// A pi extension's drawing of this custom message (by its time) or of
-    /// its own entry (by the entry's id).
-    var extMessage: ExtView? {
-        if row.title == "entry" {
-            return model.session?.extViews.first { $0.kind == "message" && $0.entryId == row.subtitle && !row.subtitle.isEmpty && !$0.lines.isEmpty }
-        }
-        guard row.time > 0 else { return nil }
-        return model.session?.extViews.first { $0.kind == "message" && $0.entryId.isEmpty && $0.timestamp == row.time && !$0.lines.isEmpty }
     }
 
     var codeSpans: [Span] {
