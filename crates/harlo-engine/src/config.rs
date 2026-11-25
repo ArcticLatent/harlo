@@ -224,9 +224,10 @@ pub struct Config {
     /// charge a request's own instructions whole every time
     /// (`experimental.cachedInstructions`, off unless turned on).
     pub cached_instructions: bool,
-    /// Whether scripts may read and search the project's files
-    /// (`experimental.scriptFiles`, on unless turned off).
-    pub script_files: bool,
+    /// Whether scripts may call the session's own tools: read, search,
+    /// edit, write and run commands, each under the tool's own rules
+    /// (`experimental.scriptTools`, on unless turned off).
+    pub script_tools: bool,
     /// Whether `read` can list what a source file declares instead of its
     /// text (`experimental.outline`, on unless turned off: over four jobs
     /// in long files it halved the tokens sent, with the same work done).
@@ -335,7 +336,7 @@ impl Config {
             source,
             providers,
             cached_instructions,
-            script_files: value["experimental"]["scriptFiles"]
+            script_tools: value["experimental"]["scriptTools"]
                 .as_bool()
                 .unwrap_or(true),
             outline: value["experimental"]["outline"].as_bool().unwrap_or(true),
@@ -756,13 +757,13 @@ mod tests {
         let empty = tempfile::tempdir().expect("dir");
         let none = Config::load(empty.path()).expect("loaded");
         assert_eq!(none, Config::from_value(&Value::Null, None));
-        assert!(none.outline && none.script_files && none.model.is_none());
+        assert!(none.outline && none.script_tools && none.model.is_none());
         let off = Config::parse(
-            r#"{ "experimental": { "outline": false, "scriptFiles": false } }"#,
+            r#"{ "experimental": { "outline": false, "scriptTools": false } }"#,
             None,
         )
         .expect("parsed");
-        assert!(!off.outline && !off.script_files);
+        assert!(!off.outline && !off.script_tools);
     }
 
     #[test]

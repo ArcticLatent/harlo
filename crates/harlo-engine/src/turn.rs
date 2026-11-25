@@ -62,9 +62,9 @@ pub struct Turn {
     pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
     /// The tools Code Mode scripts can call; none leaves `execute` out.
     pub code: Option<std::sync::Arc<dyn crate::codemode::Catalog>>,
-    /// Whether scripts may read and search the project's files, where
-    /// the rules allow it without asking.
-    pub script_files: bool,
+    /// Whether scripts may call the turn's own tools, each under the
+    /// tool's own rules.
+    pub script_tools: bool,
     /// Whether `read` can list what a source file declares instead of its
     /// text.
     pub outline: bool,
@@ -321,6 +321,18 @@ fn actions(tool: &str) -> Vec<&str> {
     }
 }
 
+/// Whether the rules of `turn` let `tool` run for some call of it.
+pub(crate) fn permitted(turn: &Turn, tool: &str) -> bool {
+    let layers: Vec<(&str, &[Rule])> = turn
+        .rules
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_slice()))
+        .collect();
+    actions(tool)
+        .iter()
+        .any(|action| crate::rules::permits(&layers, action))
+}
+
 /// The tools offered to the model this turn: the built-in ones, and those
 /// the turn's skills, memory, todos, Code Mode and subagents add, less what
 /// a rule denies.
@@ -373,8 +385,10 @@ fn all(turn: &Turn) -> Vec<Value> {
     definitions.extend(crate::web::definitions(turn.search.is_some()));
     if let Some(catalog) = &turn.code {
         let mut namespaces = catalog.namespaces();
-        if turn.script_files {
-            namespaces.insert(0, crate::script_files::namespace());
+        if turn.script_tools
+            && let Some(own) = crate::script_tools::namespace(turn)
+        {
+            namespaces.insert(0, own);
         }
         if !namespaces.is_empty() {
             definitions.push(crate::codemode::definition(&namespaces));
@@ -997,24 +1011,75 @@ enum Called {
 /// How long a Code Mode script may run.
 const SCRIPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Runs Code Mode script `code` for the call `at`, with the project's
-/// files among its tools when the turn has them on.
-async fn run_script(
-    turn: &Turn,
-    catalog: &dyn crate::codemode::Catalog,
-    code: &str,
+/// How a script's call of one of the turn's own tools failed.
+pub(crate) enum ScriptCall {
+    /// It failed, or was refused with a reason: the script is told why.
+    Failed(String),
+    /// A person refused it without a reason: the script and the turn stop.
+    Halted(String),
+}
+
+/// Runs a script's call of the turn's own tool `name` with `input`, as
+/// the model's own call of it would run: planned, decided by the rules,
+/// asked about where they say to, and noted. `at` is the `execute` call
+/// the script runs for.
+pub(crate) async fn script_call(
+    turn: &mut Turn,
+    name: &str,
+    input: &Map<String, Value>,
     at: CallOf<'_>,
+    gate: &impl Gate,
     stop: &CancellationToken,
-) -> Result<tools::Output, String> {
-    if !turn.script_files {
-        return execute(catalog, code, at.message, at.call, stop).await;
-    }
-    let with_files = crate::script_files::WithFiles {
-        inner: catalog,
-        turn,
-        stop,
+) -> Result<tools::Output, ScriptCall> {
+    let said = |state: &ToolState| match state {
+        ToolState::Error { error, .. } => error.message.clone(),
+        _ => "The call didn't run.".to_owned(),
     };
-    execute(&with_files, code, at.message, at.call, stop).await
+    let plan = match planned(turn, name, input) {
+        Ok(plan) => plan.for_script(input),
+        Err(Called::Ran(state, _) | Called::Refused(state) | Called::Halted(state)) => {
+            return Err(ScriptCall::Failed(said(&state)));
+        }
+    };
+    let plan = match admit(turn, plan, input, at.message, at.call, gate, stop).await {
+        Ok(plan) => plan,
+        Err(Called::Halted(state)) => return Err(ScriptCall::Halted(said(&state))),
+        Err(Called::Ran(state, _) | Called::Refused(state)) => {
+            return Err(ScriptCall::Failed(said(&state)));
+        }
+    };
+    run_noted(turn, plan, at.message, at.call, stop)
+        .await
+        .map_err(ScriptCall::Failed)
+}
+
+/// Runs Code Mode script `code` for the call `at`, with the turn's own
+/// tools among those it can call; `input` is the call's.
+async fn run_script(
+    turn: &mut Turn,
+    code: &str,
+    input: Map<String, Value>,
+    at: CallOf<'_>,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Called {
+    let Some(catalog) = turn.code.clone() else {
+        let why = "Code Mode isn't available here.".to_owned();
+        return ran(input, Err(why));
+    };
+    // (Its own, so a refusal without a reason stops the script at once.)
+    let own = stop.child_token();
+    let project = crate::script_tools::WithProject::new(catalog.as_ref(), turn, gate, at, &own);
+    let result = execute(&project, code, at.message, at.call, &own).await;
+    let (changed, halted) = project.ended();
+    if halted {
+        let why = "The person declined a call this script made.".to_owned();
+        return Called::Halted(failed(input, "rejected", why));
+    }
+    match ran(input, result) {
+        Called::Ran(state, _) => Called::Ran(state, changed),
+        other => other,
+    }
 }
 
 /// Runs Code Mode script `code` for call `call` of step `message`.
@@ -1108,12 +1173,14 @@ fn planned(turn: &Turn, name: &str, input: &Map<String, Value>) -> Result<Plan, 
             offset,
             limit,
             outline: true,
+            plain,
         }) if !turn.outline => Ok(Plan::Read {
             path,
             shown,
             offset,
             limit,
             outline: false,
+            plain,
         }),
         Ok(Plan::TodoWrite { .. }) if !turn.todo => {
             Err(fail(format!("There is no tool called `{name}`.")))
@@ -1165,7 +1232,7 @@ async fn admit(
 
 /// Runs a call that may run.
 async fn finish(
-    turn: &Turn,
+    turn: &mut Turn,
     plan: Plan,
     input: Map<String, Value>,
     message: &str,
@@ -1175,6 +1242,14 @@ async fn finish(
 ) -> Called {
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
+    }
+    // A script that can call the turn's tools may ask and may change the
+    // rules, as they do.
+    if let Plan::Execute { code } = &plan
+        && turn.script_tools
+    {
+        let at = CallOf { message, call };
+        return run_script(turn, code, input, at, gate, stop).await;
     }
     ran(input, run_noted(turn, plan, message, call, stop).await)
 }
@@ -1379,9 +1454,11 @@ async fn ask_questions(
 
 /// A call, by the step it is of and its own ID.
 #[derive(Debug, Clone, Copy)]
-struct CallOf<'a> {
-    message: &'a str,
-    call: &'a str,
+pub(crate) struct CallOf<'a> {
+    /// The step.
+    pub(crate) message: &'a str,
+    /// The call.
+    pub(crate) call: &'a str,
 }
 
 /// Runs `command` for the model where `jobs` can take a command over.
@@ -1493,8 +1570,7 @@ async fn run_plan(
         }
         (Plan::Execute { code }, _) if turn.code.is_some() => {
             let catalog = turn.code.as_ref().ok_or_else(String::new)?;
-            let at = CallOf { message, call };
-            run_script(turn, catalog.as_ref(), &code, at, stop).await
+            execute(catalog.as_ref(), &code, message, call, stop).await
         }
         (Plan::Subagent { request }, _) => match &turn.subagents {
             Some(subagents) => subagents

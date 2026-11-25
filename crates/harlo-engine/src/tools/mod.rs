@@ -172,6 +172,10 @@ pub enum Plan {
         limit: usize,
         /// Whether what the file declares is listed instead of its text.
         outline: bool,
+        /// Whether the text comes as it is, without line numbers and past
+        /// the lines and bytes a model is shown; set by
+        /// [`Plan::for_script`].
+        plain: bool,
     },
     /// Writes a file whole.
     Write {
@@ -364,6 +368,41 @@ async fn read(path: &Path, shown: &str, offset: usize, limit: usize) -> Result<O
     })
 }
 
+/// The text of the file at `path` as it is, for a script: `limit` lines
+/// from line `offset`.
+async fn read_plain(
+    path: &Path,
+    shown: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Output, String> {
+    let size = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| format!("Couldn't read {shown}: {e}"))?
+        .len();
+    if size > SCRIPT_READ_BYTES {
+        return Err(format!(
+            "{shown} is {} MB, too large for a script to read. Search it with grep.",
+            size / (1024 * 1024)
+        ));
+    }
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
+    let text = if offset <= 1 && limit == usize::MAX {
+        content
+    } else {
+        let lines: Vec<&str> = content.lines().skip(offset - 1).take(limit).collect();
+        lines.join("\n")
+    };
+    Ok(Output {
+        text,
+        metadata: Map::new(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    })
+}
+
 /// What the file at `path` declares, for a `read` asked for its outline;
 /// for a file that has none, how long it is and why not.
 async fn outlined(path: PathBuf, shown: String) -> Result<Output, String> {
@@ -456,6 +495,9 @@ pub(crate) const SHELL_TIMEOUT_MS: u64 = 120_000;
 /// far more than the hundred a model reads at once; this still keeps a
 /// search of everything from filling the script's memory.
 const SCRIPT_MOST: usize = 5_000;
+/// The largest file a script reads, in bytes: well inside the memory a
+/// script may use, and past any source file.
+const SCRIPT_READ_BYTES: u64 = 4 * 1024 * 1024;
 
 impl Plan {
     /// Checks a call to tool `name` with `input`, in project folder `cwd`.
@@ -492,6 +534,7 @@ impl Plan {
                         .get("outline")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
+                    plain: false,
                 })
             }
             "write" => {
@@ -754,12 +797,28 @@ impl Plan {
         })
     }
 
-    /// A search that lists as much as a script may see; any other call,
-    /// unchanged.
+    /// The call as a script makes it, with `input`: a search lists as much
+    /// as a script may see, and a read gives the file's text as it is, all
+    /// of it unless the script picked lines. Any other call, unchanged.
+    ///
+    /// A script parses and filters what it gets and returns little of it,
+    /// so it isn't held to what a model reads at once.
     #[must_use]
-    pub fn for_script(mut self) -> Self {
-        if let Self::Glob { most, .. } | Self::Grep { most, .. } = &mut self {
-            *most = SCRIPT_MOST;
+    pub fn for_script(mut self, input: &Map<String, Value>) -> Self {
+        match &mut self {
+            Self::Glob { most, .. } | Self::Grep { most, .. } => *most = SCRIPT_MOST,
+            Self::Read {
+                plain,
+                limit,
+                outline: false,
+                ..
+            } => {
+                *plain = true;
+                if !input.contains_key("limit") {
+                    *limit = usize::MAX;
+                }
+            }
+            _ => {}
         }
         self
     }
@@ -809,16 +868,15 @@ impl Plan {
             Self::Read {
                 path,
                 shown,
-                outline: true,
-                ..
-            } => outlined(path, shown).await,
-            Self::Read {
-                path,
-                shown,
                 offset,
                 limit,
-                outline: false,
-            } => read(&path, &shown, offset, limit).await,
+                outline,
+                plain,
+            } => match (outline, plain) {
+                (true, _) => outlined(path, shown).await,
+                (false, true) => read_plain(&path, &shown, offset, limit).await,
+                (false, false) => read(&path, &shown, offset, limit).await,
+            },
             Self::Write {
                 path,
                 shown,

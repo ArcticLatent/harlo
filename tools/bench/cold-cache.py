@@ -299,7 +299,7 @@ def measure(history, prices):
 
 
 # What `--compare` can turn on besides clearing, and the `experimental` key each one sets.
-SWITCHES = {"instructions": "cachedInstructions", "files": "scriptFiles", "outline": "outline"}
+SWITCHES = {"instructions": "cachedInstructions", "files": "scriptTools", "outline": "outline"}
 
 
 def run(server, arm, args):

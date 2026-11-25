@@ -302,6 +302,44 @@ pub fn describe(namespaces: &[Namespace]) -> String {
     out
 }
 
+/// How long a script has run, for its time limit.
+///
+/// The limit is on the script's own running. What it waits for a tool
+/// isn't counted: a command may take minutes, and a call that asks a
+/// person takes as long as they do.
+#[derive(Debug, Clone)]
+struct Clock {
+    /// When the script began.
+    started: Instant,
+    /// The milliseconds it has waited for tools.
+    waited: Arc<std::sync::atomic::AtomicU64>,
+    /// How long it may run of its own.
+    limit: Duration,
+}
+
+impl Clock {
+    /// A clock started now, for a script that may run for `limit`.
+    fn new(limit: Duration) -> Self {
+        Self {
+            started: Instant::now(),
+            waited: Arc::default(),
+            limit,
+        }
+    }
+
+    /// Whether the script has run past its limit.
+    fn over(&self) -> bool {
+        let waited = Duration::from_millis(self.waited.load(Ordering::Relaxed));
+        self.started.elapsed().saturating_sub(waited) > self.limit
+    }
+
+    /// Notes that the script waited for a tool since `asked`.
+    fn waited_since(&self, asked: Instant) {
+        let took = u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.waited.fetch_add(took, Ordering::Relaxed);
+    }
+}
+
 /// Runs the script on its own thread; sends its calls and its end to
 /// `out`.
 fn script_thread(
@@ -317,20 +355,23 @@ fn script_thread(
         let runtime = Runtime::new().map_err(|e| e.to_string())?;
         runtime.set_memory_limit(MEMORY);
         runtime.set_max_stack_size(1024 * 1024);
-        let deadline = Instant::now() + limit;
+        let clock = Clock::new(limit);
         let stop = Arc::clone(halted);
+        let late = clock.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || {
-            Instant::now() > deadline || stop.load(Ordering::Relaxed)
+            late.over() || stop.load(Ordering::Relaxed)
         })));
         let context = Context::full(&runtime).map_err(|e| e.to_string())?;
         context.with(|ctx| {
             let globals = ctx.globals();
             let sink = out.clone();
+            let waiting = clock.clone();
             let call = Function::new(
                 ctx.clone(),
                 move |namespace: String, tool: String, args: String| -> String {
                     let (reply, answer) = std::sync::mpsc::channel();
                     let args = serde_json::from_str(&args).unwrap_or(Value::Null);
+                    let asked = Instant::now();
                     let sent = sink.send(FromScript::Call(Request {
                         namespace,
                         tool,
@@ -343,6 +384,7 @@ fn script_thread(
                             .unwrap_or_else(|_| Err("The run was stopped.".to_owned())),
                         Err(_) => Err("The run was stopped.".to_owned()),
                     };
+                    waiting.waited_since(asked);
                     match got {
                         Ok(v) => json!({ "ok": v }).to_string(),
                         Err(e) => json!({ "error": e }).to_string(),
@@ -386,7 +428,7 @@ fn script_thread(
             let wrapped = format!("(async () => {{\n{code}\n}})()");
             let promise: Promise = ctx.eval(wrapped).catch(&ctx).map_err(|e| e.to_string())?;
             let value: rquickjs::Value = promise.finish().catch(&ctx).map_err(|e| {
-                if halted.load(Ordering::Relaxed) || Instant::now() > deadline {
+                if halted.load(Ordering::Relaxed) || clock.over() {
                     "it was stopped, or ran out of time.".to_owned()
                 } else {
                     e.to_string()
@@ -585,6 +627,41 @@ mod tests {
                 .iter()
                 .all(|c| c.tool == "math.add" && c.status == "completed")
         );
+    }
+
+    /// A catalog whose one tool takes a while to answer.
+    #[derive(Debug)]
+    struct Slow(Duration);
+
+    impl Catalog for Slow {
+        fn namespaces(&self) -> Vec<Namespace> {
+            Vec::new()
+        }
+
+        fn call<'a>(&'a self, _namespace: &'a str, _tool: &'a str, _args: Value) -> Answer<'a> {
+            Box::pin(async move {
+                tokio::time::sleep(self.0).await;
+                Ok(json!("waited"))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_tool_isnt_the_scripts_own_time() {
+        // Three calls, each longer than the script's whole allowance: a
+        // command that takes minutes, or a person asked to allow a call.
+        let limit = Duration::from_millis(300);
+        let slow = Slow(Duration::from_millis(400));
+        let code = "const got = []; for (let i = 0; i < 3; i++) got.push(await tools.any.wait({})); \
+                    return got.length + got[0];";
+        let stop = CancellationToken::new();
+        let ran = run(&slow, code, &json!({}), limit, &stop, &|_| {}).await;
+        assert_eq!(ran.value, Ok(Some(json!("3waited"))), "{:?}", ran.logs);
+
+        // Its own running is still bounded, calls or no calls.
+        let code = "await tools.any.wait({}); while (true) {}";
+        let ran = run(&slow, code, &json!({}), limit, &stop, &|_| {}).await;
+        assert!(ran.value.is_err(), "{:?}", ran.value);
     }
 
     #[tokio::test]
