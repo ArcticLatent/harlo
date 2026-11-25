@@ -255,8 +255,9 @@ pub enum Plan {
     Shell {
         /// The command.
         command: String,
-        /// Milliseconds before it's stopped.
-        timeout_ms: u64,
+        /// Milliseconds before it's stopped, when the call names them:
+        /// otherwise the usual limit holds, [`SHELL_TIMEOUT_MS`].
+        timeout_ms: Option<u64>,
         /// Whether it runs in the background.
         background: bool,
     },
@@ -304,8 +305,7 @@ fn shell_call(input: &Map<String, Value>) -> Result<Plan, String> {
         timeout_ms: input
             .get("timeout")
             .and_then(Value::as_u64)
-            .filter(|t| *t > 0)
-            .unwrap_or(SHELL_TIMEOUT_MS),
+            .filter(|t| *t > 0),
         background: input
             .get("background")
             .and_then(Value::as_bool)
@@ -378,7 +378,7 @@ const READ_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// model is shown; the whole of a longer one is saved for it to read.
 const RESULT_BYTES: usize = 32 * 1024;
 /// The default command timeout.
-const SHELL_TIMEOUT_MS: u64 = 120_000;
+pub(crate) const SHELL_TIMEOUT_MS: u64 = 120_000;
 
 impl Plan {
     /// Checks a call to tool `name` with `input`, in project folder `cwd`.
@@ -799,7 +799,7 @@ impl Plan {
                 command,
                 timeout_ms,
                 ..
-            } => Ok(shell::run(&command, cwd, timeout_ms, stop).await),
+            } => Ok(shell::run(&command, cwd, timeout_ms.unwrap_or(SHELL_TIMEOUT_MS), stop).await),
         }
     }
 }

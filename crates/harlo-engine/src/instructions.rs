@@ -20,6 +20,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// One instruction file and what it says.
@@ -342,6 +343,46 @@ pub fn render(instructions: &[Instruction]) -> String {
         .join("\n\n")
 }
 
+/// What to tell a conversation whose instruction files changed under it.
+///
+/// `told` is what the conversation last heard, `now` what the files say.
+/// The update carries each file that is new or reads differently, in
+/// full, and names each that is gone; `None` when nothing changed. A
+/// conversation a provider holds in cache keeps the system prompt it
+/// began with, so the change reaches it as a message instead.
+#[must_use]
+pub fn update(told: &[Instruction], now: &[Instruction]) -> Option<String> {
+    let changed: Vec<&Instruction> = now.iter().filter(|i| !told.contains(i)).collect();
+    let gone: Vec<&Instruction> = told
+        .iter()
+        .filter(|t| !now.iter().any(|i| i.source == t.source))
+        .collect();
+    if changed.is_empty() && gone.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "<system-update>\nThe instruction files changed since this conversation began. \
+         Where they differ from what you were told before, these hold now.",
+    );
+    for i in changed {
+        let _ = write!(
+            out,
+            "\n\nInstructions from: {}\n{}",
+            i.source.display(),
+            i.text.trim_end()
+        );
+    }
+    for i in gone {
+        let _ = write!(
+            out,
+            "\n\nNo longer there, and no longer applies: {}",
+            i.source.display()
+        );
+    }
+    out.push_str("\n</system-update>");
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +443,39 @@ mod tests {
         assert_eq!(
             load(&quiet).into_iter().map(|i| i.text).collect::<Vec<_>>(),
             ["global"]
+        );
+    }
+
+    #[test]
+    fn an_update_carries_what_changed_and_names_what_went() {
+        let file = |name: &str, text: &str| Instruction {
+            source: PathBuf::from(name),
+            text: text.to_owned(),
+        };
+        let told = [
+            file("/p/AGENTS.md", "Use tabs."),
+            file("/p/CLAUDE.md", "Be brief."),
+        ];
+        assert_eq!(update(&told, &told), None);
+
+        let now = [
+            file("/p/AGENTS.md", "Use spaces."),
+            file("/p/web/AGENTS.md", "No jQuery."),
+        ];
+        let said = update(&told, &now).expect("an update");
+        assert!(said.starts_with("<system-update>") && said.ends_with("</system-update>"));
+        assert!(
+            said.contains("Instructions from: /p/AGENTS.md\nUse spaces."),
+            "{said}"
+        );
+        assert!(
+            said.contains("Instructions from: /p/web/AGENTS.md\nNo jQuery."),
+            "{said}"
+        );
+        assert!(said.contains("no longer applies: /p/CLAUDE.md"), "{said}");
+        assert!(
+            !said.contains("Use tabs.") && !said.contains("Be brief."),
+            "{said}"
         );
     }
 

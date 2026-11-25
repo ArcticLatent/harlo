@@ -27,6 +27,14 @@ pub const OUTPUT_CAP: usize = 32 * 1024;
 /// The most memory a script may use.
 const MEMORY: usize = 64 * 1024 * 1024;
 
+/// A namespace with more tools than this lists them by name only.
+///
+/// The list goes out with every request, so a server of a hundred tools
+/// would cost a hundred signatures and descriptions each time, for a task
+/// that calls two of them. Ten covers the usual server in full; beyond it
+/// a script asks `search` for the signature of the tool it wants.
+const LISTED: usize = 10;
+
 /// One tool a namespace offers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolInfo {
@@ -125,8 +133,8 @@ pub fn definition(namespaces: &[Namespace]) -> Value {
             "Runs JavaScript that calls tools as functions, for work that takes several calls, \
              a loop or filtering: `const r = await tools.<namespace>.<tool>({{...}});`. The code \
              is the body of an async function: `return` what you want back, and console.log \
-             shows up after it. `search(\"words\")` finds tools not listed here; each result's \
-             `path` is how to call it. These tools only work inside execute:\n{}",
+             shows up after it. `search(\"words\")` finds tools, with the signature of each \
+             and the `path` to call it by. These tools only work inside execute:\n{}",
             describe(namespaces)
         ),
         "parameters": { "type": "object", "properties": {
@@ -262,10 +270,26 @@ fn search(namespaces: &[Namespace], query: &Value) -> Value {
 }
 
 /// The namespaces, as a list for the model.
+///
+/// A namespace of more than [`LISTED`] tools names them without their
+/// signatures and descriptions, and says how to look one up.
 #[must_use]
 pub fn describe(namespaces: &[Namespace]) -> String {
     let mut out = String::new();
     for ns in namespaces {
+        if ns.tools.len() > LISTED {
+            let names: Vec<&str> = ns.tools.iter().map(|t| t.name.as_str()).collect();
+            let _ = writeln!(
+                out,
+                "- tools.{}: {} Its {} tools, by name;                  search({{namespace: \"{}\", query: \"words\"}}) shows how to call one: {}",
+                ns.name,
+                ns.description,
+                names.len(),
+                ns.name,
+                names.join(", ")
+            );
+            continue;
+        }
         let _ = writeln!(out, "- tools.{}: {}", ns.name, ns.description);
         for t in &ns.tools {
             let _ = writeln!(
@@ -475,6 +499,64 @@ mod tests {
                 }
             })
         }
+    }
+
+    /// A namespace of `count` tools, each with a signature and a
+    /// description.
+    fn server(count: usize) -> Namespace {
+        Namespace {
+            name: "records".to_owned(),
+            description: "The tools of the MCP server records.".to_owned(),
+            tools: (0..count)
+                .map(|n| ToolInfo {
+                    name: format!("fetch_{n}"),
+                    description: format!("Fetches the records of kind {n}, newest first."),
+                    signature: "({from: string, to: string, limit?: number}): unknown".to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_large_namespace_lists_its_tools_by_name_only() {
+        // Up to the limit, every tool comes with how to call it.
+        let small = describe(&[server(LISTED)]);
+        assert!(
+            small.contains("tools.records.fetch_9({from: string"),
+            "{small}"
+        );
+        assert!(small.contains("Fetches the records of kind 9"), "{small}");
+
+        // Past it, the names alone, and how to find the rest.
+        let large = describe(&[server(100)]);
+        assert!(large.contains("Its 100 tools, by name"), "{large}");
+        assert!(
+            large.contains("fetch_0, fetch_1,") && large.contains("fetch_99"),
+            "{large}"
+        );
+        assert!(!large.contains("from: string"), "{large}");
+        assert!(!large.contains("Fetches the records"), "{large}");
+        assert!(
+            large.contains(r#"search({namespace: "records", query: "words"})"#),
+            "{large}"
+        );
+        assert!(
+            large.len() * 5 < describe(&[server(LISTED)]).len() * 10,
+            "{}",
+            large.len()
+        );
+
+        // What the list left out, the search it names gives back.
+        let found = search(
+            &[server(100)],
+            &json!({ "namespace": "records", "query": "kind 42" }),
+        );
+        assert_eq!(found["items"][0]["path"], "tools.records.fetch_42");
+        assert!(
+            found["items"][0]["signature"]
+                .as_str()
+                .is_some_and(|s| s.contains("from: string"))
+        );
     }
 
     #[tokio::test]

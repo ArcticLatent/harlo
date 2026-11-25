@@ -150,6 +150,20 @@ impl Client {
         Ok(())
     }
 
+    /// Sends the command that session `session_id`'s tool call `call` is
+    /// running to the background: the agent stops waiting for it, and
+    /// gets its output when it ends.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the call isn't a command still running, or the server
+    /// can't be reached.
+    pub async fn move_to_background(&self, session_id: &str, call: &str) -> Result<(), Error> {
+        let path = format!("/api/session/{session_id}/tool/{call}/background");
+        Self::send(self.request(Method::POST, &path)).await?;
+        Ok(())
+    }
+
     /// Runs `command` in session `session_id`'s folder with no model, and
     /// returns once it has ended. Its output joins the conversation.
     ///

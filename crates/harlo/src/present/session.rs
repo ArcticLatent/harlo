@@ -252,6 +252,11 @@ fn activity_row(app: &App, activity: Activity) -> InboxRow {
     let t: &Tokens = &app.tokens;
     let agent = app.agent_name();
     let mut accent = t.text_interactive_base;
+    // A command the agent waits for can be sent to the background.
+    let command = match &activity {
+        Activity::Running { command, .. } => command.clone(),
+        _ => None,
+    };
     let (icon, says, detail) = match activity {
         // It can't go on until someone approves; that's not "working".
         Activity::Waiting { action, detail } => {
@@ -273,7 +278,7 @@ fn activity_row(app: &App, activity: Activity) -> InboxRow {
             format!("{agent} is writing…"),
             String::new(),
         ),
-        Activity::Running { label, detail } => (
+        Activity::Running { label, detail, .. } => (
             Icon::LoaderCircle,
             format!("{agent} is running {label}"),
             detail,
@@ -286,6 +291,8 @@ fn activity_row(app: &App, activity: Activity) -> InboxRow {
         text: says.into(),
         detail: detail.into(),
         working: true,
+        action: if command.is_some() { "Background" } else { "" }.into(),
+        id: command.unwrap_or_default().into(),
         ..InboxRow::default()
     }
 }

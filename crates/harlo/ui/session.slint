@@ -134,6 +134,8 @@ component InboxLine inherits Rectangle {
                         Logic.goal-command(root.item.id);
                     } else if root.item.kind == 5 {
                         Logic.stop-job(root.item.id);
+                    } else if root.item.kind == 0 {
+                        Logic.move-command(root.item.id);
                     } else {
                         Logic.steer-queued(root.item.id);
                     }

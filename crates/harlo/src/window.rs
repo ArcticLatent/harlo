@@ -1441,6 +1441,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_stop_job, |id| Message::Job(crate::app::JobEvent::Stop(
         id.to_string()
     )));
+    send!(on_move_command, |call| Message::Job(
+        crate::app::JobEvent::Move(call.to_string())
+    ));
     send_with!(on_goal_command, |_app, word| crate::app::GoalAction::named(
         &word
     )

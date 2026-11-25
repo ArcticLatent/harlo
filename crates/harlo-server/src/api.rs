@@ -180,6 +180,10 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/api/experimental/job", get(jobs))
         .route("/api/experimental/job/{id}/cancel", post(cancel_job))
         .route("/api/session/{id}/shell", post(user_shell))
+        .route(
+            "/api/session/{id}/tool/{call}/background",
+            post(move_to_background),
+        )
         .route("/api/vcs", get(vcs))
         .route("/api/vcs/diff", get(vcs_diff))
         .route("/api/session/{id}/generate", post(aside))
@@ -1292,6 +1296,14 @@ async fn resume_automation(State(server): Shared, Path(id): Path<String>) -> Ans
 
 async fn cancel_job(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.cancel_job(&id)?;
+    done()
+}
+
+async fn move_to_background(
+    State(server): Shared,
+    Path((id, call)): Path<(String, String)>,
+) -> Answer {
+    server.move_to_background(&id, &call)?;
     done()
 }
 

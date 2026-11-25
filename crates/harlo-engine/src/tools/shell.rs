@@ -6,6 +6,12 @@
 //! read as well as when it is shown: a command that prints without end
 //! takes a fixed amount of memory. What a command printed before it was
 //! stopped or ran out of time is kept.
+//!
+//! A command is a [`Running`] from its start to its end. [`execute`] waits
+//! for one and ends it at its time limit; `run_within` hands one still
+//! going at its limit, or one a person asked to stop waiting for, back to
+//! the caller, which may let it carry on as a background job instead of
+//! losing the work it did.
 
 // Rust guideline compliant 2026-10-09
 
@@ -14,12 +20,13 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::Output;
@@ -35,6 +42,13 @@ const MAX_LINE: usize = 2_000;
 /// streams while it runs. More than any reader of the output shows, and
 /// a fixed cost for a command that never stops printing.
 const KEPT_BYTES: usize = 1024 * 1024;
+/// How many of a command's last lines show where it has got to, when it
+/// carries on in the background: its whole output comes when it ends.
+const LATEST_LINES: usize = 15;
+
+/// The most characters of each of those lines.
+const LATEST_LINE: usize = 200;
+
 /// How long a stopped command gets to end before it's killed.
 const GRACE: Duration = Duration::from_secs(2);
 
@@ -63,6 +77,113 @@ pub struct Ran {
     pub ended: Ended,
 }
 
+/// A command that was started, and may still be going.
+///
+/// Dropping it kills the command.
+#[derive(Debug)]
+pub struct Running {
+    child: Child,
+    /// Its process group, which holds everything it started.
+    group: Option<i32>,
+    out: Arc<Mutex<Kept>>,
+    err: Arc<Mutex<Kept>>,
+    /// The task reading what it prints, until its pipes close.
+    readers: Option<JoinHandle<()>>,
+}
+
+impl Running {
+    /// Starts `command` with `bash` in `cwd`.
+    ///
+    /// # Errors
+    ///
+    /// With why, when `bash` couldn't be started.
+    pub fn start(command: &str, cwd: &Path) -> Result<Self, String> {
+        let mut child = spawn(command, cwd).map_err(|e| format!("Couldn't start bash: {e}"))?;
+        let group = child.id().and_then(|id| i32::try_from(id).ok());
+        let (out, err) = (Arc::default(), Arc::default());
+        let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
+        let (out_kept, err_kept) = (Arc::clone(&out), Arc::clone(&err));
+        let readers = tokio::spawn(async move {
+            tokio::join!(
+                read_into(out_pipe, &out_kept),
+                read_into(err_pipe, &err_kept)
+            );
+        });
+        Ok(Self {
+            child,
+            group,
+            out,
+            err,
+            readers: Some(readers),
+        })
+    }
+
+    /// Waits for the command to end, for at most `limit`.
+    ///
+    /// Returns how it ended, or `None` when `limit` passed first: the
+    /// command is then still going, and can be waited for again. A
+    /// command `stop` cancels is ended, with everything it started.
+    pub async fn wait(
+        &mut self,
+        limit: Option<Duration>,
+        stop: &CancellationToken,
+    ) -> Option<Ended> {
+        let ended = {
+            let (readers, child) = (&mut self.readers, &mut self.child);
+            let waiting = async {
+                if let Some(reading) = readers.as_mut() {
+                    // (A reader that failed just ends what we show.)
+                    let _ = reading.await;
+                    *readers = None;
+                }
+                child.wait().await
+            };
+            let limit = async {
+                match limit {
+                    Some(t) => tokio::time::sleep(t).await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                status = waiting => Some(Ended::Exited(status.ok().and_then(|s| s.code()))),
+                () = limit => None,
+                () = stop.cancelled() => Some(Ended::Stopped),
+            }
+        };
+        if ended == Some(Ended::Stopped) {
+            self.end().await;
+        }
+        ended
+    }
+
+    /// Ends the command and everything it started: asks first, then kills.
+    pub async fn end(&mut self) {
+        end_group(self.group).await;
+    }
+
+    /// What it printed so far, standard error after standard output.
+    #[must_use]
+    pub fn printed(&self) -> String {
+        let text = |kept: &Mutex<Kept>| kept.lock().unwrap_or_else(PoisonError::into_inner).text();
+        let (mut output, stderr) = (text(&self.out), text(&self.err));
+        if !stderr.is_empty() {
+            if !output.is_empty() && !output.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str(&stderr);
+        }
+        output
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Some(readers) = &self.readers {
+            readers.abort();
+        }
+    }
+}
+
 /// Runs `command` with `bash` in `cwd` until it ends, `timeout` passes or
 /// `stop` is cancelled; a stopped command's process group is ended.
 pub async fn execute(
@@ -71,6 +192,30 @@ pub async fn execute(
     timeout: Option<Duration>,
     stop: &CancellationToken,
 ) -> Ran {
+    let mut running = match Running::start(command, cwd) {
+        Ok(running) => running,
+        Err(why) => {
+            return Ran {
+                output: String::new(),
+                ended: Ended::NotStarted(why),
+            };
+        }
+    };
+    let ended = if let Some(ended) = running.wait(timeout, stop).await {
+        ended
+    } else {
+        running.end().await;
+        Ended::TimedOut
+    };
+    // What was read so far: all of it, for a command that ended by itself.
+    Ran {
+        output: running.printed(),
+        ended,
+    }
+}
+
+/// Starts `command` with `bash` in `cwd`, in a process group of its own.
+fn spawn(command: &str, cwd: &Path) -> std::io::Result<Child> {
     let mut cmd = Command::new("bash");
     cmd.arg("-c")
         .arg(command)
@@ -92,46 +237,7 @@ pub async fn execute(
     ] {
         cmd.env(key, value);
     }
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => {
-            return Ran {
-                output: String::new(),
-                ended: Ended::NotStarted(format!("Couldn't start bash: {e}")),
-            };
-        }
-    };
-    let group = child.id().and_then(|id| i32::try_from(id).ok());
-    let (out, err) = (Mutex::new(Kept::default()), Mutex::new(Kept::default()));
-    let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
-    let waiting = async {
-        tokio::join!(read_into(out_pipe, &out), read_into(err_pipe, &err));
-        child.wait().await
-    };
-    let limit = async {
-        match timeout {
-            Some(t) => tokio::time::sleep(t).await,
-            None => std::future::pending().await,
-        }
-    };
-    let ended = tokio::select! {
-        status = waiting => Ended::Exited(status.ok().and_then(|s| s.code())),
-        () = limit => Ended::TimedOut,
-        () = stop.cancelled() => Ended::Stopped,
-    };
-    if !matches!(ended, Ended::Exited(_)) {
-        end_group(group).await;
-    }
-    // What was read so far: all of it, for a command that ended by itself.
-    let text = |kept: &Mutex<Kept>| kept.lock().unwrap_or_else(PoisonError::into_inner).text();
-    let (mut output, stderr) = (text(&out), text(&err));
-    if !stderr.is_empty() {
-        if !output.is_empty() && !output.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push_str(&stderr);
-    }
-    Ran { output, ended }
+    cmd.spawn()
 }
 
 /// The start and the end of what a stream gave, and how much it gave.
@@ -177,7 +283,7 @@ impl Kept {
 }
 
 /// Reads a pipe to its end into `kept`.
-async fn read_into(pipe: Option<impl AsyncRead + Unpin>, kept: &Mutex<Kept>) {
+async fn read_into(pipe: Option<impl AsyncRead + Unpin + Send>, kept: &Mutex<Kept>) {
     let Some(mut pipe) = pipe else { return };
     let mut chunk = vec![0; 64 * 1024];
     // (A read error just ends what we show.)
@@ -197,6 +303,83 @@ pub(super) async fn run(
     stop: &CancellationToken,
 ) -> Output {
     let ran = execute(command, cwd, Some(Duration::from_millis(timeout_ms)), stop).await;
+    shown(&ran, timeout_ms)
+}
+
+/// A command run for the model: ended, or still going.
+#[derive(Debug)]
+pub(crate) enum Within {
+    /// It ended, or couldn't start: what the model reads of it.
+    Ended(Output),
+    /// It was still going when its time was up, and wasn't stopped.
+    OutOfTime(Box<Running>),
+    /// It was still going when a person asked not to wait for it.
+    Asked(Box<Running>),
+}
+
+/// Runs `command` in `cwd` for the model, until `limit` passes or `asked`
+/// resolves.
+///
+/// Like [`run`], except that a command still going then is handed back
+/// as it is instead of being stopped.
+pub(crate) async fn run_within(
+    command: &str,
+    cwd: &Path,
+    limit: Duration,
+    stop: &CancellationToken,
+    asked: impl Future<Output = ()>,
+) -> Within {
+    let mut running = match Running::start(command, cwd) {
+        Ok(running) => running,
+        Err(why) => return Within::Ended(said(why, None)),
+    };
+    let waited = tokio::select! {
+        ended = running.wait(Some(limit), stop) => Some(ended),
+        () = asked => None,
+    };
+    match waited {
+        Some(Some(ended)) => {
+            let ran = Ran {
+                output: running.printed(),
+                ended,
+            };
+            Within::Ended(shown(&ran, 0))
+        }
+        Some(None) => Within::OutOfTime(Box::new(running)),
+        None => Within::Asked(Box::new(running)),
+    }
+}
+
+/// Stops `running`, which had `timeout_ms` to run and outran them; what
+/// the model reads of it.
+pub(crate) async fn out_of_time(mut running: Running, timeout_ms: u64) -> Output {
+    running.end().await;
+    let ran = Ran {
+        output: running.printed(),
+        ended: Ended::TimedOut,
+    };
+    shown(&ran, timeout_ms)
+}
+
+/// The last of `text`, for a look at where a command has got to: its
+/// last [`LATEST_LINES`] lines, long ones cut short.
+#[must_use]
+pub(crate) fn latest(text: &str) -> String {
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    let from = lines.len().saturating_sub(LATEST_LINES);
+    let mut out = String::new();
+    if from > 0 {
+        let _ = writeln!(out, "… ({from} lines before these) …");
+    }
+    for line in &lines[from..] {
+        let line: String = line.chars().take(LATEST_LINE).collect();
+        let _ = writeln!(out, "{line}");
+    }
+    out.trim_end().to_owned()
+}
+
+/// What the model reads of `ran`, a command that had `timeout_ms` to run.
+fn shown(ran: &Ran, timeout_ms: u64) -> Output {
     // What it printed is shown however it ended: a build that ran out of
     // time got somewhere first.
     let printed = |ending: String| {
@@ -258,9 +441,10 @@ pub(super) fn short_line(line: &str) -> Cow<'_, str> {
     ))
 }
 
-/// `text` within the line and byte caps, keeping its start and end; long
-/// lines are cut short first.
-fn capped(text: &str) -> String {
+/// `text` as a model reads a command's output: within the line and byte
+/// caps, keeping its start and end; long lines are cut short first.
+#[must_use]
+pub fn capped(text: &str) -> String {
     let lines: Vec<Cow<'_, str>> = text.lines().map(short_line).collect();
     let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
     if lines.len() <= MAX_LINES && bytes <= MAX_BYTES {

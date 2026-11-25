@@ -17,6 +17,9 @@ use harlo_core::diff;
 use harlo_core::timeline::{Change, Entry, Live, tools_summary};
 use harlo_core::workspace::{EventKind, ToolStatus};
 
+/// The server's name for the tool that runs a command.
+const SHELL: &str = "shell";
+
 /// How long a new prompt takes to fade in, rising a little.
 pub const APPEAR: Duration = Duration::from_millis(220);
 
@@ -100,6 +103,9 @@ pub enum Activity {
         label: String,
         /// The call's main argument, such as a command.
         detail: String,
+        /// The call's ID, when it is a command under way that a person
+        /// can send to the background.
+        command: Option<String>,
     },
 }
 
@@ -502,15 +508,21 @@ impl Timeline {
         let mut last = None;
         for row in run {
             if let Entry::Tool {
+                key,
+                name,
                 label,
                 detail,
-                status: ToolStatus::Streaming | ToolStatus::Running,
+                status: status @ (ToolStatus::Streaming | ToolStatus::Running),
                 ..
             } = &row.entry
             {
+                // (A call still being written isn't running yet.)
+                let command = (name == SHELL && *status == ToolStatus::Running)
+                    .then(|| key.rsplit('/').next().unwrap_or_default().to_owned());
                 return Activity::Running {
                     label: label.clone(),
                     detail: detail.clone(),
+                    command,
                 };
             }
             last.get_or_insert(&row.entry);

@@ -1330,6 +1330,71 @@ async fn ask_questions(
     )
 }
 
+/// A call, by the step it is of and its own ID.
+#[derive(Debug, Clone, Copy)]
+struct CallOf<'a> {
+    message: &'a str,
+    call: &'a str,
+}
+
+/// Runs `command` for the model where `jobs` can take a command over.
+///
+/// A command that names no time limit and outruns the usual one carries
+/// on as a background job, and so does any a person asks not to wait
+/// for: its work isn't lost, and the model isn't left to run it again. A
+/// command that names its limit is stopped at it, as it asked.
+async fn run_command(
+    turn: &Turn,
+    jobs: &dyn crate::jobs::Jobs,
+    command: &str,
+    timeout_ms: Option<u64>,
+    at: CallOf<'_>,
+    stop: &CancellationToken,
+) -> tools::Output {
+    use tools::shell::Within;
+    let patience = timeout_ms.map_or_else(|| jobs.takes_over_after(), |_| None);
+    let named = Duration::from_millis(timeout_ms.unwrap_or(tools::SHELL_TIMEOUT_MS));
+    let limit = patience.unwrap_or(named);
+    let began = std::time::Instant::now();
+    let asked = jobs.asked_to_move(at.message, at.call);
+    let (running, asked) =
+        match tools::shell::run_within(command, &turn.cwd, limit, stop, asked).await {
+            Within::Ended(output) => return output,
+            Within::OutOfTime(running) if patience.is_none() => {
+                let ms = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX);
+                return tools::shell::out_of_time(*running, ms).await;
+            }
+            Within::OutOfTime(running) => (running, false),
+            Within::Asked(running) => (running, true),
+        };
+    let so_far = running.printed();
+    let id = jobs.adopt(crate::jobs::Adopted {
+        message: at.message,
+        call: at.call,
+        command,
+        cwd: &turn.cwd,
+        running: *running,
+        asked,
+    });
+    let mut output = in_background(&id);
+    output.text = crate::jobs::moved(&id, began.elapsed().as_secs(), asked, &so_far);
+    output
+}
+
+/// What the model is told of a command it sent to the background, now
+/// job `id`.
+fn in_background(id: &str) -> tools::Output {
+    tools::Output {
+        text: crate::jobs::started(id),
+        metadata: json!({ "shellID": id, "background": true, "truncated": false })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        changed: Vec::new(),
+        pictures: Vec::new(),
+    }
+}
+
 /// Runs a checked call: the memory tools through the turn's memory, the
 /// rest in the project folder.
 async fn run_plan(
@@ -1402,22 +1467,19 @@ async fn run_plan(
         (
             Plan::Shell {
                 command,
-                background: true,
-                ..
+                timeout_ms,
+                background,
             },
             _,
         ) if turn.jobs.is_some() => {
             let jobs = turn.jobs.as_ref().ok_or_else(String::new)?;
-            jobs.shell(message, call, &command, &turn.cwd)
-                .map(|id| tools::Output {
-                    text: crate::jobs::started(&id),
-                    metadata: json!({ "shellID": id, "background": true, "truncated": false })
-                        .as_object()
-                        .cloned()
-                        .unwrap_or_default(),
-                    changed: Vec::new(),
-                    pictures: Vec::new(),
-                })
+            let at = CallOf { message, call };
+            if background {
+                return jobs
+                    .shell(message, call, &command, &turn.cwd)
+                    .map(|id| in_background(&id));
+            }
+            Ok(run_command(turn, jobs.as_ref(), &command, timeout_ms, at, stop).await)
         }
         (Plan::Skill { id }, _) => turn
             .skills

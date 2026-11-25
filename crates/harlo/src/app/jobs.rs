@@ -26,6 +26,9 @@ pub enum JobEvent {
     /// Stop a running job, named by its ID or, for a subagent, by its
     /// child session's.
     Stop(String),
+    /// Send the command the open session's agent waits for, named by its
+    /// call's ID, to the background.
+    Move(String),
 }
 
 impl App {
@@ -81,6 +84,14 @@ impl App {
                     .subagent_job(&open, &named)
                     .map_or(named, |job| job.id.clone());
                 self.act(move |client, _| async move { client.cancel_job(&id).await })
+            }
+            JobEvent::Move(call) => {
+                let Some(open) = self.active.clone() else {
+                    return Task::none();
+                };
+                self.act(
+                    move |client, _| async move { client.move_to_background(&open, &call).await },
+                )
             }
         }
     }

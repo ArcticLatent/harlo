@@ -270,7 +270,8 @@ export struct InboxRow {
     /// session's goal, 5 a background job.
     kind: int,
     /// The queued prompt's or the subagent session's ID; for the goal,
-    /// the `/goal` word its action sends.
+    /// the `/goal` word its action sends; for the activity, the call
+    /// running a command that can go to the background.
     id: string,
     glyph: string,
     glyph-color: color,
@@ -1122,6 +1123,9 @@ export global Logic {
     /// Stop a background job, named by its ID or, for a subagent, by its
     /// child session's.
     callback stop-job(string);
+    /// Send the command the open session's agent waits for, named by its
+    /// call's ID, to the background.
+    callback move-command(string);
     /// Start a new session with the history before the prompt with this
     /// key, that prompt in its composer.
     callback fork-from(string);

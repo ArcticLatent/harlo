@@ -60,9 +60,10 @@ fn forward(
     }
 }
 
-#[test]
-fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
-    let mut tasks = Tasks::new();
+/// A sandbox's session open in the window, where its agent may run any
+/// command: the sandbox, the session's ID, the server's events and the
+/// window.
+fn opened(tasks: &mut Tasks) -> (Sandbox, String, Events, Ui) {
     let sandbox = tasks.block_on(Sandbox::start());
     let client = sandbox.client();
     let id = tasks.block_on(async {
@@ -76,7 +77,7 @@ fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
             .expect("rules");
         session.id
     });
-    let mut events = tasks.block_on(client.events()).expect("the event stream");
+    let events = tasks.block_on(client.events()).expect("the event stream");
 
     // The sandbox's session, in the demo's sidebar.
     let mut snapshot = demo::snapshot();
@@ -95,6 +96,14 @@ fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
     }))));
     let ui = ui(app);
     ui.send(Message::OpenSession(id.clone()));
+    (sandbox, id, events, ui)
+}
+
+#[test]
+fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
+    let mut tasks = Tasks::new();
+    let (sandbox, id, mut events, ui) = opened(&mut tasks);
+    let client = sandbox.client();
 
     // `!` runs the rest in the session's folder, and the composer empties.
     ui.fill(COMPOSER, "!printf 'one\\ntwo\\n'; exit 2");
@@ -142,5 +151,50 @@ fn a_shell_command_shows_what_it_printed_and_a_background_one_stops() {
         |kind| matches!(kind, EventKind::JobUpdated(job) if job.status == JobStatus::Cancelled),
     );
     assert_eq!(ui.app().jobs(&id).count(), 0);
+    assert!(!ui.shows("In the background"));
+}
+
+#[test]
+fn a_command_the_agent_waits_for_goes_to_the_background_when_asked() {
+    let mut tasks = Tasks::new();
+    let (sandbox, id, mut events, ui) = opened(&mut tasks);
+    let client = sandbox.client();
+    assert!(!ui.shows("Background"));
+
+    tasks
+        .block_on(client.prompt(
+            &id,
+            &Prompt::new(
+                r#"tool shell {"command":"sleep 2; touch done.txt"} ;; say carrying on"#,
+                Delivery::Steer,
+            ),
+        ))
+        .expect("prompt");
+    forward(&mut tasks, &ui, &mut events, &id, |kind| {
+        matches!(kind, EventKind::ToolCalled { .. })
+    });
+    // The line saying what the agent runs offers to stop waiting for it.
+    assert!(ui.shows("Background"));
+    assert!(ui.shows("sleep 2; touch done.txt"));
+    ui.press("Background");
+    forward(
+        &mut tasks,
+        &ui,
+        &mut events,
+        &id,
+        |kind| matches!(kind, EventKind::JobUpdated(job) if job.status == JobStatus::Running),
+    );
+    assert_eq!(ui.app().send_error, None);
+    assert!(ui.shows("In the background"));
+
+    // It runs to its end there.
+    forward(
+        &mut tasks,
+        &ui,
+        &mut events,
+        &id,
+        |kind| matches!(kind, EventKind::JobUpdated(job) if job.status == JobStatus::Completed),
+    );
+    assert!(sandbox.project().join("done.txt").exists());
     assert!(!ui.shows("In the background"));
 }

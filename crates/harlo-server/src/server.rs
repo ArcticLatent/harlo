@@ -12,6 +12,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use harlo_engine::instructions::Instruction;
 use harlo_engine::question::Asked;
 use harlo_engine::{
     Answer, Ask, Assistant, Config, Created, ErrorInfo, Event, Gate, Message, Outcome, Part, Rule,
@@ -100,6 +101,9 @@ pub(crate) struct Live {
     pub(crate) known: crate::stale::Known,
     /// Background commands going, by job ID, to stop them.
     pub(crate) shells: HashMap<String, CancellationToken>,
+    /// The commands agents are waiting for, by session and call, each
+    /// with what tells its turn a person asked not to wait for it.
+    pub(crate) waited: HashMap<(String, String), Arc<tokio::sync::Notify>>,
     /// The terminals the server runs, by ID.
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
     /// Where random web searches stand.
@@ -110,15 +114,22 @@ pub(crate) struct Live {
 }
 
 /// What a session's system prompt keeps saying while its conversation may
-/// be in a provider's cache: the notes and the date as they were.
+/// be in a provider's cache: the notes, the date and the instruction
+/// files as they were.
 ///
 /// A provider's cache holds a conversation from its start, system prompt
-/// first. A note kept in the session, or midnight, would change that
-/// start, and the whole conversation would be charged again as new.
+/// first. A note kept in the session, an instruction file edited, or
+/// midnight, would change that start, and the whole conversation would be
+/// charged again as new.
 #[derive(Debug)]
 struct Steady {
     notes: String,
     date: String,
+    /// The instruction files as the system prompt carries them.
+    instructions: Vec<Instruction>,
+    /// The instruction files as the session last heard of them: from the
+    /// prompt, or from an update since.
+    told: Vec<Instruction>,
     /// When a turn last used it, in Unix milliseconds.
     used: i64,
 }
@@ -900,6 +911,7 @@ impl Server {
             s.time.updated = at;
         };
         while let Ok(session) = self.change(&id, started) {
+            self.tell_instructions(&session).await;
             let mut delivered = lock(&self.live).inbox.remove(&id).unwrap_or_default();
             let inbox_ids: Vec<String> = delivered.iter().map(|(m, _)| m.id().to_owned()).collect();
             order_notices(&mut delivered);
@@ -1263,21 +1275,31 @@ impl Server {
         .map_err(|e| Refusal::Bad(e.to_string()))
     }
 
-    /// The notes section and the date for the system prompt of `session`
-    /// (none: a prompt of its own) in `project`.
+    /// The notes section, the date and the instruction files for the
+    /// system prompt of `session` (none: a prompt of its own) in
+    /// `project`, where the files now read `found`.
     ///
     /// A session gets the ones its last turn got, while that turn is
     /// recent enough for a provider to still hold the conversation.
-    fn steady_parts(&self, session: Option<&str>, project: &str) -> (String, String) {
+    fn steady_parts(
+        &self,
+        session: Option<&str>,
+        project: &str,
+        found: Vec<Instruction>,
+    ) -> (String, String, Vec<Instruction>) {
         let Some(session) = session else {
-            return (self.notes_prompt(project), today());
+            return (self.notes_prompt(project), today(), found);
         };
         let time = now();
         if let Some(kept) = lock(&self.live).steady.get_mut(session)
             && time - kept.used < WARM_MS
         {
             kept.used = time;
-            return (kept.notes.clone(), kept.date.clone());
+            return (
+                kept.notes.clone(),
+                kept.date.clone(),
+                kept.instructions.clone(),
+            );
         }
         let (notes, date) = (self.notes_prompt(project), today());
         lock(&self.live).steady.insert(
@@ -1285,10 +1307,95 @@ impl Server {
             Steady {
                 notes: notes.clone(),
                 date: date.clone(),
+                instructions: found.clone(),
+                told: found.clone(),
                 used: time,
             },
         );
-        (notes, date)
+        (notes, date, found)
+    }
+
+    /// Queues, for session `session`, word of instruction files that
+    /// changed since it last heard of them.
+    ///
+    /// A session a provider may still hold in cache keeps the system
+    /// prompt it began with, so an edited file reaches it as a message
+    /// beside the prompt that starts its next turn. A session with no
+    /// prompt waiting, or whose prompt is read afresh anyway, gets none.
+    async fn tell_instructions(&self, session: &Session) {
+        let id = session.id.as_str();
+        {
+            let live = lock(&self.live);
+            let warm = live
+                .steady
+                .get(id)
+                .is_some_and(|kept| now() - kept.used < WARM_MS);
+            let prompted = live
+                .inbox
+                .get(id)
+                .is_some_and(|q| q.iter().any(|(m, _)| wakes(m)));
+            if !warm || !prompted {
+                return;
+            }
+        }
+        let directory = session.location.directory.clone();
+        let found = self
+            .instructions(&directory, &self.folder(&directory))
+            .await;
+        let text = {
+            let mut live = lock(&self.live);
+            let Some(kept) = live.steady.get_mut(id) else {
+                return;
+            };
+            let Some(text) = harlo_engine::instructions::update(&kept.told, &found) else {
+                return;
+            };
+            kept.told = found;
+            text
+        };
+        let message = Message::Synthetic {
+            id: ascending_id("msg"),
+            time: Created { created: now() },
+            text: text.clone(),
+            description: None,
+            metadata: None,
+        };
+        self.emit(
+            "session.inbox.enqueued",
+            json!({
+                "inboxID": message.id(), "sessionID": id,
+                "item": { "type": "synthetic", "payload": { "text": text }, "delivery": "steer" },
+            }),
+            Some(&directory),
+            Some(id),
+        );
+        // Ahead of the prompt it comes with, as the prompt's text reads
+        // against it.
+        lock(&self.live)
+            .inbox
+            .entry(id.to_owned())
+            .or_default()
+            .insert(0, (message, "steer".to_owned()));
+    }
+
+    /// The instruction files that apply in `directory`, as they read now.
+    async fn instructions(
+        &self,
+        directory: &str,
+        folder: &crate::folder::Folder,
+    ) -> Vec<Instruction> {
+        let root = git::toplevel(directory).await;
+        let home = dirs::home_dir().unwrap_or_default();
+        let search = harlo_engine::instructions::Search {
+            workspace: std::path::Path::new(directory),
+            project_root: root.as_deref().map(std::path::Path::new),
+            home: &home,
+            config_dir: &self.config_dir,
+            configured: &folder.config.instructions,
+            ..Default::default()
+        }
+        .with_env();
+        harlo_engine::instructions::load(&search)
     }
 
     /// Lets session `id`'s next turn read the notes and the date afresh:
@@ -1313,23 +1420,14 @@ impl Server {
         session: Option<&str>,
     ) -> String {
         let root = git::toplevel(directory).await;
-        let home = dirs::home_dir().unwrap_or_default();
-        let search = harlo_engine::instructions::Search {
-            workspace: std::path::Path::new(directory),
-            project_root: root.as_deref().map(std::path::Path::new),
-            home: &home,
-            config_dir: &self.config_dir,
-            configured: &folder.config.instructions,
-            ..Default::default()
-        }
-        .with_env();
-        let found = harlo_engine::instructions::load(&search);
+        let found = self.instructions(directory, folder).await;
+        let (notes, date, found) =
+            self.steady_parts(session, &git::project_id(directory).await, found);
         let mut prompt = BASE_PROMPT.to_owned();
         if !found.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(&harlo_engine::instructions::render(&found));
         }
-        let (notes, date) = self.steady_parts(session, &git::project_id(directory).await);
         if !notes.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(notes.trim_end());
