@@ -103,6 +103,9 @@ public struct Row: Equatable, Sendable, Identifiable {
     /// Tool rows: the call's id (a running command is sent to the
     /// background by it).
     public var callId = ""
+    /// Tool rows: why a failed call failed, whole ("" none; `result` then
+    /// says it in a word: "Declined", "Failed").
+    public var error = ""
 
     public var id: String { key }
 
@@ -130,6 +133,7 @@ public struct Row: Equatable, Sendable, Identifiable {
         let commandHtml = v["commandHtml"].text
         commandSpans = commandHtml.isEmpty ? [] : RichText.codeLine(commandHtml)
         callId = v["callId"].text
+        error = v["error"].text
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",

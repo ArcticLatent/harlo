@@ -292,8 +292,8 @@ func aside(_ model: HarloModel, _ s: OpenSession) async {
         _ = await model.answer(ask, ask.refusal(saying: " Keep it as it is. "))
         let told = await waitFor(15) { s.requests.isEmpty && !s.busy && s.rows.last?.html.contains("Left it.") == true }
         let edit = s.rows.last { $0.kind == "tool" }
-        check(told && edit?.state == "error" && edit?.result.hasSuffix("said: Keep it as it is.") == true,
-              "a refusal's reason reaches the agent (\(edit?.result ?? "-"))")
+        check(told && edit?.state == "error" && edit?.result == "Declined" && edit?.error.hasSuffix("said: Keep it as it is.") == true,
+              "a refusal's reason reaches the agent (\(edit?.result ?? "-"): \(edit?.error ?? "-"))")
     } else {
         check(false, "an edit asks, and Harlo takes a refusal's reason (\(s.requests.count), \(model.takesReasons))")
     }

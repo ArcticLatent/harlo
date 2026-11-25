@@ -27,7 +27,9 @@ struct ToolCard: View {
 
     var running: Bool { row.state == "running" }
     var symbol: String { Style.toolSymbol(row.title) }
-    var canOpen: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
+    var canOpen: Bool { hasOutput || !row.error.isEmpty }
+    /// Something for the opened card besides why it failed.
+    var hasOutput: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
     /// The command, shown opened when its line says what it's for instead.
     var shownCommand: String { row.label.isEmpty ? "" : row.command }
     var diffResult: Bool { row.result.hasPrefix("+") }
@@ -85,9 +87,20 @@ struct ToolCard: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 12)
             }
-            if open {
+            if open && hasOutput {
                 Rectangle().fill(Color(p.hairline)).frame(height: 1)
                 ToolOutput(row: row, command: shownCommand)
+            }
+            // Why it failed, whole (its corner says it in a word).
+            if open && !row.error.isEmpty {
+                Rectangle().fill(Color(p.hairline)).frame(height: 1)
+                Text(row.error)
+                    .scaledFont(14)
+                    .foregroundStyle(Color(p.error))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             // A command's result, under it ("12 tests passed · 1.4s").
             if symbol == "terminal" && !row.result.isEmpty {

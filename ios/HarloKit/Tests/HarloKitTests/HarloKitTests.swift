@@ -1306,6 +1306,14 @@ final class AsideTests: XCTestCase {
         XCTAssertEqual(old.diff, "")
     }
 
+    func testAFailedCallSaysItInAWordAndKeepsWhy() {
+        let row = Row(["key": "m1/tool/c1", "kind": "tool", "title": "edit", "state": "error", "result": "Declined",
+                       "error": "The person declined this call and said: Keep the name"])
+        XCTAssertEqual(row.result, "Declined")
+        XCTAssertEqual(row.error, "The person declined this call and said: Keep the name")
+        XCTAssertEqual(Row(["key": "m1/tool/c2", "kind": "tool", "title": "read", "state": "done"]).error, "")
+    }
+
     func testJobRowsComeWithTheCommandThatCanGoToTheBackground() {
         let ev = Event(["ev": "jobs", "key": "s1", "background": "call_7", "items": [
             ["id": "job:j1", "symbol": "terminal", "title": "Command", "text": "npm run dev", "note": "In the background", "action": "Stop", "working": true],

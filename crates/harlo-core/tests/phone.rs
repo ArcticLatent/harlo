@@ -507,8 +507,9 @@ async fn a_phone_reads_an_edit_before_refusing_it_with_a_reason() {
         .expect("the edit's row")
         .clone();
     assert_eq!(refused["state"], "error");
+    assert_eq!(refused["result"], "Declined");
     assert!(
-        refused["result"]
+        refused["error"]
             .as_str()
             .unwrap_or_default()
             .ends_with("said: Keep it at two."),

@@ -25,6 +25,10 @@ const ROW_BYTES: usize = 64 * 1024;
 /// card past its first lines, and few scripts are longer than this.
 const SCRIPT_LINES: usize = 300;
 
+/// How the server starts what it tells the agent when a person refuses a
+/// call; a call that failed with these words was refused, not broken.
+const DECLINED: &str = "The person declined";
+
 /// One session's rows, kept current by its live events.
 #[derive(Debug, Default)]
 pub struct Rows {
@@ -263,6 +267,9 @@ pub fn row(entry: &Entry) -> Value {
 }
 
 /// A tool call's row: what it did, its diff and how long it took.
+///
+/// A call that failed says so in a word (`result`), which fits the card's
+/// corner, and carries the whole reason as `error` for the opened card.
 fn tool_row(entry: &Entry) -> Value {
     let Entry::Tool {
         key,
@@ -288,7 +295,7 @@ fn tool_row(entry: &Entry) -> Value {
         .iter()
         .fold((0, 0), |(a, r), f| (a + f.additions, r + f.deletions));
     let result = if let Some(why) = error {
-        why.clone()
+        failure(why).to_owned()
     } else if files.is_empty() {
         String::new()
     } else {
@@ -305,6 +312,9 @@ fn tool_row(entry: &Entry) -> Value {
         "runMs": took.map_or(0, |t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX)),
         "callId": aside::call_of(key), "images": images(pictures),
     });
+    if let Some(why) = error {
+        row["error"] = Value::String(clip(why));
+    }
     if let Some(script) = script {
         row["text"] = Value::String(clip(&script.code));
         row["code"] = script_code(script);
@@ -317,6 +327,15 @@ fn tool_row(entry: &Entry) -> Value {
         }
     }
     row
+}
+
+/// How a failed call ended, in a word: refused by a person, or failed.
+fn failure(why: &str) -> &'static str {
+    if why.starts_with(DECLINED) {
+        "Declined"
+    } else {
+        "Failed"
+    }
 }
 
 /// A script as the phone shows code: the tools it called on a line of
@@ -469,6 +488,31 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::timeline::{Entry, Script};
+
+    #[test]
+    fn a_failed_call_says_how_it_ended_in_a_word_and_keeps_the_reason() {
+        let failed = |why: &str| Entry::Tool {
+            key: "msg_1/tool/call_3".to_owned(),
+            name: "edit".to_owned(),
+            label: String::new(),
+            detail: "src/sidebar.rs".to_owned(),
+            status: ToolStatus::Failed,
+            took: None,
+            files: Vec::new(),
+            todos: None,
+            pictures: Vec::new(),
+            error: Some(why.to_owned()),
+            script: None,
+        };
+        let refused = "The person declined this call and said: Keep the name";
+        let row = super::row(&failed(refused));
+        assert_eq!(row["state"], "error");
+        assert_eq!(row["result"], "Declined");
+        assert_eq!(row["error"], refused);
+        let broken = super::row(&failed("No such file: src/sidebar.rs"));
+        assert_eq!(broken["result"], "Failed");
+        assert_eq!(broken["error"], "No such file: src/sidebar.rs");
+    }
 
     #[test]
     fn a_script_row_carries_its_code_and_what_it_called() {
