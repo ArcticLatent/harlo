@@ -64,10 +64,6 @@ export struct SidebarRow {
     untitled: bool,
     /// Whether space follows, closing a project's group.
     gap: bool,
-    /// A session's worktree, when it runs in one rather than the
-    /// project's own folder, and the branch checked out there, once known.
-    worktree: string,
-    branch: string,
     /// For a project: whether it has a colour, `tone`, and its icon image,
     /// if it has one.
     colored: bool,
@@ -928,11 +924,6 @@ export global State {
     /// Whether the open session runs without asking ("Don't ask").
     in property <bool> session-trusted;
     in property <string> session-model;
-    /// The worktree the open session runs in, by name; empty in a
-    /// project's own folder.
-    in property <string> session-worktree;
-    /// The branch checked out in the session's worktree, once known.
-    in property <string> session-branch;
     in property <bool> session-busy;
     in property <string> session-placeholder;
     in property <[TimelineRow]> timeline;

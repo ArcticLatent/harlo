@@ -16,8 +16,8 @@ use crate::wire as g;
 /// The server's version and addresses, from `GET /api/info`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerInfo {
-    /// What the server is: `Harlo`, or `OpenCode` for an OpenCode setup's
-    /// server, which sessions are imported from.
+    /// What the server is: `Harlo`, or `OpenCode` for a server that speaks
+    /// the same API without saying it is Harlo's.
     pub name: String,
     /// Its version, such as `2.3.2`.
     pub version: String,

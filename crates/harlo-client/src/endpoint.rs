@@ -3,7 +3,7 @@
 // Rust guideline compliant 2026-10-09
 
 use std::fmt::{self, Debug, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -75,20 +75,6 @@ pub struct SharedService {
     pub version: Option<String>,
     /// Its process, when recorded.
     pub pid: Option<u32>,
-}
-
-/// Returns the path of the shared service's registration file.
-///
-/// Where an OpenCode setup records its running background service, for
-/// importing its sessions:
-/// `$XDG_STATE_HOME/opencode/service.json`, falling back to
-/// `~/.local/state/opencode/service.json`.
-#[must_use]
-pub fn opencode_registration_path(xdg_state_home: Option<&Path>, home: &Path) -> PathBuf {
-    xdg_state_home
-        .map_or_else(|| home.join(".local").join("state"), Path::to_path_buf)
-        .join("opencode")
-        .join("service.json")
 }
 
 /// Reads the shared service's registration from `path`.

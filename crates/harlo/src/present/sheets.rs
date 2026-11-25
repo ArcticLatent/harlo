@@ -1058,20 +1058,6 @@ fn server_rows(app: &App) -> Vec<SheetRow> {
             "Harlo's own server. It keeps running when Harlo closes."
         }
     }));
-    if matches!(app.location, Location::Local) {
-        rows.push(heading("From OpenCode"));
-        let mut row = pair(
-            "Sessions made on OpenCode",
-            app.sheets
-                .import
-                .as_deref()
-                .unwrap_or("Copied here whole; OpenCode keeps its own."),
-            3,
-        );
-        row.action = "Import all".into();
-        row.setting = crate::window::IMPORT_OPENCODE;
-        rows.push(row);
-    }
     computer_rows(app, &mut rows);
     rows
 }

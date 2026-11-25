@@ -48,9 +48,7 @@ pub use daemon::{
     AvatarPick, Note, NoteScope, NoteSource, PhoneDevice, PhoneRelay, PhoneState, PhoneWanted,
 };
 #[doc(inline)]
-pub use endpoint::{
-    Endpoint, SharedService, opencode_registration_path, parse_registration, read_registration,
-};
+pub use endpoint::{Endpoint, SharedService, parse_registration, read_registration};
 #[doc(inline)]
 pub use error::Error;
 #[doc(inline)]

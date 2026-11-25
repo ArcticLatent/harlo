@@ -763,9 +763,6 @@ pub const FORGET_NOTE: i32 = 84;
 /// Settings → Memory: stop correcting a note.
 pub const CANCEL_NOTE: i32 = 85;
 
-/// Settings → Server: bring every session over from OpenCode.
-pub const IMPORT_OPENCODE: i32 = 86;
-
 /// Settings → General: look for a new Harlo now.
 pub const CHECK_UPDATE: i32 = 88;
 
@@ -811,11 +808,6 @@ fn local_action(number: i32, item: i32) -> Option<Message> {
         REMOVE_COMPUTER => {
             return Some(Message::Sheet(SheetEvent::Computer(
                 app::ComputerEvent::Remove(index?),
-            )));
-        }
-        IMPORT_OPENCODE => {
-            return Some(Message::Sheet(SheetEvent::Computer(
-                app::ComputerEvent::ImportOpenCode,
             )));
         }
         FOLLOW_SSH_HOST => {
@@ -1000,9 +992,7 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         DOWNLOAD_VOICE => Some(Message::Voice(app::VoiceEvent::Download)),
         STOP_VOICE_DOWNLOAD => Some(Message::Voice(app::VoiceEvent::StopDownload)),
         CHOOSE_VOICE_LANGUAGE => Some(Message::TogglePicker(Picker::VoiceLanguage)),
-        INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST | IMPORT_OPENCODE => {
-            local_action(number, item)
-        }
+        INSTALL_ENGINE..=TEST_PHONE | FOLLOW_SSH_HOST => local_action(number, item),
         CHOOSE_SCHEDULE_SESSION => Some(Message::TogglePicker(Picker::ScheduleSession)),
         EDIT_NOTE => Some(Message::Memory(app::MemoryEvent::Edit(
             usize::try_from(item).ok()?,

@@ -353,18 +353,6 @@ impl App {
         })
     }
 
-    /// The name of the worktree session `id` runs in; `None` when it runs
-    /// in a project's own folder, or isn't known.
-    #[must_use]
-    pub fn worktree_of(&self, id: &str) -> Option<&str> {
-        let folder = &self.workspace.session(id)?.directory;
-        self.projects
-            .iter()
-            .flat_map(|p| &p.worktrees)
-            .find(|w| &w.directory == folder)
-            .map(|w| w.name.as_str())
-    }
-
     /// Returns the session whose subagents the Subagents panel lists: the
     /// open one, or its parent while one of its subagents is open.
     #[must_use]
@@ -378,13 +366,6 @@ impl App {
                     .chain(p.worktrees.iter().flat_map(|w| &w.sessions))
             })
             .find(|s| s.id == active || s.children.iter().any(|c| c.id == active))
-    }
-
-    /// Returns the branch checked out in the worktree session `id` runs
-    /// in, once read.
-    #[must_use]
-    pub fn worktree_branch_of(&self, id: &str) -> Option<&str> {
-        self.branch_of(&self.workspace.session(id)?.directory)
     }
 
     /// The model new sessions in `folder`, or a worktree of its project,

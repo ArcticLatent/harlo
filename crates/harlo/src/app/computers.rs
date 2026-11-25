@@ -4,8 +4,6 @@
 
 // Rust guideline compliant 2026-10-09
 
-use std::fmt::Write as _;
-
 use harlo_core::server::Location;
 use harlo_core::ssh;
 
@@ -21,10 +19,6 @@ pub enum ComputerEvent {
     Found(Vec<String>),
     /// Add the SSH config's host `n`, and follow it.
     Follow(usize),
-    /// Bring every session over from OpenCode's service on this computer.
-    ImportOpenCode,
-    /// What bringing them over did.
-    Imported(Result<harlo_core::import::Imported, String>),
 }
 
 impl App {
@@ -76,21 +70,6 @@ impl App {
                 Some(host) => self.add_computer(&host),
                 None => Task::none(),
             },
-            ComputerEvent::ImportOpenCode => {
-                if self.sheets.import.as_deref() == Some(IMPORTING) {
-                    return Task::none();
-                }
-                self.sheets.import = Some(IMPORTING.to_owned());
-                Task::perform(harlo_core::import::from_opencode(None), |done| {
-                    Message::Sheet(super::SheetEvent::Computer(ComputerEvent::Imported(done)))
-                })
-            }
-            ComputerEvent::Imported(done) => {
-                // Harlo's server announces each session that came over, so
-                // the lists take them in as they come.
-                self.sheets.import = Some(imported_text(&done));
-                Task::none()
-            }
             ComputerEvent::Remove(index) => {
                 if index >= self.preferences.computers.len() {
                     return Task::none();
@@ -107,36 +86,6 @@ impl App {
                 }
                 Task::batch(tasks)
             }
-        }
-    }
-}
-
-/// What Settings → Server says while sessions come over from OpenCode.
-pub const IMPORTING: &str = "Bringing sessions over…";
-
-/// What an import from OpenCode did, in a line.
-#[must_use]
-pub fn imported_text(done: &Result<harlo_core::import::Imported, String>) -> String {
-    match done {
-        Err(why) => format!("Not imported: {why}"),
-        Ok(imported) => {
-            let mut said = match imported.copied {
-                0 => "Nothing new to bring over".to_owned(),
-                1 => "Brought 1 session over".to_owned(),
-                n => format!("Brought {n} sessions over"),
-            };
-            if imported.already > 0 {
-                let _ = write!(said, "; {} already here", imported.already);
-            }
-            if let Some(first) = imported.failed.first() {
-                let _ = write!(
-                    said,
-                    "; {} didn't come over ({first})",
-                    imported.failed.len()
-                );
-            }
-            said.push('.');
-            said
         }
     }
 }

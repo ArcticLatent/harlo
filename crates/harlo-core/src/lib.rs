@@ -16,7 +16,6 @@ pub mod files;
 pub mod fonts;
 pub mod git;
 pub mod hosting;
-pub mod import;
 pub mod instructions;
 pub mod layout;
 pub mod local_models;

@@ -644,9 +644,6 @@ pub struct Sheets {
     pub autostart_error: Option<String>,
     /// Why a computer couldn't be added, if it couldn't.
     pub computer_error: Option<String>,
-    /// How bringing sessions over from OpenCode went: under way, or what
-    /// it did.
-    pub import: Option<String>,
     /// The hosts the SSH config names, offered to follow.
     pub ssh_hosts: Vec<String>,
     /// The setup guide's step.

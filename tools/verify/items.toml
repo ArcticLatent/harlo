@@ -171,8 +171,8 @@ checks = ["unit:harlo:local_models", "unit:harlo-core:local_models", "unit:harlo
 
 [[item]]
 id = "backends"
-title = "Harlo's server on this computer and others: offered, the service started and found, OpenCode sessions imported"
-checks = ["unit:harlo:server_choice", "unit:harlo:import_button", "unit:harlo-core:engine_location", "unit:harlo-server:service", "unit:harlo-server:opencode_import"]
+title = "Harlo's server on this computer and others: offered, the service started and found"
+checks = ["unit:harlo:server_choice", "unit:harlo-core:engine_location", "unit:harlo-server:service"]
 
 [[item]]
 id = "computers"

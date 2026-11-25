@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar, HoverTip } from "widgets.slint";
+import { Icon, Press, Dot, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -55,32 +55,6 @@ component SelectedBar inherits Rectangle {
     width: 3px;
     border-radius: 1.5px;
     background: Theme.accent-ink;
-}
-
-/// A session's worktree: its icon, and on hover the worktree's name and
-/// branch.
-component WorktreeMark inherits TouchArea {
-    in property <string> worktree;
-    in property <string> branch;
-    property <string> words: "Worktree " + root.worktree
-        + (root.branch != "" ? " · branch " + root.branch : "");
-    width: 16px;
-    accessible-role: image;
-    accessible-label: root.words;
-    Icon {
-        text: Icons.worktree;
-        font-size: 13px;
-        color: Theme.icon-quiet;
-    }
-    HoverTip {
-        text: root.words;
-        hovered: root.has-hover;
-        pressed: root.pressed;
-        button-x: root.absolute-position.x;
-        button-y: root.absolute-position.y;
-        button-width: root.width;
-        button-height: root.height;
-    }
 }
 
 component Item inherits Rectangle {
@@ -189,13 +163,6 @@ component Item inherits Rectangle {
                     font-size: Size.text;
                     color: entry.untitled ? Theme.text-weaker
                         : entry.selected ? Theme.text-strong : Theme.text-weak;
-                }
-                // Runs in a worktree: a quiet mark that names it, and its
-                // branch, on hover.
-                if entry.worktree != "": WorktreeMark {
-                    worktree: entry.worktree;
-                    branch: entry.branch;
-                    clicked => { Logic.open-session(entry.id); }
                 }
                 // Runs without asking: marked beside what it's doing.
                 if entry.trusted: Icon {

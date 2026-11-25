@@ -598,21 +598,8 @@ fn empty_text(status: &Status, location: &Location) -> String {
     }
 }
 
-/// A session the sidebar lists under its project, with the worktree it
-/// runs in, if not the project's own folder.
-struct Listed<'a> {
-    session: &'a SessionSummary,
-    worktree: Option<&'a harlo_core::sessions::Worktree>,
-}
-
-impl std::borrow::Borrow<SessionSummary> for Listed<'_> {
-    fn borrow(&self) -> &SessionSummary {
-        self.session
-    }
-}
-
 /// The sidebar's rows: each project's heading, then its sessions and its
-/// worktrees', newest first, those in a worktree marked with it.
+/// worktrees', newest first.
 fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
     let filtering = !app.filter.trim().is_empty();
     let mut rows = Vec::new();
@@ -634,21 +621,12 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
             other: project.other,
             ..SidebarRow::default()
         });
-        let mut listed: Vec<Listed<'_>> = project
+        let mut listed: Vec<&SessionSummary> = project
             .sessions
             .iter()
-            .map(|session| Listed {
-                session,
-                worktree: None,
-            })
-            .chain(project.worktrees.iter().flat_map(|w| {
-                w.sessions.iter().map(move |session| Listed {
-                    session,
-                    worktree: Some(w),
-                })
-            }))
+            .chain(project.worktrees.iter().flat_map(|w| &w.sessions))
             .collect();
-        listed.sort_by_key(|l| l.session.age);
+        listed.sort_by_key(|session| session.age);
         let any = session_rows(app, &project.directory, &listed, &mut rows);
         if filtering && !any {
             rows.truncate(start);
@@ -664,7 +642,7 @@ fn sidebar_rows(app: &App, marks: &marks::Marks) -> Vec<SidebarRow> {
 fn session_rows(
     app: &App,
     folder: &str,
-    sessions: &[Listed<'_>],
+    sessions: &[&SessionSummary],
     rows: &mut Vec<SidebarRow>,
 ) -> bool {
     let t = &app.tokens;
@@ -674,7 +652,7 @@ fn session_rows(
     if shown.is_empty() {
         return false;
     }
-    for &Listed { session, worktree } in shown {
+    for &session in shown {
         // A subagent's session open marks its parent's row.
         let selected = app.active.as_deref().is_some_and(|active| {
             session.id == active || session.children.iter().any(|c| c.id == active)
@@ -697,11 +675,6 @@ fn session_rows(
             trusted: app.shield_of(&session.id) == Shield::Trusted,
             maker,
             tone: color(tone),
-            worktree: worktree.map(|w| w.name.as_str()).unwrap_or_default().into(),
-            branch: worktree
-                .and_then(|w| app.branch_of(&w.directory))
-                .unwrap_or_default()
-                .into(),
             ..SidebarRow::default()
         });
     }
