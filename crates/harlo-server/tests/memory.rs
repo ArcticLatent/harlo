@@ -240,6 +240,68 @@ async fn a_decision_crosses_worktrees_and_its_reversal_is_followed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_message_a_search_lists_is_read_with_those_around_it() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    call(
+        &sandbox,
+        reqwest::Method::PUT,
+        "/harlo/memory",
+        Some(json!({ "enabled": true })),
+    )
+    .await;
+    let a = client.create_session(&folder).await.expect("A");
+    turn(&client, &a.id, "say The cache goes in SQLite.").await;
+    turn(&client, &a.id, "say And the queue in Postgres.").await;
+
+    let b = client.create_session(&folder).await.expect("B");
+    turn(
+        &client,
+        &b.id,
+        r#"tool search_sessions {"query":"cache SQLite"} ;; say Found."#,
+    )
+    .await;
+    let found = tool_outputs(&sandbox, &b.id).await.join("\n");
+    let listed = found
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("msg_")?.split(':').next())
+        .map_or_else(
+            || panic!("a message listed: {found}"),
+            |rest| format!("msg_{rest}"),
+        );
+    turn(
+        &client,
+        &b.id,
+        &format!(r#"tool search_sessions {{"message":"{listed}"}} ;; say Read."#),
+    )
+    .await;
+    let read = tool_outputs(&sandbox, &b.id).await.join("\n");
+    // The message whole, and what came after it in its session.
+    assert!(read.contains(&format!("({listed}):")), "{read}");
+    assert!(read.contains("The cache goes in SQLite."), "{read}");
+    assert!(read.contains("And the queue in Postgres."), "{read}");
+    assert!(read.contains(&format!("({})", a.id)), "{read}");
+
+    // A message this project doesn't have isn't read.
+    turn(
+        &client,
+        &b.id,
+        r#"tool search_sessions {"message":"msg_nowhere"} ;; say No."#,
+    )
+    .await;
+    let all = call(
+        &sandbox,
+        reqwest::Method::GET,
+        &format!("/api/session/{}/message", b.id),
+        None,
+    )
+    .await
+    .to_string();
+    assert!(all.contains("have no message msg_nowhere"), "{all}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn people_correct_and_forget_notes_and_off_means_none() {
     let sandbox = Sandbox::start().await;
     let client = sandbox.client();

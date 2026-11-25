@@ -161,6 +161,9 @@ impl Server {
         }
         let signed_in = self.signed_in(&config.providers);
         config.providers.extend(signed_in);
+        for provider in &mut config.providers {
+            provider.system_first = config.cached_instructions;
+        }
         // The agents: the merged config's, then each config folder's. A
         // project's agents keep their instructions; the rules that let
         // them act unasked wait with the rest of what it asks for.

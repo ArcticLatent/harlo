@@ -88,7 +88,8 @@ pub fn definitions() -> Vec<Value> {
             "parameters": { "type": "object", "properties": {
                 "pattern": { "type": "string" },
                 "path": { "type": "string", "description": "The folder to search (default: the project's)." },
-                "include": { "type": "string", "description": "Only files whose name matches this glob, such as \"*.rs\"." }
+                "include": { "type": "string", "description": "Only files whose name matches this glob, such as \"*.rs\"." },
+                "filesOnly": { "type": "boolean", "description": "List the files with a match and how many lines match, not the lines." }
             }, "required": ["pattern"] }
         }),
         json!({
@@ -210,6 +211,8 @@ pub enum Plan {
         base: PathBuf,
         /// Only files whose name matches this glob.
         include: Option<String>,
+        /// Whether it lists the files with a match, not the lines.
+        files_only: bool,
         /// What the search leaves out, set by [`Plan::sealing`].
         skip: Vec<PathBuf>,
         /// The rules that say which files it may read, set by
@@ -241,10 +244,12 @@ pub enum Plan {
         /// The skill's ID.
         id: String,
     },
-    /// Searches the project's earlier sessions.
+    /// Searches the project's earlier sessions, or reads a message of one.
     SearchSessions {
         /// The words.
         query: String,
+        /// The message to read instead of searching.
+        message: Option<String>,
     },
     /// Runs a command.
     Shell {
@@ -281,6 +286,10 @@ fn search_call(name: &str, pattern: String, input: &Map<String, Value>, cwd: &Pa
             .and_then(Value::as_str)
             .filter(|i| !i.is_empty())
             .map(str::to_owned),
+        files_only: input
+            .get("filesOnly")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -445,9 +454,18 @@ impl Plan {
             "todowrite" => Ok(Self::TodoWrite {
                 todos: crate::todo::parse(input)?,
             }),
-            "search_sessions" => Ok(Self::SearchSessions {
-                query: text("query")?,
-            }),
+            "search_sessions" => {
+                let message = input
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_owned);
+                let query = match &message {
+                    Some(_) => String::new(),
+                    None => text("query")?,
+                };
+                Ok(Self::SearchSessions { query, message })
+            }
             "shell" => shell_call(input),
             "webfetch" => text("url").map(|url| Self::WebFetch { url }),
             "websearch" => text("query").map(|query| Self::WebSearch { query }),
@@ -543,9 +561,9 @@ impl Plan {
                 resources: vec![id.clone()],
                 metadata: Map::new(),
             },
-            Self::SearchSessions { query } => Permission {
+            Self::SearchSessions { query, message } => Permission {
                 action: "search_sessions".into(),
-                resources: vec![query.clone()],
+                resources: vec![message.clone().unwrap_or_else(|| query.clone())],
                 metadata: Map::new(),
             },
             Self::Shell { command, .. } => Permission {
@@ -800,6 +818,7 @@ impl Plan {
                 pattern,
                 base,
                 include,
+                files_only,
                 skip,
                 rules,
             } => {
@@ -817,7 +836,12 @@ impl Plan {
                 let guard: Option<&dyn Fn(&str) -> bool> = layers
                     .is_some()
                     .then_some(&allowed as &dyn Fn(&str) -> bool);
-                search::grep(&pattern, &base, include.as_deref(), &cwd, &skip, guard)
+                let wanted = search::Wanted {
+                    pattern: &pattern,
+                    include: include.as_deref(),
+                    files_only,
+                };
+                search::grep(wanted, &base, &cwd, &skip, guard)
             }
             _ => Err("not a search".to_owned()),
         })
@@ -1216,7 +1240,14 @@ mod tests {
                     base,
                     skip,
                     ..
-                } => search::grep(pattern, base, None, &project, skip, None),
+                } => {
+                    let wanted = search::Wanted {
+                        pattern,
+                        include: None,
+                        files_only: false,
+                    };
+                    search::grep(wanted, base, &project, skip, None)
+                }
                 other => panic!("{other:?} isn't a search"),
             }
             .expect("search")

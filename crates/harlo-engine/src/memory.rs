@@ -103,6 +103,15 @@ pub trait Memory: Send + Sync + std::fmt::Debug {
     /// Fails, with a message for the model, when the query has no words
     /// or the search fails.
     fn search(&self, query: &str) -> Result<String, String>;
+
+    /// What message `message` of one of the project's conversations says,
+    /// with the messages around it, written for the model.
+    ///
+    /// # Errors
+    ///
+    /// Fails, with a message for the model, when the project has no such
+    /// message or the read fails.
+    fn read(&self, message: &str) -> Result<String, String>;
 }
 
 /// The memory tools' definitions, as a model is told about them.
@@ -122,8 +131,9 @@ pub fn definitions() -> Vec<Value> {
             "name": "search_sessions",
             "description": "Searches this project's earlier conversations and notes, including replaced notes, to find why something was decided. Lists matching messages by session, with a snippet.",
             "parameters": { "type": "object", "properties": {
-                "query": { "type": "string", "description": "Words to look for." }
-            }, "required": ["query"] }
+                "query": { "type": "string", "description": "Words to look for." },
+                "message": { "type": "string", "description": "Instead of searching: the ID of a listed message, to read it whole with the ones around it." }
+            } }
         }),
     ]
 }

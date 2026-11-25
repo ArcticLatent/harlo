@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use harlo_engine::memory::{Draft, Memory, Note, Scope, Source};
-use harlo_engine::{ascending_id, now};
+use harlo_engine::{Message, ascending_id, now};
 
 use crate::server::{Refusal, Server};
 
@@ -20,6 +20,37 @@ use crate::server::{Refusal, Server};
 const SETTING: &str = "memory";
 /// The most messages a search lists.
 const HITS: usize = 20;
+/// How many messages with something said are shown on each side of one
+/// read from a search: enough to see what it answered and what came of it.
+const AROUND: usize = 2;
+/// How many messages are looked through on each side for those: runs' ends
+/// and notices between them say nothing.
+const NEAR: usize = 12;
+/// Characters of the message read that are shown, and of each beside it.
+const READ_CHARS: usize = 12_000;
+const BESIDE_CHARS: usize = 2_000;
+
+/// `message` as a conversation read back shows it, at most `limit`
+/// characters of it; nothing when it says nothing.
+fn said(message: &Message, limit: usize) -> Option<String> {
+    let text = crate::store::searched(message);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let who = match message {
+        Message::User { .. } => "Person",
+        Message::Shell(_) => "Command",
+        _ => "Agent",
+    };
+    let shown: String = text.chars().take(limit).collect();
+    let cut = if shown.len() < text.len() {
+        "\n(cut here)"
+    } else {
+        ""
+    };
+    Some(format!("{who} ({}):\n{shown}{cut}", message.id()))
+}
 
 impl Server {
     /// Whether notes are on.
@@ -204,5 +235,39 @@ impl Memory for SessionMemory {
             return Ok("Nothing found.".to_owned());
         }
         Ok(out.trim_end().to_owned())
+    }
+
+    fn read(&self, message: &str) -> Result<String, String> {
+        let store = &self.server.store;
+        let none = || format!("This project's conversations have no message {message}.");
+        let (session, asked) = store
+            .message(message)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(none)?;
+        let owner = store
+            .session(&session)
+            .map_err(|e| e.to_string())?
+            .filter(|s| s.project_id == self.project)
+            .ok_or_else(none)?;
+        let beside = |newest_first: bool| -> Result<Vec<String>, String> {
+            let (page, _) = store
+                .message_page(&session, newest_first, Some(message), NEAR)
+                .map_err(|e| e.to_string())?;
+            Ok(page
+                .iter()
+                .filter_map(|m| said(m, BESIDE_CHARS))
+                .take(AROUND)
+                .collect())
+        };
+        let mut parts = beside(true)?;
+        parts.reverse();
+        parts
+            .push(said(&asked, READ_CHARS).unwrap_or_else(|| format!("({message} says nothing.)")));
+        parts.extend(beside(false)?);
+        Ok(format!(
+            "Session \"{}\" ({session}):\n\n{}",
+            owner.title.as_deref().unwrap_or("untitled"),
+            parts.join("\n\n")
+        ))
     }
 }

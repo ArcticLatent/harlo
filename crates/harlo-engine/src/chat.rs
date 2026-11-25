@@ -77,7 +77,10 @@ pub(crate) fn prepare(
     let body = match &provider.wire {
         Wire::Chat => request(&model.model, system, history, tools, &extra),
         Wire::Messages => crate::messages::request(at, output, system, history, tools, &extra),
-        Wire::Responses => crate::responses::request(at, system, history, tools, &extra),
+        Wire::Responses => {
+            let system = crate::responses::System::of(system, at, provider.system_first);
+            crate::responses::request(at, system, history, tools, &extra)
+        }
         Wire::Unsupported(_) => Value::Null,
     };
     let endpoint = Endpoint {

@@ -122,6 +122,24 @@ impl Catalog for ServerCatalog {
         })
     }
 
+    fn call_seen<'a>(
+        &'a self,
+        namespace: &'a str,
+        tool: &'a str,
+        args: Value,
+    ) -> harlo_engine::codemode::Seen<'a> {
+        Box::pin(async move {
+            match namespace {
+                "automation" => Ok((self.automation(tool, args)?, Vec::new())),
+                other => {
+                    crate::mcp::call_seen(&self.links, other, tool, args, self.session.as_deref())
+                        .await
+                        .unwrap_or_else(|| Err(format!("There's no namespace {other}.")))
+                }
+            }
+        })
+    }
+
     fn progress(&self, message: &str, call: &str, calls: &[Call]) {
         let Some(session) = &self.session else {
             return;

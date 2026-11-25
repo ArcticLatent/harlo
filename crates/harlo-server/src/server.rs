@@ -843,15 +843,27 @@ impl Server {
         Ok(())
     }
 
-    /// Asks the session's model for a title from its first message, and
-    /// uses it unless the session was renamed meanwhile.
+    /// Asks a model for a title from the session's first message, and uses
+    /// it unless the session was renamed meanwhile.
+    ///
+    /// The model is the config's small one when it names one, else the
+    /// session's own, without its variant: a title needs no long thought.
     async fn name_session(self: Arc<Self>, session: Session, first: String, provisional: String) {
         let folder = self.folder(&session.location.directory);
-        let Some(model) = session
-            .model
+        let small = folder
+            .config
+            .small_model
             .clone()
-            .or_else(|| folder.config.default_model())
-        else {
+            .filter(|m| folder.config.resolve(m).is_some());
+        let own = || {
+            let mut model = session
+                .model
+                .clone()
+                .or_else(|| folder.config.default_model())?;
+            model.variant = None;
+            Some(model)
+        };
+        let Some(model) = small.or_else(own) else {
             return;
         };
         let Some((provider, _)) = folder.config.resolve(&model) else {

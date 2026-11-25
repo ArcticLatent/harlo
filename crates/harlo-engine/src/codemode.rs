@@ -86,6 +86,11 @@ impl Direct {
 /// A tool call's answer, on its way.
 pub type Answer<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 
+/// A tool call's answer with the pictures it came with, on its way.
+pub type Seen<'a> = Pin<
+    Box<dyn Future<Output = Result<(Value, Vec<crate::attachment::File>), String>> + Send + 'a>,
+>;
+
 /// The tools scripts can call, and where their progress goes.
 pub trait Catalog: Send + Sync + std::fmt::Debug {
     /// The namespaces on offer.
@@ -98,6 +103,13 @@ pub trait Catalog: Send + Sync + std::fmt::Debug {
 
     /// Runs `tool` of `namespace` with `args`.
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a>;
+
+    /// Runs `tool` of `namespace` with `args` for a call the model made on
+    /// its own, and returns the pictures it answered with too. A script's
+    /// calls get values only.
+    fn call_seen<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {
+        Box::pin(async move { Ok((self.call(namespace, tool, args).await?, Vec::new())) })
+    }
 
     /// Tells whoever follows tool call `call` of step `message` the
     /// script's calls so far.

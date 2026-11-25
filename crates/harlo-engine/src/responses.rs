@@ -134,23 +134,81 @@ fn input(at: Signer<'_>, history: &[Message]) -> Vec<Value> {
 /// Others that speak Responses may refuse a field they don't know.
 const KEYED: &str = "openai";
 
+/// The system prompt, and where a request carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum System<'a> {
+    /// As the request's own `instructions`.
+    Instructions(&'a str),
+    /// As a developer message opening the conversation.
+    First(&'a str),
+}
+
+impl<'a> System<'a> {
+    /// `text` as a request to `at` carries it, opening the conversation
+    /// when `first` asks for that and the model is one it matters for.
+    pub(crate) fn of(text: &'a str, at: Signer<'_>, first: bool) -> Self {
+        if first && appends_instructions(at) {
+            Self::First(text)
+        } else {
+            Self::Instructions(text)
+        }
+    }
+}
+
+/// Whether the model adds a request's `instructions` after the
+/// conversation: `OpenAI`'s GPT-6.2 and later.
+///
+/// Its cache holds a request from its start. Instructions added at the
+/// end are outside what it holds, and are charged whole with every
+/// request; the same text in a developer message at the start is held
+/// with the rest.
+fn appends_instructions(at: Signer<'_>) -> bool {
+    let Some(version) = at
+        .model
+        .strip_prefix("gpt-")
+        .filter(|_| at.provider == KEYED)
+    else {
+        return false;
+    };
+    let mut numbers = version
+        .split(|c: char| !c.is_ascii_digit())
+        .map(|n| n.parse::<u32>().unwrap_or(0));
+    let major = numbers.next().unwrap_or(0);
+    let minor = if version
+        .split_once('.')
+        .is_some_and(|(m, _)| m.parse::<u32>().is_ok())
+    {
+        numbers.next().unwrap_or(0)
+    } else {
+        0
+    };
+    (major, minor) >= (6, 2)
+}
+
 /// The request's body: the instructions, the history and the tools, then
 /// the model's and variant's own fields over them.
 pub(crate) fn request(
     at: Signer<'_>,
-    system: &str,
+    system: System<'_>,
     history: &[Message],
     tools: &[Value],
     extra: &Map<String, Value>,
 ) -> Value {
+    let mut items = input(at, history);
     let mut body = json!({
         "model": at.model,
-        "instructions": system,
-        "input": input(at, history),
         "stream": true,
         "store": false,
         "include": ["reasoning.encrypted_content"],
     });
+    match system {
+        System::Instructions(text) => body["instructions"] = json!(text),
+        System::First(text) => items.insert(
+            0,
+            json!({ "role": "developer", "content": [{ "type": "input_text", "text": text }] }),
+        ),
+    }
+    body["input"] = Value::Array(items);
     if !tools.is_empty() {
         body["tools"] = tools
             .iter()
@@ -339,7 +397,7 @@ mod tests {
     fn own_reasoning_goes_back_encrypted_and_others_stay_out() {
         let body = request(
             AT,
-            "sys",
+            System::Instructions("sys"),
             &[step(vec![
                 Part::Reasoning {
                     text: "plan".into(),
@@ -374,18 +432,87 @@ mod tests {
             },
             step(vec![Part::Text { text: "Hi".into() }]),
         ];
-        let body = request(AT, "", &history, &[], &Map::new());
+        let body = request(AT, System::Instructions(""), &history, &[], &Map::new());
         assert_eq!(body["prompt_cache_key"], "msg_first");
         // The next step's request, a message longer, carries the same.
-        let body = request(AT, "", &history[..1], &[], &Map::new());
+        let body = request(
+            AT,
+            System::Instructions(""),
+            &history[..1],
+            &[],
+            &Map::new(),
+        );
         assert_eq!(body["prompt_cache_key"], "msg_first");
 
         let other = Signer {
             provider: "elsewhere",
             model: "gpt",
         };
-        let body = request(other, "", &history, &[], &Map::new());
+        let body = request(other, System::Instructions(""), &history, &[], &Map::new());
         assert!(body.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn the_system_prompt_opens_the_conversation_where_instructions_would_come_last() {
+        let at = |model| Signer {
+            provider: "openai",
+            model,
+        };
+        for (model, appended) in [
+            ("gpt-6.2-sol", true),
+            ("gpt-6.2", true),
+            ("gpt-6.10-astra", true),
+            ("gpt-7", true),
+            ("gpt-6.1", false),
+            ("gpt-5.6-mini", false),
+            ("gpt-6-mini", false),
+            ("o4", false),
+        ] {
+            assert_eq!(appends_instructions(at(model)), appended, "{model}");
+        }
+        let elsewhere = Signer {
+            provider: "elsewhere",
+            model: "gpt-6.2-sol",
+        };
+        assert!(!appends_instructions(elsewhere));
+        // Only when asked for, and only there.
+        let sol = at("gpt-6.2-sol");
+        assert_eq!(
+            System::of("Be brief.", sol, false),
+            System::Instructions("Be brief.")
+        );
+        assert_eq!(
+            System::of("Be brief.", at("gpt-5.6"), true),
+            System::Instructions("Be brief.")
+        );
+
+        let history = [Message::User {
+            id: "msg_first".into(),
+            time: crate::message::Created { created: 1 },
+            text: "hi".into(),
+            skills: Vec::new(),
+            files: Vec::new(),
+        }];
+        let body = request(
+            sol,
+            System::of("Be brief.", sol, true),
+            &history,
+            &[],
+            &Map::new(),
+        );
+        assert!(body.get("instructions").is_none(), "{body}");
+        assert_eq!(body["input"][0]["role"], "developer");
+        assert_eq!(body["input"][0]["content"][0]["text"], "Be brief.");
+        assert_eq!(body["input"][1]["role"], "user");
+        let body = request(
+            sol,
+            System::Instructions("Be brief."),
+            &history,
+            &[],
+            &Map::new(),
+        );
+        assert_eq!(body["instructions"], "Be brief.");
+        assert_eq!(body["input"][0]["role"], "user");
     }
 
     #[test]

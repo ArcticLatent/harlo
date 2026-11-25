@@ -282,6 +282,9 @@ def measure(history, prices):
 
 def run(server, arm, args):
     prune = False if arm == "off" else (True if args.wait else 0)
+    if args.compare == "instructions":
+        # Clearing as Harlo has it by default, in both arms.
+        prune = True
     config = {
         "model": args.model,
         # Nothing here asks: the files in the project and no more.
@@ -294,6 +297,8 @@ def run(server, arm, args):
         ],
     }
     config["compaction"] = {"prune": prune}
+    if args.compare == "instructions":
+        config["experimental"] = {"cachedInstructions": arm == "on"}
     server.configure(config)
     project = server.project()
     session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
@@ -364,6 +369,9 @@ def main():
     parser.add_argument("--sign-in", action="store_true", help="with --plan: sign in and list the models")
     parser.add_argument("--sign-out", action="store_true", help="with --plan: forget the sign-in, remove DIR")
     parser.add_argument("--reps", type=int, default=2)
+    parser.add_argument("--compare", choices=["clearing", "instructions"], default="clearing",
+                        help="what the on arm turns on: clearing old tool output (the default), or sending the "
+                             "system prompt as the conversation's opening message")
     parser.add_argument("--wait", type=int, default=0, help="seconds of rest before each prompt")
     parser.add_argument("--limit", type=int, default=900, help="seconds a prompt may take")
     parser.add_argument("--prices", help="IN,WRITE,READ,OUT in dollars per million tokens")
@@ -415,7 +423,7 @@ def main():
             raise SystemExit(f"{args.model} isn't offered with this sign-in: {' '.join(offered(server, provider))}")
         for rep in range(args.reps):
             for arm in ("off", "on"):
-                print(f"run {rep + 1}/{args.reps}, clearing {arm}…", file=sys.stderr, flush=True)
+                print(f"run {rep + 1}/{args.reps}, {args.compare} {arm}…", file=sys.stderr, flush=True)
                 results.append(run(server, arm, args))
     finally:
         server.close()
@@ -427,7 +435,8 @@ def main():
         f"## {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · cold-cache · {args.model}",
         "",
         f"Revision {revision}{' with uncommitted changes' if dirty else ''}; paid by {paid}; rest before each prompt: "
-        f"{args.wait or 'none (every prompt counts as rested)'}; prices {args.prices}." + (f" {args.note}" if args.note else ""),
+        f"{args.wait or 'none (every prompt counts as rested)'}; prices {args.prices}; the on arm turns on: {args.compare}."
+        + (f" {args.note}" if args.note else ""),
         "",
         "| arm | changes work (textwrap, argparse, difflib) | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",

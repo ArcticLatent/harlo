@@ -39,6 +39,14 @@ const STARTUP: Duration = Duration::from_secs(30);
 /// How long a tool call may take, unless its entry says.
 const EXECUTION: Duration = Duration::from_mins(5);
 
+/// The most pictures one tool result brings the model: each costs about as
+/// much as a page of text.
+const PICTURES: usize = 4;
+
+/// The largest picture a tool result brings the model, in base64 bytes
+/// (about 3.7 MB of picture): what providers take in one image.
+const PICTURE_BYTES: usize = 5 * 1024 * 1024;
+
 /// The `_meta` key a client-hosted server reads the calling session from.
 const SESSION_KEY: &str = "harlo/sessionID";
 
@@ -156,6 +164,17 @@ impl Link {
 
     /// Calls tool `tool` with `args`, for session `session`.
     async fn call(&self, tool: &str, args: Value, session: Option<&str>) -> Result<Value, String> {
+        answer(&self.result(tool, args, session).await?)
+    }
+
+    /// Calls tool `tool` with `args`, for session `session`; returns the
+    /// server's result as it sent it.
+    async fn result(
+        &self,
+        tool: &str,
+        args: Value,
+        session: Option<&str>,
+    ) -> Result<Value, String> {
         let peer = lock(&self.state)
             .peer
             .clone()
@@ -172,7 +191,7 @@ impl Link {
             .await
             .map_err(|_late| format!("{}.{tool} took too long.", self.name))?
             .map_err(|e| format!("{}.{tool} failed: {e}", self.name))?;
-        answer(&serde_json::to_value(result).unwrap_or_default())
+        Ok(serde_json::to_value(result).unwrap_or_default())
     }
 }
 
@@ -211,6 +230,31 @@ fn answer(result: &Value) -> Result<Value, String> {
         return Ok(structured.clone());
     }
     Ok(serde_json::from_str(&text).unwrap_or(Value::String(text)))
+}
+
+/// The pictures in a tool result, for the model to look at: the first few,
+/// those of a size a provider takes.
+fn pictures(result: &Value) -> Vec<harlo_engine::attachment::File> {
+    result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "image")
+        .filter_map(|block| {
+            let data = block["data"].as_str()?;
+            let mime = block["mimeType"].as_str()?;
+            (mime.starts_with("image/") && data.len() <= PICTURE_BYTES).then(|| {
+                harlo_engine::attachment::File {
+                    data: data.to_owned(),
+                    mime: mime.to_owned(),
+                    source: json!({ "type": "inline" }),
+                    name: None,
+                    mention: None,
+                }
+            })
+        })
+        .take(PICTURES)
+        .collect()
 }
 
 /// A JSON Schema type as TypeScript writes it.
@@ -308,6 +352,23 @@ pub(crate) fn direct(links: &[Arc<Link>]) -> Vec<Direct> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+/// Calls tool `tool` of server `namespace` among `links`, and returns its
+/// answer with the pictures it came with.
+pub(crate) async fn call_seen(
+    links: &[Arc<Link>],
+    namespace: &str,
+    tool: &str,
+    args: Value,
+    session: Option<&str>,
+) -> Option<Result<(Value, Vec<harlo_engine::attachment::File>), String>> {
+    let link = links.iter().find(|l| l.name == namespace)?;
+    let result = match link.result(tool, args, session).await {
+        Ok(result) => result,
+        Err(e) => return Some(Err(e)),
+    };
+    Some(answer(&result).map(|value| (value, pictures(&result))))
 }
 
 /// Calls tool `tool` of server `namespace` among `links`.
@@ -860,6 +921,33 @@ mod tests {
         });
         assert_eq!(object_type(&schema), "{lines?: number[], path: string}");
         assert_eq!(direct_name("my server", "read.file"), "my_server_read_file");
+    }
+
+    #[test]
+    fn a_results_pictures_are_kept_for_the_model() {
+        let result = json!({ "content": [
+            { "type": "text", "text": "The window:" },
+            { "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" },
+            { "type": "image", "data": "x".repeat(PICTURE_BYTES + 1), "mimeType": "image/png" },
+            { "type": "audio", "data": "aGVsbG8=", "mimeType": "audio/wav" },
+        ] });
+        let found = pictures(&result);
+        assert_eq!(found.len(), 1, "the one of a size to send");
+        assert_eq!(
+            (found[0].mime.as_str(), found[0].data.as_str()),
+            ("image/png", "aGVsbG8=")
+        );
+        // The text still says what came, pictures included.
+        assert_eq!(
+            answer(&result),
+            Ok(json!(
+                "The window:\n(image image/png)\n(image image/png)\n(audio audio/wav)"
+            ))
+        );
+        let many = json!({ "content": vec![
+            json!({ "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" }); PICTURES + 2
+        ] });
+        assert_eq!(pictures(&many).len(), PICTURES);
     }
 
     #[test]

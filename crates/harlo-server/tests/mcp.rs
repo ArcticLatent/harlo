@@ -228,3 +228,56 @@ async fn each_folder_has_its_own_server_started_in_it() {
     connected(&sandbox, &other).await;
     connected(&sandbox, &first).await;
 }
+
+/// A stdio MCP server with one tool, `snap`, answering with a picture.
+const SNAP: &str = r#"import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "id" not in msg:
+        continue
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": msg["params"]["protocolVersion"],
+                  "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "snap", "version": "1"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "snap", "description": "Takes a picture.",
+                             "inputSchema": {"type": "object", "properties": {}}}]}
+    else:
+        result = {"content": [{"type": "text", "text": "The window:"},
+                              {"type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}), flush=True)
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tools_picture_reaches_the_model() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let script = sandbox.dir.path().join("snap.py");
+    std::fs::write(&script, SNAP).expect("snap.py");
+    let path = sandbox.dir.path().join("config/harlo/harlo.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("config")).expect("JSON");
+    config["mcp"] = serde_json::json!({ "servers": { "here": {
+        "type": "local", "command": ["python3", "-I", script], "codemode": false,
+    } } });
+    std::fs::write(&path, config.to_string()).expect("config");
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    connected(&sandbox, &folder).await;
+
+    let session = client.create_session(&folder).await.expect("session");
+    run_until(
+        &sandbox,
+        &session.id,
+        "tool here_snap {} ;; say ok",
+        "The window:",
+    )
+    .await;
+    // The request after the call shows the model the picture itself.
+    let after = support::turn_requests(sandbox.dir.path())
+        .last()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    assert!(after.contains("aGVsbG8="), "{after}");
+    assert!(after.contains("image/png"), "{after}");
+}

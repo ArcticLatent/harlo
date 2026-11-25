@@ -198,6 +198,7 @@ impl Entry {
             api_key: key,
             models: self.models.clone(),
             wire: self.wire.clone(),
+            system_first: false,
         })
     }
 }

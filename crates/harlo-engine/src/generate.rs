@@ -83,11 +83,19 @@ pub const TITLE_SYSTEM: &str = "Name the conversation so the person can find it 
     specific subject, such as the feature, file, error or tool. No quotes, no label, and no full \
     stop at the end.";
 
+/// Characters of a first message that naming the session reads: its
+/// subject is in its opening, and a pasted log isn't paid for twice.
+const TITLE_CHARS: usize = 2_000;
+
 /// The request to name a session that starts with `first`.
 #[must_use]
 pub fn title_prompt(first: &str) -> String {
+    let mut opening: String = first.chars().take(TITLE_CHARS).collect();
+    if opening.len() < first.len() {
+        opening.push('…');
+    }
     format!(
-        "The conversation's first message:\n\n<message>\n{first}\n</message>\n\nReply with the title only."
+        "The conversation's first message:\n\n<message>\n{opening}\n</message>\n\nReply with the title only."
     )
 }
 
@@ -114,6 +122,16 @@ pub fn clean_title(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_first_message_is_named_from_its_opening() {
+        let long = format!("Fix the login bug. {}", "log line\n".repeat(5_000));
+        let asked = title_prompt(&long);
+        assert!(asked.contains("Fix the login bug."), "{asked}");
+        assert!(asked.len() < 2_500, "{} bytes", asked.len());
+        assert!(asked.contains("…\n</message>"), "it says it was cut");
+        assert!(!title_prompt("Short.").contains('…'));
+    }
 
     #[test]
     fn titles_are_cleaned() {

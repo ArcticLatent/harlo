@@ -114,6 +114,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
                 ..ModelSpec::default()
             }],
             wire: harlo_engine::catalog::Wire::Chat,
+            system_first: false,
         },
         system: "You are a coding agent.".into(),
         rules,

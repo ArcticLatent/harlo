@@ -116,7 +116,11 @@ async fn the_scripted_model_offers_efforts_and_a_turn_sends_the_chosen_one() {
     let sent = log
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .find(|r| r["body"].to_string().contains("thought hard"))
+        // (The session's title is asked for on the side, without the effort.)
+        .find(|r| {
+            let body = r["body"].to_string();
+            body.contains("thought hard") && !body.contains("Name the conversation")
+        })
         .expect("the turn's request");
     assert_eq!(sent["body"]["reasoning_effort"], "high", "{sent}");
 }

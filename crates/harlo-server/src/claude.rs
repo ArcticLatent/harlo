@@ -97,6 +97,7 @@ impl Server {
             api_key: None,
             models: lock(&self.claude_models).clone(),
             wire: harlo_engine::catalog::Wire::Unsupported(PROVIDER.to_owned()),
+            system_first: false,
         })
     }
 

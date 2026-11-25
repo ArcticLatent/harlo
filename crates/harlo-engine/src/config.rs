@@ -198,10 +198,18 @@ pub struct ProviderSpec {
     pub models: Vec<ModelSpec>,
     /// The API it speaks.
     pub wire: crate::catalog::Wire,
+    /// Whether the system prompt opens the conversation, where the
+    /// provider's cache keeps it, on models that would otherwise charge
+    /// it whole with every request (`experimental.cachedInstructions`).
+    pub system_first: bool,
 }
 
 /// What the engine read from the configuration.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is a switch of its own in the configuration file"
+)]
 pub struct Config {
     /// The file it came from, if one was found.
     pub source: Option<PathBuf>,
@@ -209,6 +217,13 @@ pub struct Config {
     pub providers: Vec<ProviderSpec>,
     /// The model new sessions use, when the file names one.
     pub model: Option<ModelRef>,
+    /// A cheaper model for small jobs such as naming a session
+    /// (`small_model`), when the file names one.
+    pub small_model: Option<ModelRef>,
+    /// Whether the system prompt opens the conversation on models that
+    /// charge a request's own instructions whole every time
+    /// (`experimental.cachedInstructions`, off unless turned on).
+    pub cached_instructions: bool,
     /// Permission rules from the file, applied after the agent's own.
     pub permissions: Vec<Rule>,
     /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
@@ -301,10 +316,19 @@ impl Config {
             .flatten()
             .filter_map(|r| serde_json::from_value(r.clone()).ok())
             .collect();
+        let cached_instructions = value["experimental"]["cachedInstructions"]
+            .as_bool()
+            .unwrap_or(false);
+        let mut providers: Vec<ProviderSpec> = providers;
+        for provider in &mut providers {
+            provider.system_first = cached_instructions;
+        }
         Self {
             source,
             providers,
+            cached_instructions,
             model: model_ref(&value["model"]),
+            small_model: model_ref(&value["small_model"]),
             permissions,
             instructions: strings(&value["instructions"]),
             skills: strings(&value["skills"]),
@@ -577,6 +601,7 @@ fn provider(id: &str, p: &Value) -> Option<ProviderSpec> {
         api_key,
         models,
         wire: crate::catalog::Wire::of_package(package),
+        system_first: false,
     })
 }
 

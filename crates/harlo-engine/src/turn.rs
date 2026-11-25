@@ -1050,8 +1050,8 @@ async fn run_external(
     input: Value,
     stop: &CancellationToken,
 ) -> Result<tools::Output, String> {
-    let value = tokio::select! {
-        v = catalog.call(namespace, tool, input) => v?,
+    let (value, pictures) = tokio::select! {
+        v = catalog.call_seen(namespace, tool, input) => v?,
         () = stop.cancelled() => return Err("Stopped.".to_owned()),
     };
     let text = tools::outside_result(&value, &crate::web::saved_pages());
@@ -1059,7 +1059,7 @@ async fn run_external(
         text,
         metadata: Map::new(),
         changed: Vec::new(),
-        pictures: Vec::new(),
+        pictures,
     })
 }
 
@@ -1351,8 +1351,9 @@ async fn run_plan(
                 pictures: Vec::new(),
             })
         }
-        (Plan::SearchSessions { query }, Some(memory)) => {
-            memory.search(&query).map(|text| tools::Output {
+        (Plan::SearchSessions { query, message }, Some(memory)) => {
+            let found = message.map_or_else(|| memory.search(&query), |m| memory.read(&m));
+            found.map(|text| tools::Output {
                 text,
                 metadata: Map::new(),
                 changed: Vec::new(),

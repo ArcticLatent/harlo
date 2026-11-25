@@ -8,6 +8,11 @@
 //! then the files the config's `instructions` list names. Each keeps the
 //! path it came from, so the prompt and the UI can say where a rule is from.
 //!
+//! A file brings in another by naming it after an `@`, as in `@docs/style.md`
+//! or `@~/notes/rules.md`: the named file follows the one that names it. A
+//! file inside the project brings in only files inside the project; the
+//! person's own files, outside it, may name any.
+//!
 //! `HARLO_DISABLE_PROJECT_CONFIG` skips the project's files and
 //! `HARLO_DISABLE_CLAUDE_MD` every `CLAUDE.md`. Not yet: URLs in
 //! `instructions`, and
@@ -73,24 +78,107 @@ impl Search<'_> {
     }
 }
 
+/// How many files deep one file brings in another: a file, what it names,
+/// what that names, and so on. Enough for any real layout, and an end to
+/// files that name each other.
+const DEEPEST_IMPORT: usize = 5;
+
+/// `path` with its links followed, or as given when it can't be.
+fn real(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The paths `text` names after an `@`, outside code.
+///
+/// A word such as `@docs/style.md`, on a line of its own or in a
+/// sentence. Words in a fenced block or between backticks are examples,
+/// not imports.
+fn named(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut fenced = false;
+    for line in text.lines() {
+        let start = line.trim_start();
+        if start.starts_with("```") || start.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        // Every other piece between backticks is code.
+        for prose in line.split('`').step_by(2) {
+            found.extend(
+                prose
+                    .split_whitespace()
+                    .filter_map(|word| word.strip_prefix('@'))
+                    .map(|path| path.trim_end_matches([',', ';', ':', ')', ']', '"', '\'']))
+                    .filter(|path| !path.is_empty()),
+            );
+        }
+    }
+    found
+}
+
+/// The file `name`, named in the instruction file `from`, when there is
+/// one and `from` may bring it in.
+fn imported(name: &str, from: &Path, search: &Search<'_>) -> Option<PathBuf> {
+    let folder = from.parent()?;
+    let at = |name: &str| match name.strip_prefix("~/") {
+        Some(rest) => search.home.join(rest),
+        None => folder.join(name),
+    };
+    // (A sentence may end at the name: `See @README.md.`)
+    let path = [name, name.trim_end_matches('.')]
+        .into_iter()
+        .map(at)
+        .find(|p| p.is_file())?;
+    // A project's file reaches no further than the project.
+    let project = real(search.project_root.unwrap_or(search.workspace));
+    if real(from).starts_with(&project) && !real(&path).starts_with(&project) {
+        tracing::info!(
+            name: "instructions.import.outside",
+            file = %from.display(),
+            "a project's instruction file named a file outside the project; it isn't read"
+        );
+        return None;
+    }
+    Some(path)
+}
+
+/// Adds the instruction file `path` to `out`, then the files it names,
+/// `deeper` more files deep; a file already there isn't added again.
+fn add(path: PathBuf, search: &Search<'_>, deeper: usize, out: &mut Vec<Instruction>) {
+    let here = real(&path);
+    if out.iter().any(|i| real(&i.source) == here) {
+        return;
+    }
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    let names: Vec<PathBuf> = if deeper == 0 {
+        Vec::new()
+    } else {
+        named(&text)
+            .into_iter()
+            .filter_map(|name| imported(name, &path, search))
+            .collect()
+    };
+    out.push(Instruction { source: path, text });
+    for name in names {
+        add(name, search, deeper - 1, out);
+    }
+}
+
 /// The instruction files for a session, in the order they're given to the
 /// model. Files that can't be read are left out.
 #[must_use]
 pub fn load(search: &Search<'_>) -> Vec<Instruction> {
     let mut out: Vec<Instruction> = Vec::new();
     let add = |path: PathBuf, out: &mut Vec<Instruction>| {
-        let real = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        if out
-            .iter()
-            .any(|i| std::fs::canonicalize(&i.source).unwrap_or_else(|_| i.source.clone()) == real)
-        {
-            return;
-        }
-        if let Ok(text) = std::fs::read_to_string(&path)
-            && !text.trim().is_empty()
-        {
-            out.push(Instruction { source: path, text });
-        }
+        add(path, search, DEEPEST_IMPORT, out);
     };
 
     let global = search.config_dir.join("AGENTS.md");
@@ -314,6 +402,51 @@ mod tests {
         assert_eq!(
             load(&quiet).into_iter().map(|i| i.text).collect::<Vec<_>>(),
             ["global"]
+        );
+    }
+
+    #[test]
+    fn a_file_brings_in_the_files_it_names() {
+        let t = tempfile::tempdir().expect("dir");
+        let (home, config) = (t.path().join("home"), t.path().join("config/harlo"));
+        let root = t.path().join("work/repo");
+        // The person's own file names one anywhere; the project's names
+        // one beside it, one in a sentence, one that names it back, and
+        // (not read) one outside the project.
+        write(&home.join(".claude/CLAUDE.md"), "@~/rules/mine.md\n");
+        write(&home.join("rules/mine.md"), "mine");
+        write(&home.join("secret.txt"), "secret");
+        write(
+            &root.join("CLAUDE.md"),
+            &format!(
+                "@AGENTS.md\nSee @docs/style.md.\n`@docs/example.md` and\n```\n@docs/example.md\n```\n\
+                 @{}\n@missing.md\n",
+                home.join("secret.txt").display()
+            ),
+        );
+        write(&root.join("AGENTS.md"), "agents @CLAUDE.md");
+        write(&root.join("docs/style.md"), "style");
+        write(&root.join("docs/example.md"), "an example, not read");
+        let search = Search {
+            workspace: &root,
+            project_root: Some(&root),
+            home: &home,
+            config_dir: &config,
+            ..Search::default()
+        };
+        // Each once, though the project's two name each other; the example
+        // in code, the file outside the project and the missing one aren't
+        // read.
+        let sources: Vec<PathBuf> = load(&search).into_iter().map(|i| i.source).collect();
+        assert_eq!(
+            sources,
+            [
+                home.join(".claude/CLAUDE.md"),
+                home.join("rules/mine.md"),
+                root.join("AGENTS.md"),
+                root.join("CLAUDE.md"),
+                root.join("docs/style.md"),
+            ]
         );
     }
 

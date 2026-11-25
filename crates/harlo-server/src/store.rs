@@ -172,7 +172,7 @@ const BUSY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The text of `message` that search looks in: a prompt, a command, or
 /// what a step said.
-fn searched(message: &Message) -> String {
+pub(crate) fn searched(message: &Message) -> String {
     match message {
         Message::User { text, .. } => text.clone(),
         Message::Shell(run) => run.command.clone(),
@@ -755,6 +755,25 @@ impl Store {
         let more = page.len() > limit;
         page.truncate(limit);
         Ok((page, more))
+    }
+
+    /// The message with ID `id`, and the session it's in.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn message(&self, id: &str) -> Result<Option<(String, Message)>, Error> {
+        let found: Option<(String, String)> = self
+            .reader()
+            .query_row(
+                "SELECT session, body FROM message WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        found
+            .map(|(session, body)| Ok((session, serde_json::from_str(&body).map_err(json_error)?)))
+            .transpose()
     }
 
     /// A session's newest message, if it has any.

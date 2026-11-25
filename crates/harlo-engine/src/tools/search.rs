@@ -1,6 +1,7 @@
 //! `glob` and `grep`: finding files by name and lines by pattern. Both
-//! walk the project the way git
-//! sees it: `.gitignore`d files, hidden folders and `.git` are left out.
+//! walk the project the way git sees it: `.gitignore`d files and the
+//! version control's own folder are left out. Other hidden files and
+//! folders (`.github`, `.harlo`, dotfiles) are part of the project.
 
 // Rust guideline compliant 2026-10-09
 
@@ -18,27 +19,50 @@ const MAX_FILES: usize = 100;
 const MAX_MATCHES: usize = 100;
 /// The longest line `grep` shows whole.
 const MAX_LINE: usize = 300;
+/// The folders version control keeps for itself: never the project's own.
+const VERSION_CONTROL: [&str; 4] = [".git", ".jj", ".hg", ".svn"];
+
+/// What a `grep` looks for.
+#[derive(Debug, Clone, Copy)]
+pub struct Wanted<'a> {
+    /// The regular expression.
+    pub pattern: &'a str,
+    /// Only files whose name matches this glob.
+    pub include: Option<&'a str>,
+    /// Whether to list the files that have a match, not the lines.
+    pub files_only: bool,
+}
 
 /// Walks the files under `base`, leaving out whatever is under one of the
 /// `skip` paths, which are given with their links followed.
 fn walk(base: &Path, skip: &[PathBuf]) -> ignore::Walk {
     let mut walk = WalkBuilder::new(base);
+    walk.hidden(false);
     let real = super::real_path(base);
     let skip: Vec<PathBuf> = skip
         .iter()
         .filter(|s| s.starts_with(&real))
         .cloned()
         .collect();
-    if !skip.is_empty() {
-        let base = base.to_path_buf();
-        walk.filter_entry(move |entry| {
-            let at = entry
-                .path()
-                .strip_prefix(&base)
-                .map_or_else(|_| entry.path().to_path_buf(), |rest| real.join(rest));
-            !skip.iter().any(|s| at.starts_with(s))
-        });
-    }
+    let base = base.to_path_buf();
+    walk.filter_entry(move |entry| {
+        if entry.depth() > 0
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| VERSION_CONTROL.contains(&name))
+        {
+            return false;
+        }
+        if skip.is_empty() {
+            return true;
+        }
+        let at = entry
+            .path()
+            .strip_prefix(&base)
+            .map_or_else(|_| entry.path().to_path_buf(), |rest| real.join(rest));
+        !skip.iter().any(|s| at.starts_with(s))
+    });
     walk.build()
 }
 
@@ -89,9 +113,9 @@ pub fn glob(pattern: &str, base: &Path, cwd: &Path, skip: &[PathBuf]) -> Result<
     Ok(text)
 }
 
-/// The lines in files under `base` (only those whose name matches
-/// `include`, when given) that match the regular expression `pattern`,
-/// grouped by file.
+/// The lines in files under `base` that match what's `wanted`, grouped by
+/// file; or, asked for files only, each file with a match and how many
+/// lines of it match.
 ///
 /// A file under a searched folder is read only when `may_read` says so of
 /// its path as shown; the result says how many were left out. A file
@@ -101,13 +125,17 @@ pub fn glob(pattern: &str, base: &Path, cwd: &Path, skip: &[PathBuf]) -> Result<
 ///
 /// When `pattern` isn't a regular expression or `include` isn't a glob.
 pub fn grep(
-    pattern: &str,
+    wanted: Wanted<'_>,
     base: &Path,
-    include: Option<&str>,
     cwd: &Path,
     skip: &[PathBuf],
     may_read: Option<&dyn Fn(&str) -> bool>,
 ) -> Result<String, String> {
+    let Wanted {
+        pattern,
+        include,
+        files_only,
+    } = wanted;
     let regex =
         Regex::new(pattern).map_err(|e| format!("`{pattern}` isn't a regular expression: {e}"))?;
     let include = include
@@ -145,6 +173,19 @@ pub fn grep(
             // Not text.
             continue;
         };
+        if files_only {
+            let lines = text.lines().filter(|line| regex.is_match(line)).count();
+            if lines == 0 {
+                continue;
+            }
+            if count == MAX_FILES {
+                more = true;
+                break;
+            }
+            let _ = writeln!(out, "{} ({lines})", shown(path, cwd));
+            count += 1;
+            continue;
+        }
         let mut header = false;
         for (n, line) in text.lines().enumerate() {
             if !regex.is_match(line) {
@@ -193,6 +234,69 @@ fn shown(path: &Path, cwd: &Path) -> String {
 mod tests {
     use super::*;
 
+    /// A search for the lines matching `pattern`.
+    fn lines<'a>(pattern: &'a str, include: Option<&'a str>) -> Wanted<'a> {
+        Wanted {
+            pattern,
+            include,
+            files_only: false,
+        }
+    }
+
+    #[test]
+    fn hidden_files_are_searched_and_version_control_is_not() {
+        let t = tempfile::tempdir().expect("dir");
+        let p = t.path();
+        for dir in [".github/workflows", ".git/hooks", "src/.jj"] {
+            std::fs::create_dir_all(p.join(dir)).expect("folder");
+        }
+        std::fs::write(p.join(".github/workflows/ci.yml"), "run: cargo test\n").expect("ci");
+        std::fs::write(p.join(".editorconfig"), "indent = cargo\n").expect("dotfile");
+        std::fs::write(p.join(".git/hooks/pre-commit"), "cargo fmt\n").expect("hook");
+        std::fs::write(p.join("src/.jj/op"), "cargo\n").expect("op");
+
+        let mut files: Vec<String> = glob("*", p, p, &[])
+            .expect("glob")
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        files.sort();
+        assert_eq!(files, [".editorconfig", ".github/workflows/ci.yml"]);
+        let hits = grep(lines("cargo", None), p, p, &[], None).expect("grep");
+        assert!(hits.contains(".github/workflows/ci.yml:"), "{hits}");
+        assert!(hits.contains(".editorconfig:"), "{hits}");
+        assert!(
+            !hits.contains("pre-commit") && !hits.contains(".jj"),
+            "{hits}"
+        );
+    }
+
+    #[test]
+    fn grep_lists_only_the_files_when_asked() {
+        let t = tempfile::tempdir().expect("dir");
+        let p = t.path();
+        std::fs::write(p.join("a.rs"), "fn one() {}\nfn two() {}\nlet x = 1;\n").expect("a");
+        std::fs::write(p.join("b.rs"), "fn three() {}\n").expect("b");
+        std::fs::write(p.join("c.rs"), "let y = 2;\n").expect("c");
+        let files = Wanted {
+            pattern: r"fn \w+",
+            include: None,
+            files_only: true,
+        };
+        let mut found: Vec<String> = grep(files, p, p, &[], None)
+            .expect("grep")
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        found.sort();
+        assert_eq!(found, ["a.rs (2)", "b.rs (1)"]);
+        let none = Wanted {
+            pattern: "nowhere",
+            ..files
+        };
+        assert_eq!(grep(none, p, p, &[], None).expect("grep"), "No matches.");
+    }
+
     #[test]
     fn grep_reads_only_the_files_it_may() {
         let t = tempfile::tempdir().expect("dir");
@@ -202,16 +306,23 @@ mod tests {
         std::fs::write(p.join("test.env"), "nothing here\n").expect("env");
         let not_env = |shown: &str| !crate::rules::glob("*.env", shown);
 
-        let hits = grep("KEY", p, None, p, &[], Some(&not_env)).expect("grep");
+        let hits = grep(lines("KEY", None), p, p, &[], Some(&not_env)).expect("grep");
         assert!(hits.contains("notes.txt:"), "{hits}");
         assert!(!hits.contains("secret"), "{hits}");
         // Both are counted, the one without a match too.
         assert!(hits.contains("(2 not searched"), "{hits}");
-        let none = grep("secret", p, None, p, &[], Some(&not_env)).expect("grep");
+        let none = grep(lines("secret", None), p, p, &[], Some(&not_env)).expect("grep");
         assert!(none.starts_with("No matches.\n(2 not searched"), "{none}");
 
         // A file searched by itself was decided by the caller.
-        let own = grep("KEY", &p.join("prod.env"), None, p, &[], Some(&not_env)).expect("grep");
+        let own = grep(
+            lines("KEY", None),
+            &p.join("prod.env"),
+            p,
+            &[],
+            Some(&not_env),
+        )
+        .expect("grep");
         assert!(own.contains("KEY=secret"), "{own}");
     }
 
@@ -245,7 +356,7 @@ mod tests {
         );
         assert_eq!(glob("*.md", p, p, &[]).expect("glob"), "No files found.");
 
-        let hits = grep(r"hello\(", p, Some("*.rs"), p, &[], None).expect("grep");
+        let hits = grep(lines(r"hello\(", Some("*.rs")), p, p, &[], None).expect("grep");
         assert!(hits.contains("src/main.rs:\n  2:     hello();"), "{hits}");
         assert!(
             hits.contains("src/lib.rs:\n  1: pub fn hello() {}"),
@@ -253,6 +364,6 @@ mod tests {
         );
         assert!(!hits.contains("target"), "{hits}");
         assert!(!hits.contains("notes.txt"), "{hits}");
-        grep("(", p, None, p, &[], None).expect_err("not a regular expression");
+        grep(lines("(", None), p, p, &[], None).expect_err("not a regular expression");
     }
 }
