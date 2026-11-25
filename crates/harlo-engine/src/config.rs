@@ -224,6 +224,9 @@ pub struct Config {
     /// charge a request's own instructions whole every time
     /// (`experimental.cachedInstructions`, off unless turned on).
     pub cached_instructions: bool,
+    /// Whether scripts may read and search the project's files
+    /// (`experimental.scriptFiles`, off unless turned on).
+    pub script_files: bool,
     /// Permission rules from the file, applied after the agent's own.
     pub permissions: Vec<Rule>,
     /// Extra instruction files (`instructions`): paths, `*` patterns, URLs.
@@ -327,6 +330,9 @@ impl Config {
             source,
             providers,
             cached_instructions,
+            script_files: value["experimental"]["scriptFiles"]
+                .as_bool()
+                .unwrap_or(false),
             model: model_ref(&value["model"]),
             small_model: model_ref(&value["small_model"]),
             permissions,

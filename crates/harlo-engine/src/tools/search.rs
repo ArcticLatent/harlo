@@ -13,10 +13,8 @@ use globset::GlobBuilder;
 use ignore::WalkBuilder;
 use regex::Regex;
 
-/// The most paths `glob` lists.
-const MAX_FILES: usize = 100;
-/// The most matching lines `grep` lists.
-const MAX_MATCHES: usize = 100;
+/// The most files, or matching lines, a search lists for a model.
+pub(super) const MAX_FILES: usize = 100;
 /// The longest line `grep` shows whole.
 const MAX_LINE: usize = 300;
 /// The folders version control keeps for itself: never the project's own.
@@ -31,6 +29,8 @@ pub struct Wanted<'a> {
     pub include: Option<&'a str>,
     /// Whether to list the files that have a match, not the lines.
     pub files_only: bool,
+    /// The most files or lines to list.
+    pub most: usize,
 }
 
 /// Walks the files under `base`, leaving out whatever is under one of the
@@ -67,12 +67,18 @@ fn walk(base: &Path, skip: &[PathBuf]) -> ignore::Walk {
 }
 
 /// The files under `base` whose path (relative to `base`) matches
-/// `pattern`, most recently changed first.
+/// `pattern`, most recently changed first, at most `most` of them.
 ///
 /// # Errors
 ///
 /// When `pattern` isn't a glob.
-pub fn glob(pattern: &str, base: &Path, cwd: &Path, skip: &[PathBuf]) -> Result<String, String> {
+pub fn glob(
+    pattern: &str,
+    base: &Path,
+    cwd: &Path,
+    skip: &[PathBuf],
+    most: usize,
+) -> Result<String, String> {
     let matcher = GlobBuilder::new(pattern)
         .literal_separator(pattern.contains('/'))
         .build()
@@ -100,10 +106,10 @@ pub fn glob(pattern: &str, base: &Path, cwd: &Path, skip: &[PathBuf]) -> Result<
         return Ok("No files found.".to_owned());
     }
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    let more = found.len().saturating_sub(MAX_FILES);
+    let more = found.len().saturating_sub(most);
     let mut text: String = found
         .into_iter()
-        .take(MAX_FILES)
+        .take(most)
         .map(|(_, p)| p)
         .collect::<Vec<_>>()
         .join("\n");
@@ -135,6 +141,7 @@ pub fn grep(
         pattern,
         include,
         files_only,
+        most,
     } = wanted;
     let regex =
         Regex::new(pattern).map_err(|e| format!("`{pattern}` isn't a regular expression: {e}"))?;
@@ -178,7 +185,7 @@ pub fn grep(
             if lines == 0 {
                 continue;
             }
-            if count == MAX_FILES {
+            if count == most {
                 more = true;
                 break;
             }
@@ -191,7 +198,7 @@ pub fn grep(
             if !regex.is_match(line) {
                 continue;
             }
-            if count == MAX_MATCHES {
+            if count == most {
                 more = true;
                 break;
             }
@@ -240,6 +247,7 @@ mod tests {
             pattern,
             include,
             files_only: false,
+            most: MAX_FILES,
         }
     }
 
@@ -255,7 +263,7 @@ mod tests {
         std::fs::write(p.join(".git/hooks/pre-commit"), "cargo fmt\n").expect("hook");
         std::fs::write(p.join("src/.jj/op"), "cargo\n").expect("op");
 
-        let mut files: Vec<String> = glob("*", p, p, &[])
+        let mut files: Vec<String> = glob("*", p, p, &[], MAX_FILES)
             .expect("glob")
             .lines()
             .map(str::to_owned)
@@ -282,6 +290,7 @@ mod tests {
             pattern: r"fn \w+",
             include: None,
             files_only: true,
+            most: MAX_FILES,
         };
         let mut found: Vec<String> = grep(files, p, p, &[], None)
             .expect("grep")
@@ -343,7 +352,7 @@ mod tests {
         std::fs::write(p.join("target/gen.rs"), "fn hello() {}\n").expect("gen");
         std::fs::write(p.join("notes.txt"), "hello there\n").expect("notes");
 
-        let mut rs: Vec<String> = glob("*.rs", p, p, &[])
+        let mut rs: Vec<String> = glob("*.rs", p, p, &[], MAX_FILES)
             .expect("glob")
             .lines()
             .map(str::to_owned)
@@ -351,10 +360,16 @@ mod tests {
         rs.sort();
         assert_eq!(rs, ["src/lib.rs", "src/main.rs"]);
         assert_eq!(
-            glob("src/*.rs", p, p, &[]).expect("glob").lines().count(),
+            glob("src/*.rs", p, p, &[], MAX_FILES)
+                .expect("glob")
+                .lines()
+                .count(),
             2
         );
-        assert_eq!(glob("*.md", p, p, &[]).expect("glob"), "No files found.");
+        assert_eq!(
+            glob("*.md", p, p, &[], MAX_FILES).expect("glob"),
+            "No files found."
+        );
 
         let hits = grep(lines(r"hello\(", Some("*.rs")), p, p, &[], None).expect("grep");
         assert!(hits.contains("src/main.rs:\n2\t    hello();"), "{hits}");

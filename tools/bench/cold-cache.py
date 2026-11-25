@@ -280,9 +280,13 @@ def measure(history, prices):
     return turns
 
 
+# What `--compare` can turn on besides clearing, and the `experimental` key each one sets.
+SWITCHES = {"instructions": "cachedInstructions", "files": "scriptFiles", "outline": "outline"}
+
+
 def run(server, arm, args):
     prune = False if arm == "off" else (True if args.wait else 0)
-    if args.compare == "instructions":
+    if args.compare in SWITCHES:
         # Clearing as Harlo has it by default, in both arms.
         prune = True
     config = {
@@ -297,8 +301,8 @@ def run(server, arm, args):
         ],
     }
     config["compaction"] = {"prune": prune}
-    if args.compare == "instructions":
-        config["experimental"] = {"cachedInstructions": arm == "on"}
+    if args.compare in SWITCHES:
+        config["experimental"] = {SWITCHES[args.compare]: arm == "on"}
     server.configure(config)
     project = server.project()
     session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
@@ -369,9 +373,10 @@ def main():
     parser.add_argument("--sign-in", action="store_true", help="with --plan: sign in and list the models")
     parser.add_argument("--sign-out", action="store_true", help="with --plan: forget the sign-in, remove DIR")
     parser.add_argument("--reps", type=int, default=2)
-    parser.add_argument("--compare", choices=["clearing", "instructions"], default="clearing",
-                        help="what the on arm turns on: clearing old tool output (the default), or sending the "
-                             "system prompt as the conversation's opening message")
+    parser.add_argument("--compare", choices=["clearing", *SWITCHES], default="clearing",
+                        help="what the on arm turns on: clearing old tool output (the default), sending the "
+                             "system prompt as the conversation's opening message (instructions), letting "
+                             "scripts read and search files (files), or outlines of source files (outline)")
     parser.add_argument("--wait", type=int, default=0, help="seconds of rest before each prompt")
     parser.add_argument("--limit", type=int, default=900, help="seconds a prompt may take")
     parser.add_argument("--prices", help="IN,WRITE,READ,OUT in dollars per million tokens")

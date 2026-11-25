@@ -202,6 +202,8 @@ pub enum Plan {
         base: PathBuf,
         /// What the search leaves out, set by [`Plan::sealing`].
         skip: Vec<PathBuf>,
+        /// The most files it lists; [`Plan::for_script`] raises it.
+        most: usize,
     },
     /// Searches files' contents.
     Grep {
@@ -218,6 +220,9 @@ pub enum Plan {
         /// The rules that say which files it may read, set by
         /// [`Plan::guarded`]; none reads them all.
         rules: Option<Vec<(String, Vec<Rule>)>>,
+        /// The most files or lines it lists; [`Plan::for_script`] raises
+        /// it.
+        most: usize,
     },
     /// Keeps a note for later sessions.
     Remember {
@@ -275,6 +280,7 @@ fn search_call(name: &str, pattern: String, input: &Map<String, Value>, cwd: &Pa
             pattern,
             base,
             skip: Vec::new(),
+            most: search::MAX_FILES,
         };
     }
     Plan::Grep {
@@ -282,6 +288,7 @@ fn search_call(name: &str, pattern: String, input: &Map<String, Value>, cwd: &Pa
         base,
         skip: Vec::new(),
         rules: None,
+        most: search::MAX_FILES,
         include: input
             .get("include")
             .and_then(Value::as_str)
@@ -379,6 +386,13 @@ const READ_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const RESULT_BYTES: usize = 32 * 1024;
 /// The default command timeout.
 pub(crate) const SHELL_TIMEOUT_MS: u64 = 120_000;
+
+/// The most files or lines a search lists for a script.
+///
+/// A script filters what it finds and returns little of it, so it may see
+/// far more than the hundred a model reads at once; this still keeps a
+/// search of everything from filling the script's memory.
+const SCRIPT_MOST: usize = 5_000;
 
 impl Plan {
     /// Checks a call to tool `name` with `input`, in project folder `cwd`.
@@ -673,6 +687,16 @@ impl Plan {
         })
     }
 
+    /// A search that lists as much as a script may see; any other call,
+    /// unchanged.
+    #[must_use]
+    pub fn for_script(mut self) -> Self {
+        if let Self::Glob { most, .. } | Self::Grep { most, .. } = &mut self {
+            *most = SCRIPT_MOST;
+        }
+        self
+    }
+
     /// A content search that reads only the files `rules` let be read
     /// without asking; any other call, unchanged.
     ///
@@ -813,7 +837,8 @@ impl Plan {
                 pattern,
                 base,
                 skip,
-            } => search::glob(&pattern, &base, &cwd, &skip),
+                most,
+            } => search::glob(&pattern, &base, &cwd, &skip, most),
             Self::Grep {
                 pattern,
                 base,
@@ -821,6 +846,7 @@ impl Plan {
                 files_only,
                 skip,
                 rules,
+                most,
             } => {
                 let layers: Option<Vec<(&str, &[Rule])>> = rules.as_ref().map(|rules| {
                     rules
@@ -840,6 +866,7 @@ impl Plan {
                     pattern: &pattern,
                     include: include.as_deref(),
                     files_only,
+                    most,
                 };
                 search::grep(wanted, &base, &cwd, &skip, guard)
             }
@@ -1236,7 +1263,8 @@ mod tests {
                     pattern,
                     base,
                     skip,
-                } => search::glob(pattern, base, &project, skip),
+                    most,
+                } => search::glob(pattern, base, &project, skip, *most),
                 Plan::Grep {
                     pattern,
                     base,
@@ -1247,6 +1275,7 @@ mod tests {
                         pattern,
                         include: None,
                         files_only: false,
+                        most: search::MAX_FILES,
                     };
                     search::grep(wanted, base, &project, skip, None)
                 }

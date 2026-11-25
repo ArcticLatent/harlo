@@ -62,6 +62,9 @@ pub struct Turn {
     pub jobs: Option<std::sync::Arc<dyn crate::jobs::Jobs>>,
     /// The tools Code Mode scripts can call; none leaves `execute` out.
     pub code: Option<std::sync::Arc<dyn crate::codemode::Catalog>>,
+    /// Whether scripts may read and search the project's files, where
+    /// the rules allow it without asking.
+    pub script_files: bool,
     /// Where web searches go; none leaves `websearch` out.
     pub search: Option<std::sync::Arc<dyn crate::web::Searcher>>,
     /// Where subagents start; none offers no subagent tool.
@@ -363,7 +366,10 @@ fn all(turn: &Turn) -> Vec<Value> {
     }
     definitions.extend(crate::web::definitions(turn.search.is_some()));
     if let Some(catalog) = &turn.code {
-        let namespaces = catalog.namespaces();
+        let mut namespaces = catalog.namespaces();
+        if turn.script_files {
+            namespaces.insert(0, crate::script_files::namespace());
+        }
         if !namespaces.is_empty() {
             definitions.push(crate::codemode::definition(&namespaces));
         }
@@ -985,6 +991,26 @@ enum Called {
 /// How long a Code Mode script may run.
 const SCRIPT_LIMIT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Runs Code Mode script `code` for the call `at`, with the project's
+/// files among its tools when the turn has them on.
+async fn run_script(
+    turn: &Turn,
+    catalog: &dyn crate::codemode::Catalog,
+    code: &str,
+    at: CallOf<'_>,
+    stop: &CancellationToken,
+) -> Result<tools::Output, String> {
+    if !turn.script_files {
+        return execute(catalog, code, at.message, at.call, stop).await;
+    }
+    let with_files = crate::script_files::WithFiles {
+        inner: catalog,
+        turn,
+        stop,
+    };
+    execute(&with_files, code, at.message, at.call, stop).await
+}
+
 /// Runs Code Mode script `code` for call `call` of step `message`.
 async fn execute(
     catalog: &dyn crate::codemode::Catalog,
@@ -1446,7 +1472,8 @@ async fn run_plan(
         }
         (Plan::Execute { code }, _) if turn.code.is_some() => {
             let catalog = turn.code.as_ref().ok_or_else(String::new)?;
-            execute(catalog.as_ref(), &code, message, call, stop).await
+            let at = CallOf { message, call };
+            run_script(turn, catalog.as_ref(), &code, at, stop).await
         }
         (Plan::Subagent { request }, _) => match &turn.subagents {
             Some(subagents) => subagents

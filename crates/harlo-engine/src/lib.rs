@@ -34,6 +34,7 @@ mod messages;
 pub mod question;
 mod responses;
 mod rules;
+mod script_files;
 pub mod skills;
 pub mod snapshot;
 pub mod stale;

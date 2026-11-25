@@ -1103,6 +1103,7 @@ impl Server {
                 session: session.id.clone(),
             })),
             subagent_agents: folder.subagents(),
+            script_files: folder.config.script_files,
             search: self.searcher(&session.id, &session.location.directory),
             code: Some(Arc::new(crate::code::ServerCatalog {
                 server: Arc::clone(self),
