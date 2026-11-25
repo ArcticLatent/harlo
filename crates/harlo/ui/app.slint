@@ -50,6 +50,15 @@ export component AppWindow inherits Window {
     /// dark.
     out property <bool> system-dark: Palette.color-scheme != ColorScheme.light;
 
+    // The clock the spinner and the breathing dots keep time with.
+    Timer {
+        interval: Motion.beat-every;
+        running: Motion.speed > 0;
+        triggered => {
+            Motion.beat += 1;
+        }
+    }
+
     // A digit of the code font, for diffs' number columns: they fit their
     // numbers in whichever font and size is chosen.
     digits := Text {

@@ -301,7 +301,7 @@ export component Dot inherits Rectangle {
 /// breathe together.
 export component Breathing inherits Rectangle {
     opacity: Motion.breath-low + (1 - Motion.breath-low)
-        * (0.5 - 0.5 * cos(animation-tick() / Motion.breath * 360deg));
+        * (0.5 - 0.5 * cos(Motion.beat-ms / (Motion.breath / 1ms) * 360deg));
     @children
 }
 
@@ -321,7 +321,7 @@ export component Spinner inherits Rectangle {
         width: root.size;
         height: root.size;
         transform-rotation: Motion.speed > 0
-            ? Math.mod(animation-tick() / 1ms, root.turn-ms) / root.turn-ms * 360deg : 0deg;
+            ? Math.mod(Motion.beat-ms, root.turn-ms) / root.turn-ms * 360deg : 0deg;
         Icon {
             text: Icons.loader;
             font-size: root.size;

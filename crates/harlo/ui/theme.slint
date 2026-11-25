@@ -192,6 +192,16 @@ export global Motion {
     /// The dimmest a breathing indicator gets; with motion off it stays
     /// lit.
     out property <float> breath-low: root.speed > 0 ? 0.35 : 1;
+    /// How often the signs of work in progress (the spinner, a breathing
+    /// dot) move on: twenty times a second, however fast the screen is.
+    /// Turning with every frame would redraw the window at the screen's
+    /// rate for as long as anything works.
+    out property <duration> beat-every: 45ms;
+    /// How many beats have passed. The window counts them, so every sign
+    /// keeps the same time.
+    in-out property <int> beat;
+    /// The time the beats have counted, in milliseconds.
+    out property <float> beat-ms: root.beat * (root.beat-every / 1ms);
 }
 
 /// Motion's easing curves. They're kept apart from [`Motion`], which Rust
