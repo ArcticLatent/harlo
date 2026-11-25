@@ -1,6 +1,7 @@
-//! Scripts and the project's files: with `experimental.scriptFiles` on, a
-//! script reads and searches files where the rules allow it without
-//! asking, and only what it returns enters the conversation.
+//! Scripts and the project's files: a script reads and searches files
+//! where the rules allow it without asking, and only what it returns
+//! enters the conversation, unless `experimental.scriptFiles` is turned
+//! off.
 
 // Rust guideline compliant 2026-10-09
 
@@ -88,9 +89,6 @@ fn execute_description(sandbox: &Sandbox) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_reads_and_searches_what_the_rules_allow() {
     let sandbox = Sandbox::start().await;
-    configure(&sandbox, |config| {
-        config["experimental"]["scriptFiles"] = true.into();
-    });
     let project = sandbox.project();
     std::fs::create_dir_all(project.join("notes")).expect("folder");
     for (name, text) in [
@@ -130,8 +128,11 @@ async fn a_script_reads_and_searches_what_the_rules_allow() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scripts_reach_no_files_unless_it_is_turned_on() {
+async fn scripts_reach_no_files_when_it_is_turned_off() {
     let sandbox = Sandbox::start().await;
+    configure(&sandbox, |config| {
+        config["experimental"]["scriptFiles"] = false.into();
+    });
     std::fs::write(sandbox.project().join("a.txt"), "alpha\n").expect("file");
     let client = sandbox.client();
     let code = r#"return await tools.files.read({path: "a.txt"});"#;

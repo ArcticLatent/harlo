@@ -225,7 +225,7 @@ pub struct Config {
     /// (`experimental.cachedInstructions`, off unless turned on).
     pub cached_instructions: bool,
     /// Whether scripts may read and search the project's files
-    /// (`experimental.scriptFiles`, off unless turned on).
+    /// (`experimental.scriptFiles`, on unless turned off).
     pub script_files: bool,
     /// Whether `read` can list what a source file declares instead of its
     /// text (`experimental.outline`, on unless turned off: over four jobs
@@ -337,7 +337,7 @@ impl Config {
             cached_instructions,
             script_files: value["experimental"]["scriptFiles"]
                 .as_bool()
-                .unwrap_or(false),
+                .unwrap_or(true),
             outline: value["experimental"]["outline"].as_bool().unwrap_or(true),
             model: model_ref(&value["model"]),
             small_model: model_ref(&value["small_model"]),
@@ -756,9 +756,13 @@ mod tests {
         let empty = tempfile::tempdir().expect("dir");
         let none = Config::load(empty.path()).expect("loaded");
         assert_eq!(none, Config::from_value(&Value::Null, None));
-        assert!(none.outline && !none.script_files && none.model.is_none());
-        let off = Config::parse(r#"{ "experimental": { "outline": false } }"#, None);
-        assert!(!off.expect("parsed").outline);
+        assert!(none.outline && none.script_files && none.model.is_none());
+        let off = Config::parse(
+            r#"{ "experimental": { "outline": false, "scriptFiles": false } }"#,
+            None,
+        )
+        .expect("parsed");
+        assert!(!off.outline && !off.script_files);
     }
 
     #[test]
