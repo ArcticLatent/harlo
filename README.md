@@ -27,6 +27,13 @@ Written in Rust and drawn with Slint, not Electron.</p>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-c6a0f6?style=flat-square"></a>
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/desktop-hero-2x.webp">
+    <img src="site/assets/desktop-hero-light-2x.webp" width="900" alt="Harlo with a session that fixed a login redirect: the agent's answer in the middle, its two changed files in the Changes panel, and the other sessions in the sidebar, one still working and one waiting for a yes.">
+  </picture>
+</p>
+
 ## Why Harlo
 
 Many agent apps are a web page in an Electron window. Harlo is a desktop app:
@@ -42,12 +49,23 @@ Many agent apps are a web page in an Electron window. Harlo is a desktop app:
 |---|---|
 | **Your models** | Anthropic, OpenAI (an API key, or your ChatGPT plan), OpenRouter, OpenCode Go, Vercel's AI Gateway, Cohere and any OpenAI-compatible server. Settings → Providers puts the popular ones up front, checks keys as you add them, and signs in to OpenRouter and ChatGPT in the browser. |
 | **Local models** | Settings → Local models installs Ollama or llama.cpp, runs their servers, and gets models that fit your computer. |
-| **Agents that do the work** | They read and edit files, run commands and background jobs, search the web, use MCP servers (OAuth sign-ins included), skills, commands and plugins, run subagents, keep a todo list, and carry notes from one session to the next. |
+| **Agents that do the work** | They read and edit files, run commands and background jobs, search the web, use MCP servers (OAuth sign-ins included), skills, commands and plugins, run subagents, and carry notes from one session to the next. |
 | **A native chat** | Your prompts and each agent's turn, real lists and tables, code coloured by language, pictures with a viewer, and jumps between earlier prompts. Long conversations are summarized as they grow. |
-| **You stay in charge** | Approvals with permission modes, saved approvals, and questions the agent asks you. Undo a turn, one file at a time. Fork, move, archive, export and import sessions; side questions with `/btw`, goals with `/goal`, shell commands with `!`. |
+| **You stay in charge** | Approvals with permission modes, saved approvals, and questions the agent asks you. The commands an agent runs are confined to the project by the kernel, and can't read your SSH keys, your sign-ins or Harlo's own files. Undo a turn, one file at a time. Fork, move, archive, export and import sessions; side questions with `/btw`, goals with `/goal`, shell commands with `!`. |
 | **Changes and Git** | The Changes panel shows only the lines that changed, takes comments on diff lines and commits (✦ writes the message). Settings → Git signs in to GitHub, GitLab and Forgejo. |
 | **Your other machines** | Harlo follows a Harlo server on another computer over SSH: a GPU box, a build server, a NAS. |
 | **And** | A terminal, an editor, notes, schedules that send prompts or run commands, dictation recognised on your computer, desktop notifications with a sound each, and light and dark Base16 themes with contrast, fonts, text sizes, chat width and motion of your choosing. |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/desktop-approval.webp">
+    <img src="site/assets/desktop-approval-light.webp" width="49%" alt="A session where the agent changed two files, each shown with its diff, and now asks to run a command: Allow once, Always allow or Deny.">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/desktop-diff.webp">
+    <img src="site/assets/desktop-diff-light.webp" width="49%" alt="The Changes panel, maximized: the session's files on the left, and one file's changed lines on the right.">
+  </picture>
+</p>
 
 ### On your iPhone
 
@@ -93,7 +111,7 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit. A
 
 ## Configuration
 
-Settings covers most of it. Underneath, the server reads `~/.config/harlo/harlo.jsonc` (or `harlo.json`): the providers and their models, the default `model`, permission rules, `instructions`, `skills`, `commands`, `agents`, `mcp.servers` and `websearch`. A project adds its own `harlo.jsonc`, or one in its `.harlo/` folder, and the nearer file wins. Changes apply as soon as the file is saved.
+Settings covers most of it. Underneath, the server reads `~/.config/harlo/harlo.jsonc` (or `harlo.json`): the providers and their models, the default `model`, permission rules, `instructions`, `skills`, `commands`, `agents`, `mcp.servers` and `websearch`. A project adds its own `harlo.jsonc`, or one in its `.harlo/` folder, and the nearer file wins. Changes apply as soon as the file is saved. `"sandbox": false` lets agents' commands run unconfined; `"experimental": { "todo": true }` gives agents a todo list to keep, shown in the Todos panel.
 
 The first time the server starts, it looks for an earlier OpenCode setup. If there is one, it copies `~/.config/opencode/opencode.json`, `AGENTS.md`, commands, agents and skills into `~/.config/harlo`, once, and leaves the original untouched. Sessions made on OpenCode come over from Settings → Server.
 

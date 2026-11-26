@@ -75,23 +75,23 @@ sudo zypper install ./harlo-*.rpm</code></pre>
 
   <h2>After installing</h2>
   <ul>
-    <li>On its first start, Harlo's setup guide signs in the Harlo agent and helps you install and sign in Claude Code. <code>harlo --setup</code> opens it again.</li>
+    <li>On its first start, Harlo's setup guide takes you through the server, your models, Git and the theme. <code>harlo --setup</code> opens it again.</li>
     <li>Harlo checks for new versions and updates itself with your system's package manager (Settings → General).</li>
     <li>Dictation's speech model (148 MB) downloads the first time you use the microphone.</li>
-    <li>The iPhone app is coming soon to the App Store (it's in review). Once it's there, get it, then in Harlo on your computer: Settings → Devices → Pair a device, and scan the code.</li>
+    <li>The iPhone app is coming soon to the App Store (it's in review). Once it's there, get it, then in Harlo on your computer: Settings → Phone → Show a code, and scan the code.</li>
   </ul>
 
   <h2>What it needs</h2>
   <table>
     <tr><th>System</th><td>Linux, x86-64 with AVX2 (most PCs since 2013), glibc 2.35 or newer</td></tr>
-    <tr><th>Included</th><td>Its own Qt 6, so it runs where the system's Qt is older</td></tr>
-    <tr><th>Uses</th><td><code>git</code>; optionally <code>ssh</code> (other machines), <code>notify-send</code> (notifications)</td></tr>
+    <tr><th>Included</th><td>The window and the server that runs your agents; nothing else to install</td></tr>
+    <tr><th>Uses</th><td><code>git</code>; optionally <code>ssh</code> (other machines), <code>gh</code> or <code>glab</code> (signing git in)</td></tr>
     <tr><th>Checksums</th><td>Each release lists its files' SHA-256 sums in <code>SHA256SUMS</code></td></tr>
   </table>
 
   <h2>Other ways</h2>
   <ul>
-    <li><strong>From source:</strong> Rust 1.85+, Qt 6.9+, cmake and clang, then <code>cargo run -p harlo-app --release</code>. See the <a href="https://github.com/ArcticLatent/harlo#build-from-source">README</a>.</li>
+    <li><strong>From source:</strong> Rust 1.92+, cmake and clang, then <code>cargo build --release -p harlo -p harlo-server</code>. See the <a href="https://github.com/ArcticLatent/harlo#build-from-source">README</a>.</li>
   </ul>
 </div>
 </main>

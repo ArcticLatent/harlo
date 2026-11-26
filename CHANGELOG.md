@@ -25,15 +25,17 @@ Settings → Server imports its sessions.
   prompts. Long conversations are summarized as they grow.
 - Agents read and edit files, run commands and background jobs, search the
   web, use MCP servers (OAuth sign-ins included), skills and commands, run
-  subagents, keep a todo list, and carry notes from one session to the next.
+  subagents, and carry notes from one session to the next.
 - Plugins: a git repository adds skills, commands, agents, MCP servers and
   tools written in JavaScript. Settings → Extensions → Plugins adds one by
   its address or from the published list; what would act for you waits for
   your yes. docs/plugins.md has how to write one.
 - Approvals with permission modes, saved approvals, and questions the agent
-  asks; undo a turn, one file at a time; fork, move, archive, export and
-  import sessions; side questions with /btw, goals with /goal, and shell
-  commands with !.
+  asks. The commands an agent runs are confined to the project by the kernel
+  and can't read your SSH keys, your sign-ins or Harlo's own files.
+- Undo a turn, one file at a time; fork, move, archive, export and import
+  sessions; side questions with /btw, goals with /goal, and shell commands
+  with !.
 - The Changes panel shows only the lines that changed, takes comments on
   diff lines, and commits (✦ writes the message); Settings → Git signs in
   to GitHub, GitLab and Forgejo.
