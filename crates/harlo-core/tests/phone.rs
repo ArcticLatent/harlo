@@ -275,6 +275,20 @@ async fn a_phone_starts_and_renames_sessions() {
     // A new session from the phone, in the first project, with a first message.
     let choices = p.call(json!({ "op": "projects" })).await;
     assert_eq!(choices["projects"][0]["name"], "project", "{choices}");
+    // Each model it can start with says whose it is, for the phone's logo.
+    let offered: Vec<&Value> = choices["agentModels"]
+        .as_object()
+        .into_iter()
+        .flat_map(|agents| agents.values())
+        .filter_map(Value::as_array)
+        .flatten()
+        .collect();
+    assert!(!offered.is_empty(), "{choices}");
+    for model in offered {
+        let provider = model["id"].as_str().and_then(|id| id.split('/').next());
+        let logo = provider.map(|p| harlo_core::makers::logo(p).unwrap_or(p));
+        assert_eq!(model["maker"].as_str(), logo, "{model}");
+    }
     let started = p
         .call(json!({ "op": "new", "project": 0, "agent": "", "model": "", "text": "say started on the phone" }))
         .await;

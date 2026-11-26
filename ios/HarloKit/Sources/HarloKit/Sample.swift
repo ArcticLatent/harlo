@@ -29,11 +29,11 @@ extension HarloModel {
             s("live:3", "Why does the relay drop idle phones?", "harlo", "harlo", "unread", 3600, model: "GLM 5.3", maker: "zai-coding-plan"),
             s("/s/4", "Release notes for 0.4", "harlo", "harlo", "", 86400 * 2, model: "Kimi K3.1 Pro", maker: "kimi-for-coding"),
             s("/s/5", "Tidy the README", "website", "harlo", "", 86400 * 5, model: "GLM 5.3", maker: "zai-coding-plan"),
-            s("/s/6", "Benchmark the markdown renderer", "", "harlo", "", 86400 * 12, host: "nas"),
-            s("/s/7", "Split the relay's config", "harlo", "harlo", "", 86400 * 3, branch: "relay-config", settled: "Merged"),
+            s("/s/6", "Benchmark the markdown renderer", "", "harlo", "", 86400 * 12, host: "nas", model: "GPT-5", maker: "openai"),
+            s("/s/7", "Split the relay's config", "harlo", "harlo", "", 86400 * 3, branch: "relay-config", settled: "Merged", model: "Sonnet 5", maker: "anthropic"),
         ]
         if busier {
-            m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "harlo", "input", 600, requests: [command]), at: 2)
+            m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "harlo", "input", 600, requests: [command], model: "Gemini 3 Pro", maker: "google"), at: 2)
         }
         m.limits = sampleLimits(now: now)
         return m

@@ -1,7 +1,8 @@
 import HarloKit
 import SwiftUI
 
-/// A new session's agent tile and model name; its menu picks either.
+/// A new session's model, with its provider's tile; its menu picks the
+/// agent or the model.
 /// (Used before first, then every model the agent offers; another
 /// machine's agent picks its own.)
 struct AgentModelMenu: View {
@@ -40,7 +41,7 @@ struct AgentModelMenu: View {
             .pickerStyle(.menu)
         } label: {
             HStack(spacing: 6) {
-                AgentTile(harness: agent, size: 20)
+                AgentTile(maker: c.maker(of: modelId), size: 20)
                 Text(modelName)
                     .scaledFont(13.5, .medium)
                     .lineLimit(1)

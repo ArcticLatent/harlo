@@ -1012,10 +1012,40 @@ final class MachinesTests: XCTestCase {
         XCTAssertEqual(s.maker, "zai-coding-plan")
         XCTAssertEqual(SessionSummary(["key": "old"]).maker, "", "from a harlo that doesn't say")
         XCTAssertEqual(SessionInfo(["modelId": "opencode-go/claude-haiku-5-5", "maker": "anthropic"]).maker, "anthropic")
-        // Claude Code on Claude: Claude's own mark; any other maker, or
-        // another agent: the maker, with the agent as a tag.
-        XCTAssertTrue(Palette.modelFirst(harness: "harlo", maker: "anthropic"))
-        XCTAssertFalse(Palette.modelFirst(harness: "harlo", maker: ""))
+    }
+
+    func testProvidersHaveTheirBrandTiles() throws {
+        let colors: JSON = ["surface": ["background": "#ff101010", "foreground": "#ffeeeeee"], "primary": ["base": "#ffc6a0f6"]]
+        let p = try XCTUnwrap(Palette(colors, light: false))
+        let plain = p.makerTile("")
+        XCTAssertNotNil(plain.ink)
+        XCTAssertEqual(p.makerTile("a provider nobody knows").fill, plain.fill)
+        for maker in ["anthropic", "openai", "google", "zai-coding-plan", "kimi-for-coding", "openrouter", "deepseek", "mistral", "xai"] {
+            XCTAssertNotEqual(p.makerTile(maker).fill, plain.fill, maker)
+        }
+        XCTAssertEqual(p.makerTile("openai").fill, RGBA(0, 0, 0))
+        XCTAssertEqual(p.makerTile("deepseek").fill, RGBA(hex: "#4D6BFE"))
+        // A logo in its own colours isn't tinted.
+        XCTAssertNil(p.makerTile("google").ink)
+        XCTAssertNil(p.makerTile("kimi-for-coding").ink)
+    }
+
+    func testANewSessionsModelHasItsMaker() {
+        let c = NewSessionChoices(["agentModels": ["harlo": [["id": "opencode-go/glm-5.3", "name": "GLM 5.3", "maker": "opencode"],
+                                                              ["id": "openai/gpt-5", "name": "GPT-5"]]]])
+        XCTAssertEqual(c.maker(of: "opencode-go/glm-5.3"), "opencode")
+        // From a harlo that doesn't say: the provider's own id.
+        XCTAssertEqual(c.maker(of: "openai/gpt-5"), "openai")
+        XCTAssertEqual(c.maker(of: ""), "")
+    }
+
+    func testAWidgetRowKeepsItsMaker() throws {
+        let item = WidgetSnapshot.Item(key: "k", title: "T", harness: "harlo", maker: "openai", status: "busy", modified: 1)
+        let back = try JSONDecoder().decode(WidgetSnapshot.Item.self, from: JSONEncoder().encode(item))
+        XCTAssertEqual(back, item)
+        // Saved by an earlier version of the app.
+        let old = Data(#"{"key":"k","title":"T","harness":"harlo","status":"busy","modified":1}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(WidgetSnapshot.Item.self, from: old).maker, "")
     }
 }
 

@@ -47,7 +47,7 @@ fn every_logo_is_in_the_window_and_in_the_phone_app() {
             .find(&file)
             .unwrap_or_else(|| panic!("the sidebar lists {file} out of order, or not at all"));
         from += at + file.len();
-        let asset = format!("ios/Harlo/Harlo/Assets.xcassets/Maker-{name}.imageset");
+        let asset = format!("ios/Harlo/Shared/Shared.xcassets/Maker-{name}.imageset");
         assert!(root.join(&asset).is_dir(), "{asset} is missing");
     }
 }

@@ -97,7 +97,7 @@ struct SessionCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            AgentTile(harness: session.harness, maker: session.maker, size: 46)
+            AgentTile(maker: session.maker, size: 46)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if session.pinned {

@@ -257,7 +257,7 @@ fn status(server: &Server, id: &str) -> &'static str {
 
 /// The logo the phone shows for a session's model, by the server's
 /// provider `id`: the phone app's images are named as Harlo's logos are.
-/// A provider without one goes as it is, and the phone shows its own mark.
+/// A provider without one goes as it is, and the phone shows a plain tile.
 fn maker(id: &str) -> String {
     crate::makers::logo(id).unwrap_or(id).to_owned()
 }
@@ -1144,7 +1144,10 @@ async fn choices(server: &Server) -> Value {
     let models: Vec<Value> = catalog
         .models
         .iter()
-        .map(|m| json!({ "id": format!("{}/{}", m.provider_id, m.id), "name": m.name }))
+        .map(|m| {
+            json!({ "id": format!("{}/{}", m.provider_id, m.id), "name": m.name,
+                    "maker": maker(&m.provider_id) })
+        })
         .collect();
     let agent_models: serde_json::Map<String, Value> = catalog
         .primary_agents()

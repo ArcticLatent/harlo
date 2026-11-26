@@ -9,18 +9,32 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var key: String
         public var title: String
         public var harness: String
+        /// Who made its model: a logo's id ("" not known).
+        public var maker: String
         /// "busy", "input" (needs you), "unread" (done), "failed", or "".
         public var status: String
         /// Last active: unix seconds.
         public var modified: Int64
         public var id: String { key }
 
-        public init(key: String, title: String, harness: String, status: String, modified: Int64) {
+        public init(key: String, title: String, harness: String, maker: String = "", status: String, modified: Int64) {
             self.key = key
             self.title = title
             self.harness = harness
+            self.maker = maker
             self.status = status
             self.modified = modified
+        }
+
+        /// (A snapshot saved by an earlier version has no maker.)
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            key = try c.decode(String.self, forKey: .key)
+            title = try c.decode(String.self, forKey: .title)
+            harness = try c.decode(String.self, forKey: .harness)
+            maker = try c.decodeIfPresent(String.self, forKey: .maker) ?? ""
+            status = try c.decode(String.self, forKey: .status)
+            modified = try c.decode(Int64.self, forKey: .modified)
         }
     }
 
@@ -57,7 +71,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         let listed = sessions.filter { $0.settled.isEmpty || ["busy", "starting", "input"].contains($0.status) || !$0.requests.isEmpty }
         let items = listed.map { s -> Item in
             let status = ["busy", "starting"].contains(s.status) ? "busy" : s.status == "input" || !s.requests.isEmpty ? "input" : unread(s) ? "unread" : ""
-            return Item(key: s.key, title: s.title.isEmpty ? "New session" : s.title, harness: s.harness, status: status, modified: s.modified)
+            return Item(key: s.key, title: s.title.isEmpty ? "New session" : s.title, harness: s.harness, maker: s.maker, status: status, modified: s.modified)
         }
         let rank = ["input": 0, "busy": 1, "unread": 2, "failed": 2]
         let ordered = items.enumerated().sorted { a, b in
@@ -117,12 +131,12 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public static func sample(now: Date = Date.now) -> WidgetSnapshot {
         let t = Int64(now.timeIntervalSince1970)
         return WidgetSnapshot(host: "archlinux", items: [
-            Item(key: "s1", title: "Fix the session list", harness: "harlo", status: "busy", modified: t - 30),
-            Item(key: "s2", title: "Relay load test", harness: "harlo", status: "busy", modified: t - 90),
-            Item(key: "s3", title: "Phone photos", harness: "harlo", status: "input", modified: t - 300),
-            Item(key: "s4", title: "Release notes", harness: "harlo", status: "unread", modified: t - 1200),
-            Item(key: "s5", title: "Tidy the README", harness: "harlo", status: "", modified: t - 7200),
-            Item(key: "s6", title: "Benchmark markdown", harness: "harlo", status: "", modified: t - 86400),
+            Item(key: "s1", title: "Fix the session list", harness: "harlo", maker: "openai", status: "busy", modified: t - 30),
+            Item(key: "s2", title: "Relay load test", harness: "harlo", maker: "anthropic", status: "busy", modified: t - 90),
+            Item(key: "s3", title: "Phone photos", harness: "harlo", maker: "google", status: "input", modified: t - 300),
+            Item(key: "s4", title: "Release notes", harness: "harlo", maker: "kimi-for-coding", status: "unread", modified: t - 1200),
+            Item(key: "s5", title: "Tidy the README", harness: "harlo", maker: "zai-coding-plan", status: "", modified: t - 7200),
+            Item(key: "s6", title: "Benchmark markdown", harness: "harlo", maker: "deepseek", status: "", modified: t - 86400),
         ], working: 2, waiting: 1, total: 6, updated: now)
     }
 }

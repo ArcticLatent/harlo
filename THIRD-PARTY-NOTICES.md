@@ -36,6 +36,20 @@ The icon font is embedded through the `lucide-icons` crate. It is licensed under
 
 `crates/harlo/ui/images/providers/*.svg`. These are copied from OpenChamber and licensed under the MIT License; the full text is in `crates/harlo/ui/images/providers/OPENCHAMBER-LICENSE`. The logos are trademarks of their owners and are used only to show which provider a model comes from.
 
+## Model provider logos in the iPhone app
+
+`ios/Harlo/Shared/Shared.xcassets/Maker-*.imageset`, written by `tools/phone-provider-icons.py` from [Lobe Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg` 1.106.0); the tile colours behind them follow its avatars. The few providers Lobe Icons doesn't carry keep their earlier logos, from the set described above. Lobe Icons is licensed under the MIT License:
+
+> Copyright (c) 2023 LobeHub
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The logos are trademarks of their owners and are used only to show which provider a model comes from.
+
 ## Colour themes
 
 `crates/harlo-core/themes/tinted.json`. These colour schemes are converted from Tinted Theming's Base16 collection (https://github.com/tinted-theming/schemes) by `tools/themes-update.sh`, at the commit in `crates/harlo-core/themes/TINTED_COMMIT`. Each scheme credits its own author. They are licensed under the MIT License; the full text is in `crates/harlo-core/themes/TINTED-LICENSE`, and Settings → About shows it.

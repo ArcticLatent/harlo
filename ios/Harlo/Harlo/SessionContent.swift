@@ -185,11 +185,11 @@ struct SessionContent: View {
                     Button("Back to the session", systemImage: "chevron.backward", action: model.back)
                 }
             }
-            // The session's tile (its model's maker, the agent as a tag), its
+            // The session's tile (its model's provider), its
             // name, and the agent · project · branch.
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 10) {
-                    AgentTile(harness: session.harness, maker: session.info.maker, size: 34)
+                    AgentTile(maker: session.info.maker, size: 34)
                         .overlay(alignment: .bottomTrailing) {
                             if session.busy || !session.requests.isEmpty {
                                 StatusDot(status: session.busy ? "busy" : "input")

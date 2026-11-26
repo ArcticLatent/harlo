@@ -100,7 +100,7 @@ struct SessionsWidgetView: View {
 
     func cell(_ item: WidgetSnapshot.Item, tile: CGFloat) -> some View {
         HStack(spacing: 10) {
-            AgentMark(harness: item.harness, size: tile, palette: p)
+            ProviderTile(maker: item.maker, size: tile, palette: p)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
                     .font(.system(size: tile > 32 ? 14.5 : 13.5, weight: .semibold))

@@ -163,6 +163,9 @@ public struct NewSessionChoices: Equatable, Sendable {
     /// Every model each agent offers (as harlo's Settings → Agents reads
     /// them): `provider/model` and its name.
     public var agentModels: [String: [(id: String, name: String)]]
+    /// Who made each of those models: `provider/model` to a logo's id
+    /// (none from a harlo that doesn't say).
+    public var makers: [String: String]
     /// harlo's other machines (empty from a harlo before 1.2).
     public var hosts: [RemoteMachine]
 
@@ -175,6 +178,19 @@ public struct NewSessionChoices: Equatable, Sendable {
         models = (v["models"].array ?? []).map { ($0["harness"].text, $0["model"].text) }
         approvals = Project.modes(v["approvals"])
         agentModels = (v["agentModels"].object ?? [:]).mapValues { list in (list.array ?? []).map { (id: $0["id"].text, name: $0["name"].text) } }
+        var makers: [String: String] = [:]
+        for list in (v["agentModels"].object ?? [:]).values {
+            for model in list.array ?? [] where !model["maker"].text.isEmpty {
+                makers[model["id"].text] = model["maker"].text
+            }
+        }
+        self.makers = makers
+    }
+
+    /// The logo for model `id` (`provider/model`): as harlo names it, else
+    /// its provider's own id ("" for no model).
+    public func maker(of id: String) -> String {
+        makers[id] ?? (id.contains("/") ? String(id.prefix { $0 != "/" }) : "")
     }
 
     /// The shield's mode `agent` starts in, in `project` ("" none).
@@ -269,6 +285,7 @@ public struct NewSessionChoices: Equatable, Sendable {
         a.projects == b.projects && a.templates == b.templates && a.agents == b.agents && a.defaultAgent == b.defaultAgent
             && a.models.map { "\($0.agent)\t\($0.model)" } == b.models.map { "\($0.agent)\t\($0.model)" }
             && a.agentModels.mapValues { $0.map(\.id) } == b.agentModels.mapValues { $0.map(\.id) }
+            && a.makers == b.makers
     }
 }
 
@@ -692,33 +709,40 @@ public struct Palette: Codable, Equatable, Sendable {
                 isLight ? base.mix(RGBA(0, 0, 0), 0.25) : base.mix(RGBA(1, 1, 1), 0.15))
     }
 
-    /// An agent's tile (the dashboard, a reply's head): its colour, solid,
-    /// and a dark mark on it.
-    public func agentTile(_ id: String) -> (fill: RGBA, ink: RGBA) {
-        let base = RGBA(0.733, 0.745, 0.776)
-        return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))
-    }
-
-    /// A model maker's tile (by its logo's id), as the desktop tints it; a
-    /// quiet grey for makers in black and white.
-    public func makerTile(_ id: String) -> (fill: RGBA, ink: RGBA) {
-        let base: RGBA
+    /// A model provider's tile (by its logo's id): the brand's colour behind
+    /// the logo and the logo's colour on it, as Lobe Icons draws its
+    /// avatars; no colour for a logo that brings its own. A quiet grey for
+    /// a provider with no brand colour here, and for one not known.
+    public func makerTile(_ id: String) -> (fill: RGBA, ink: RGBA?) {
+        let black = RGBA(0, 0, 0)
+        let white = RGBA(1, 1, 1)
         switch id {
-        case "anthropic": base = RGBA(0.969, 0.639, 0.471)
-        case "zai-coding-plan": base = RGBA(0.431, 0.545, 1)
-        case "google": base = RGBA(0.357, 0.608, 0.941)
-        case "deepseek": base = RGBA(0.365, 0.482, 1)
-        case "minimax-coding-plan": base = RGBA(0.941, 0.376, 0.478)
-        case "mistral": base = RGBA(0.98, 0.478, 0.184)
-        default: base = RGBA(0.733, 0.745, 0.776)
+        case "anthropic": return (Self.rgb(0xF1F0E8), Self.rgb(0x141413))
+        case "claude-code": return (Self.rgb(0x09090B), Self.rgb(0xD97757))
+        case "openai", "zai-coding-plan", "opencode", "github-copilot", "cursor", "command-code", "wafer.ai":
+            return (black, white)
+        case "openrouter": return (black, Self.rgb(0xC8FF00))
+        case "kimi-for-coding": return (black, nil)
+        case "google", "together", "bailian-coding-plan", "vllm", "llmapi", "llmapi-detailed": return (white, nil)
+        case "xai", "ollama": return (white, black)
+        case "zhipuai-coding-plan": return (Self.rgb(0x3859FF), white)
+        case "deepseek": return (Self.rgb(0x4D6BFE), white)
+        case "minimax-coding-plan", "minimax-cn-coding-plan": return (Self.rgb(0xF23F5D), white)
+        case "mistral": return (Self.rgb(0xFA520F), white)
+        case "groq": return (Self.rgb(0xF55036), white)
+        case "cerebras": return (Self.rgb(0xF15A29), white)
+        case "fireworks": return (Self.rgb(0x5019C5), white)
+        case "cline": return (Self.rgb(0x323B43), white)
+        case "lmstudio": return (Self.rgb(0x4338CA), white)
+        default:
+            let grey = RGBA(0.733, 0.745, 0.776)
+            return (isLight ? grey.mix(white, 0.2) : grey, RGBA(0.09, 0.075, 0.11))
         }
-        return (isLight ? base.mix(RGBA(1, 1, 1), 0.2) : base, RGBA(0.09, 0.075, 0.11))
     }
 
-    /// Whether a session's icon shows its model's maker (with the agent as a
-    /// tag): a maker is known.
-    public static func modelFirst(harness: String, maker: String) -> Bool {
-        !maker.isEmpty
+    /// A colour from its `0xRRGGBB` number.
+    private static func rgb(_ hex: UInt32) -> RGBA {
+        RGBA(Double((hex >> 16) & 0xFF) / 255, Double((hex >> 8) & 0xFF) / 255, Double(hex & 0xFF) / 255)
     }
 
     /// Text on a primary-coloured fill.

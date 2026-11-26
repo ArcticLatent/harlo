@@ -1,7 +1,7 @@
 import HarloKit
 import SwiftUI
 
-/// The model: its agent's tile and name; tap to pick another.
+/// The model: its provider's tile and its name; tap to pick another.
 struct ModelChip: View {
     @Environment(\.palette) private var p
     let session: OpenSession
@@ -12,7 +12,7 @@ struct ModelChip: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 6) {
-                AgentTile(harness: session.harness, size: 20)
+                AgentTile(maker: session.info.maker, size: 20)
                 Text(session.model.isEmpty ? "Model" : session.model)
                     .scaledFont(13.5, .medium)
                     .lineLimit(1)
