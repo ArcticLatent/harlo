@@ -123,7 +123,7 @@ pub enum Section {
     Agents,
     /// MCP servers and skills, each on a tab.
     Extensions,
-    /// Web search and Harlo's own tools.
+    /// Web search.
     Tools,
     /// Notes the agent keeps between sessions.
     Memory,
@@ -239,8 +239,6 @@ pub enum Setting {
     /// Whether the server allows automations, which schedules are: its
     /// config, not a preference.
     Automations,
-    /// [`Preferences::own_tools`].
-    OwnTools,
     /// [`Preferences::phone`].
     Phone,
     /// [`Preferences::phone_relay`].
@@ -257,7 +255,7 @@ pub enum Setting {
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 20] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -273,7 +271,6 @@ impl Setting {
         Self::QuietQuestions,
         Self::Snapshots,
         Self::Automations,
-        Self::OwnTools,
         Self::Phone,
         Self::PhoneRelay,
         Self::Notes,
@@ -927,10 +924,6 @@ impl App {
                 self.preferences.reopen_tabs = !self.preferences.reopen_tabs;
             }
             Setting::Glass => self.preferences.glass = !self.preferences.glass,
-            Setting::OwnTools => {
-                // Attached or detached after this update.
-                self.preferences.own_tools = !self.preferences.own_tools;
-            }
             // Phone access and the relay start or stop after this update.
             Setting::Phone => {
                 self.preferences.phone = !self.preferences.phone;
@@ -1024,7 +1017,6 @@ impl App {
             | Setting::KeepInTray
             | Setting::Snapshots
             | Setting::Automations
-            | Setting::OwnTools
             | Setting::Phone
             | Setting::PhoneRelay
             | Setting::Notes

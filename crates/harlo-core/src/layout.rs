@@ -91,9 +91,6 @@ pub struct Preferences {
     /// The Forgejo sign-in made here, as `host account`: Forgejo has no
     /// tool that says who is signed in.
     pub forgejo_account: Option<String>,
-    /// Whether Harlo offers its own tools to the server's agents while it's
-    /// open: finding and reading past sessions.
-    pub own_tools: bool,
     /// The Whisper model dictation uses, by name ("base" or "small").
     pub voice_model: String,
     /// The language dictation listens for, as Whisper's code, or "auto".
@@ -154,7 +151,6 @@ impl Default for Preferences {
             gitlab_host: String::new(),
             forgejo_host: String::new(),
             forgejo_account: None,
-            own_tools: true,
             voice_model: crate::voice::Model::Base.name().to_owned(),
             voice_language: "auto".to_owned(),
             voice_microphone: String::new(),

@@ -1278,6 +1278,7 @@ fn tool_icon(name: &str) -> Icon {
         "bash" | "shell" => Icon::Terminal,
         "todowrite" | "todoread" | "todo" => Icon::ListTodo,
         "webfetch" | "websearch" => Icon::Globe,
+        "search_sessions" => Icon::History,
         "task" => Icon::Bot,
         "skill" => Icon::Sparkles,
         "question" => Icon::CircleQuestionMark,

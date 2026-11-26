@@ -3,6 +3,10 @@
 //! decision is reversed in B; a later session gets only the replacement,
 //! and searching still finds the old conversation and says what replaced
 //! the old note. People can correct and forget notes; off, there are none.
+//!
+//! Earlier sessions are searched whether notes are on or off: by title
+//! and by what was said, one read from its start; another project's only
+//! when asked to look everywhere, which asks the person.
 
 // Rust guideline compliant 2026-10-09
 
@@ -298,7 +302,159 @@ async fn a_message_a_search_lists_is_read_with_those_around_it() {
     )
     .await
     .to_string();
-    assert!(all.contains("have no message msg_nowhere"), "{all}");
+    assert!(all.contains("There is no message msg_nowhere."), "{all}");
+}
+
+/// Everything session `id`'s messages hold, tool errors included.
+async fn everything(sandbox: &Sandbox, id: &str) -> String {
+    call(
+        sandbox,
+        reqwest::Method::GET,
+        &format!("/api/session/{id}/message"),
+        None,
+    )
+    .await
+    .to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn earlier_sessions_are_found_and_read_with_notes_off() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let a = client.create_session(&folder).await.expect("A");
+    turn(&client, &a.id, "say The cache goes in SQLite.").await;
+    turn(&client, &a.id, "say And the queue in Postgres.").await;
+    client
+        .set_title(&a.id, "Storage layout")
+        .await
+        .expect("titled");
+
+    // By what was said, and by its title; no notes are looked through.
+    let b = client.create_session(&folder).await.expect("B");
+    turn(
+        &client,
+        &b.id,
+        r#"tool search_sessions {"query":"cache SQLite"} ;; say Found."#,
+    )
+    .await;
+    let found = tool_outputs(&sandbox, &b.id).await.join("\n");
+    assert!(found.contains("Conversations:"), "{found}");
+    assert!(found.contains(&format!("({})", a.id)), "{found}");
+    assert!(!found.contains("Notes:"), "{found}");
+    turn(
+        &client,
+        &b.id,
+        r#"tool search_sessions {"query":"storage"} ;; say Found."#,
+    )
+    .await;
+    let found = tool_outputs(&sandbox, &b.id).await.join("\n");
+    assert!(
+        found.contains(&format!(
+            "Sessions by title:\n- \"Storage layout\" ({})",
+            a.id
+        )),
+        "{found}"
+    );
+
+    // The session read from its start.
+    turn(
+        &client,
+        &b.id,
+        &format!(
+            r#"tool search_sessions {{"session":"{}"}} ;; say Read."#,
+            a.id
+        ),
+    )
+    .await;
+    let read = tool_outputs(&sandbox, &b.id).await.join("\n");
+    assert!(
+        read.contains(&format!("Session \"Storage layout\" ({}), folder", a.id)),
+        "{read}"
+    );
+    let (first, second) = (
+        read.find("The cache goes in SQLite.").expect("the start"),
+        read.find("And the queue in Postgres.").expect("the end"),
+    );
+    assert!(first < second, "{read}");
+    assert!(!read.contains("left out"), "{read}");
+
+    // With notes off there's still no `remember`.
+    turn(
+        &client,
+        &b.id,
+        r#"tool remember {"text":"Cache in SQLite."} ;; say No."#,
+    )
+    .await;
+    let all = everything(&sandbox, &b.id).await;
+    assert!(all.contains("Notes are off."), "{all}");
+    let offered = support::turn_requests(sandbox.dir.path())
+        .last()
+        .map(|r| r["tools"].to_string())
+        .expect("a request");
+    assert!(offered.contains("search_sessions"), "{offered}");
+    assert!(!offered.contains("\"remember\""), "{offered}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_projects_sessions_are_read_only_when_the_person_allows() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let here = sandbox.project().to_str().expect("utf-8").to_owned();
+    let other = sandbox.dir.path().join("other");
+    std::fs::create_dir_all(&other).expect("the other project");
+    let elsewhere = client
+        .create_session(other.to_str().expect("utf-8"))
+        .await
+        .expect("elsewhere");
+    turn(&client, &elsewhere.id, "say The cache goes in SQLite.").await;
+
+    let b = client.create_session(&here).await.expect("B");
+    assert_ne!(b.project_id, elsewhere.project_id);
+    // This project's search doesn't reach it, nor does a read by its ID.
+    turn(
+        &client,
+        &b.id,
+        &format!(
+            r#"tool search_sessions {{"query":"cache SQLite"}} ;; tool search_sessions {{"session":"{}"}} ;; say No."#,
+            elsewhere.id
+        ),
+    )
+    .await;
+    let all = everything(&sandbox, &b.id).await;
+    assert!(all.contains("Nothing found."), "{all}");
+    assert!(all.contains("is another project's"), "{all}");
+    assert!(!all.contains("The cache goes in SQLite."), "{all}");
+
+    // Looking everywhere asks first, then finds and reads it.
+    turn_allowing(
+        &client,
+        &b.id,
+        r#"tool search_sessions {"query":"cache SQLite","everywhere":true} ;; say Found."#,
+        "search_all_sessions",
+    )
+    .await;
+    let found = tool_outputs(&sandbox, &b.id).await.join("\n");
+    assert!(
+        found.contains(&format!(
+            "({}), folder {}",
+            elsewhere.id,
+            other.to_str().expect("utf-8")
+        )),
+        "{found}"
+    );
+    turn_allowing(
+        &client,
+        &b.id,
+        &format!(
+            r#"tool search_sessions {{"session":"{}","everywhere":true}} ;; say Read."#,
+            elsewhere.id
+        ),
+        "search_all_sessions",
+    )
+    .await;
+    let read = tool_outputs(&sandbox, &b.id).await.join("\n");
+    assert!(read.contains("The cache goes in SQLite."), "{read}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

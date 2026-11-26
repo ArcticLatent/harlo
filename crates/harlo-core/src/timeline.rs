@@ -927,6 +927,7 @@ pub fn tool_label(name: &str) -> String {
         "todowrite" | "todoread" | "todo" => "Todo".to_owned(),
         "webfetch" => "Fetch".to_owned(),
         "websearch" => "Search".to_owned(),
+        "search_sessions" => "Search sessions".to_owned(),
         "apply_patch" | "patch" => "Patch".to_owned(),
         SCRIPT => "Script".to_owned(),
         other => {
@@ -947,6 +948,10 @@ pub fn tool_detail(name: &str, input: &Value) -> String {
         "grep" | "glob" => field("pattern"),
         "webfetch" => field("url"),
         "websearch" => field("query"),
+        // What it looked for, or the session or message it read.
+        "search_sessions" => field("query")
+            .or_else(|| field("session"))
+            .or_else(|| field("message")),
         "task" => field("description"),
         // The script shows below; its row says what it's for, if it says.
         SCRIPT => return script_summary(field("code").unwrap_or_default()),

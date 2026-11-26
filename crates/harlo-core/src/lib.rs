@@ -24,7 +24,6 @@ pub mod mcp_catalog;
 pub mod model_menu;
 pub mod notes;
 pub mod notifications;
-pub mod own_tools;
 pub mod phone;
 pub mod schedules;
 pub mod server;

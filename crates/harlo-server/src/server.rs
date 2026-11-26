@@ -1150,7 +1150,7 @@ impl Server {
             rules,
             history,
             shadow: folder.config.snapshots.then(|| self.shadow(&directory)),
-            memory: self.memory_for(session),
+            memory: Some(self.memory_for(session)),
             jobs: Some(Arc::new(crate::shell::SessionJobs {
                 server: Arc::clone(self),
                 session: session.id.clone(),

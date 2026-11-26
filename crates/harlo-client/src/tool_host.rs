@@ -3,7 +3,7 @@
 //! available to every session on the server while the socket stays open.
 //!
 //! The server shows them to agents in its Code Mode catalog, under the name
-//! the client attaches with, such as `tools.harlo.past_sessions`.
+//! the client attaches with, such as `tools.editor.open_file`.
 
 // Rust guideline compliant 2026-10-09
 

@@ -57,7 +57,7 @@ pub use message::{
     Snapshot, StepTime, Tokens, ToolState, ToolTime,
 };
 pub use rules::{
-    AGENT, Decision, Effect, OUTSIDE, OUTSIDE_SANDBOX, REMEMBER_USER, Rule, agent_rules, decide,
-    outside_rules,
+    AGENT, Decision, Effect, OUTSIDE, OUTSIDE_SANDBOX, REMEMBER_USER, Rule, SEARCH_EVERYWHERE,
+    agent_rules, decide, outside_rules,
 };
 pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Steering, Turn, now, run};

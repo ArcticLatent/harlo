@@ -141,6 +141,8 @@ pub struct Hit {
     pub title: Option<String>,
     /// When the session was made, in Unix milliseconds.
     pub created: Option<i64>,
+    /// The session's folder.
+    pub directory: Option<String>,
 }
 
 /// A stored event: its sequence number, the session (or other thing) it
@@ -336,13 +338,20 @@ impl Store {
         }
     }
 
-    /// The messages of `project`'s sessions whose text has every word of
-    /// `words`, best first, at most `limit`.
+    /// The messages whose text has every word of `words`, best first, at
+    /// most `limit`: of `project`'s sessions, or of every project's, and
+    /// never of session `asking`.
     ///
     /// # Errors
     ///
     /// Fails when the read fails.
-    pub fn search(&self, project: &str, words: &[String], limit: usize) -> Result<Vec<Hit>, Error> {
+    pub fn search(
+        &self,
+        project: Option<&str>,
+        asking: Option<&str>,
+        words: &[String],
+        limit: usize,
+    ) -> Result<Vec<Hit>, Error> {
         // Each word quoted, so punctuation can't make a query of it.
         let query = words
             .iter()
@@ -352,19 +361,23 @@ impl Store {
         let conn = self.reader();
         let mut stmt = conn.prepare(
             "SELECT t.session, t.message, snippet(message_text, 0, '[', ']', '…', 16),
-                    json_extract(s.info, '$.title'), json_extract(s.info, '$.time.created')
+                    json_extract(s.info, '$.title'), json_extract(s.info, '$.time.created'),
+                    json_extract(s.info, '$.location.directory')
              FROM message_text t JOIN session s ON s.id = t.session
-             WHERE message_text MATCH ?1 AND json_extract(s.info, '$.projectID') = ?2
+             WHERE message_text MATCH ?1
+               AND (?2 IS NULL OR json_extract(s.info, '$.projectID') = ?2)
+               AND (?4 IS NULL OR t.session != ?4)
              ORDER BY rank LIMIT ?3",
         )?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        stmt.query_map(params![query, project, limit], |r| {
+        stmt.query_map(params![query, project, limit, asking], |r| {
             Ok(Hit {
                 session: r.get(0)?,
                 message: r.get(1)?,
                 snippet: r.get(2)?,
                 title: r.get(3)?,
                 created: r.get(4)?,
+                directory: r.get(5)?,
             })
         })?
         .collect()
@@ -920,7 +933,7 @@ mod tests {
     /// The messages search finds for `word`, and how many rows its index has.
     fn found(store: &Store, word: &str) -> (Vec<String>, i64) {
         let mut hits: Vec<String> = store
-            .search("p", &[word.to_owned()], 10)
+            .search(Some("p"), None, &[word.to_owned()], 10)
             .expect("search")
             .into_iter()
             .map(|hit| hit.message)

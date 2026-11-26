@@ -172,7 +172,6 @@ pub fn new_app_with(layout: Layout) -> App {
     // Not the mockup's home folder, whatever `HOME` the test runs with:
     // its sessions stay a project.
     "/home/demo".clone_into(&mut app.home);
-    app.preferences.own_tools = false;
     // Never the real speech models' folder.
     app.voice.models = None;
     // Nor the real Claude Code: nothing is there unless a test names a

@@ -19,8 +19,8 @@ fn add(sum: &mut Tokens, more: &Tokens) {
     sum.cache.write += more.cache.write;
 }
 
-/// The local calendar day of Unix milliseconds `at`.
-fn day(at: i64) -> String {
+/// The local calendar day of Unix milliseconds `at`, as `2026-11-25`.
+pub(crate) fn day(at: i64) -> String {
     jiff::Timestamp::from_millisecond(at).map_or_else(
         |_| String::new(),
         |t| {

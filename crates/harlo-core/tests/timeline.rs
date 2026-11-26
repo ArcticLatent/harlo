@@ -181,7 +181,21 @@ fn tools_have_readable_labels_and_details() {
     assert_eq!(tool_label("read"), "Read");
     assert_eq!(tool_label("todowrite"), "Todo");
     assert_eq!(tool_label("shell"), "Bash");
+    assert_eq!(tool_label("search_sessions"), "Search sessions");
     assert_eq!(tool_label(""), "");
+
+    // A search of earlier sessions says its words, or what it read.
+    assert_eq!(
+        tool_detail(
+            "search_sessions",
+            &json!({ "query": "cache", "everywhere": true })
+        ),
+        "cache"
+    );
+    assert_eq!(
+        tool_detail("search_sessions", &json!({ "session": "ses_1" })),
+        "ses_1"
+    );
 
     assert_eq!(
         tool_detail("grep", &json!({ "pattern": "fn main" })),

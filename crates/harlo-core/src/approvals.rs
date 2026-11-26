@@ -106,6 +106,7 @@ pub fn describe(asked: &Permission) -> Described {
         "skill" => "load a skill".to_owned(),
         "remember" => "keep a note for this project".to_owned(),
         "remember_user" => "keep a note for every project".to_owned(),
+        "search_all_sessions" => "read other projects' conversations".to_owned(),
         other => format!("use {}", other.replace('_', " ")),
     };
     Described {

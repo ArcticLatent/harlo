@@ -198,6 +198,11 @@ pub const AGENT: &str = "agent";
 /// asks by default; a note for the project alone is `remember`.
 pub const REMEMBER_USER: &str = "remember_user";
 
+/// The action of searching or reading every project's conversations,
+/// which asks by default; within the session's own project it is
+/// `search_sessions`.
+pub const SEARCH_EVERYWHERE: &str = "search_all_sessions";
+
 /// What the rules say about one action on one resource, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Decision {
@@ -211,8 +216,8 @@ pub struct Decision {
 /// The rules every session's default agent starts from.
 ///
 /// Everything in the project runs, except reading secrets, shell
-/// commands, web pages, files outside the project and notes kept for
-/// every project, which ask.
+/// commands, web pages, files outside the project, notes kept for every
+/// project and other projects' conversations, which ask.
 #[must_use]
 pub fn agent_rules() -> Vec<Rule> {
     let rule = |action: &str, resource: &str, effect| Rule {
@@ -229,6 +234,9 @@ pub fn agent_rules() -> Vec<Rule> {
         rule("webfetch", "*", Effect::Ask),
         // (A note for every project reaches every later session.)
         rule(REMEMBER_USER, "*", Effect::Ask),
+        // (Another project's conversations are as much outside this one
+        // as its files.)
+        rule(SEARCH_EVERYWHERE, "*", Effect::Ask),
     ];
     rules.extend(outside_rules());
     rules

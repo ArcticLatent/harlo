@@ -48,8 +48,9 @@ pub struct Turn {
     /// Records the project's files around each step that runs tools, so
     /// the step can be undone; none, and steps aren't recorded.
     pub shadow: Option<crate::snapshot::Shadow>,
-    /// Where notes are kept and earlier sessions searched; none, and the
-    /// model isn't offered `remember` or `search_sessions`.
+    /// Where earlier sessions are searched and, when notes are on, notes
+    /// kept; none, and the model isn't offered `search_sessions` or
+    /// `remember`.
     pub memory: Option<std::sync::Arc<dyn crate::memory::Memory>>,
     /// Where messages that steer the turn come from; none, and nothing
     /// joins it once it started.
@@ -319,6 +320,7 @@ fn actions(tool: &str) -> Vec<&str> {
     match tool {
         "write" => vec!["edit"],
         "remember" => vec!["remember", crate::rules::REMEMBER_USER],
+        "search_sessions" => vec!["search_sessions", crate::rules::SEARCH_EVERYWHERE],
         other => vec![other],
     }
 }
@@ -384,8 +386,8 @@ fn all(turn: &Turn) -> Vec<Value> {
     if !offered.is_empty() {
         definitions.push(crate::skills::definition(&offered));
     }
-    if turn.memory.is_some() {
-        definitions.extend(crate::memory::definitions());
+    if let Some(memory) = &turn.memory {
+        definitions.extend(crate::memory::definitions(memory.notes()));
     }
     definitions.extend(crate::web::definitions(turn.search.is_some()));
     if let Some(catalog) = &turn.code {
@@ -1190,9 +1192,12 @@ fn planned(turn: &Turn, name: &str, input: &Map<String, Value>) -> Result<Plan, 
         Ok(Plan::TodoWrite { .. }) if !turn.todo => {
             Err(fail(format!("There is no tool called `{name}`.")))
         }
-        Ok(Plan::Remember { .. } | Plan::SearchSessions { .. }) if turn.memory.is_none() => Err(
-            fail(format!("There is no tool called `{name}`. Notes are off.")),
-        ),
+        Ok(Plan::Remember { .. }) if !turn.memory.as_ref().is_some_and(|m| m.notes()) => Err(fail(
+            format!("There is no tool called `{name}`. Notes are off."),
+        )),
+        Ok(Plan::SearchSessions { .. }) if turn.memory.is_none() => {
+            Err(fail(format!("There is no tool called `{name}`.")))
+        }
         Ok(plan) => Ok(plan),
         Err(why) => Err(fail(why)),
     }
@@ -1602,9 +1607,8 @@ async fn run_plan(
                 pictures: Vec::new(),
             })
         }
-        (Plan::SearchSessions { query, message }, Some(memory)) => {
-            let found = message.map_or_else(|| memory.search(&query), |m| memory.read(&m));
-            found.map(|text| tools::Output {
+        (Plan::SearchSessions { lookup }, Some(memory)) => {
+            memory.look(&lookup).map(|text| tools::Output {
                 text,
                 metadata: Map::new(),
                 changed: Vec::new(),

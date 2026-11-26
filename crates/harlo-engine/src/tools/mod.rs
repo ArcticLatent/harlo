@@ -256,12 +256,10 @@ pub enum Plan {
         /// The skill's ID.
         id: String,
     },
-    /// Searches the project's earlier sessions, or reads a message of one.
+    /// Searches earlier sessions, or reads a message of one, or one whole.
     SearchSessions {
-        /// The words.
-        query: String,
-        /// The message to read instead of searching.
-        message: Option<String>,
+        /// What to find, and where.
+        lookup: crate::memory::Lookup,
     },
     /// Runs a command.
     Shell {
@@ -592,16 +590,23 @@ impl Plan {
                 todos: crate::todo::parse(input)?,
             }),
             "search_sessions" => {
-                let message = input
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .filter(|m| !m.is_empty())
-                    .map(str::to_owned);
-                let query = match &message {
-                    Some(_) => String::new(),
-                    None => text("query")?,
+                use crate::memory::{Find, Lookup};
+                let given = |key: &str| {
+                    input
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_owned)
                 };
-                Ok(Self::SearchSessions { query, message })
+                let find = match (given("message"), given("session")) {
+                    (Some(message), _) => Find::Message(message),
+                    (None, Some(session)) => Find::Session(session),
+                    (None, None) => Find::Words(text("query")?),
+                };
+                let everywhere = input.get("everywhere").and_then(Value::as_bool) == Some(true);
+                Ok(Self::SearchSessions {
+                    lookup: Lookup { find, everywhere },
+                })
             }
             "shell" => shell_call(input),
             "webfetch" => text("url").map(|url| Self::WebFetch { url }),
@@ -698,9 +703,9 @@ impl Plan {
                 resources: vec![id.clone()],
                 metadata: Map::new(),
             },
-            Self::SearchSessions { query, message } => Permission {
-                action: "search_sessions".into(),
-                resources: vec![message.clone().unwrap_or_else(|| query.clone())],
+            Self::SearchSessions { lookup } => Permission {
+                action: lookup.action().into(),
+                resources: vec![lookup.asked().to_owned()],
                 metadata: Map::new(),
             },
             Self::Shell { command, .. } => Permission {
@@ -945,8 +950,9 @@ impl Plan {
                 })
             }
             Self::Glob { .. } | Self::Grep { .. } => self.search(cwd).await,
-            Self::Remember { .. } | Self::SearchSessions { .. } => {
-                Err("Notes aren't kept on this server.".to_owned())
+            Self::Remember { .. } => Err("Notes aren't kept on this server.".to_owned()),
+            Self::SearchSessions { .. } => {
+                Err("Earlier sessions can't be searched here.".to_owned())
             }
             Self::Question { .. } => Err("There's no one to ask here.".to_owned()),
             Self::Execute { .. } => Err("Code Mode isn't available here.".to_owned()),

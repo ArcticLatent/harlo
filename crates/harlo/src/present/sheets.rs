@@ -1942,7 +1942,6 @@ pub(super) const LINK: i32 = 13;
 fn tool_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     let mut rows = Vec::new();
     search_rows(app, setup, &mut rows);
-    mcp::own_tools_rows(app, &mut rows);
     rows
 }
 

@@ -45,7 +45,6 @@ mod mcp;
 mod memory;
 mod notes;
 mod notices;
-mod own_tools;
 mod phone;
 mod pictures;
 mod projects;
@@ -84,7 +83,6 @@ pub use mcp::{McpEvent, McpServers, McpView};
 pub use memory::{Kept, Memory, MemoryEvent};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
-pub use own_tools::OwnToolsEvent;
 pub use phone::{Host as PhoneHost, Paired, PhoneEvent, PhoneState, Shown};
 pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
 pub use projects::{ProjectEvent, Projects, icon_url};
@@ -323,8 +321,6 @@ pub enum Message {
     Sheet(SheetEvent),
     /// Something happened to the Claude subscription.
     Claude(ClaudeEvent),
-    /// Something happened to Harlo's own tools for agents.
-    OwnTools(OwnToolsEvent),
     /// Something happened to dictation.
     Voice(VoiceEvent),
     /// Something happened to local models.
@@ -737,12 +733,6 @@ pub struct App {
     restore: Option<Tabs>,
     /// The connection to the current server; dropping it disconnects.
     following: Option<crate::task::Handle>,
-    /// The connections offering Harlo's own tools to agents, by folder.
-    own_tools: HashMap<String, crate::task::Handle>,
-    /// Whether attaching waits, and why.
-    own_tools_hold: own_tools::Hold,
-    /// Why offering them last failed.
-    pub own_tools_error: Option<String>,
     /// Dictation into the composer.
     pub voice: Voice,
     /// Local models: engines, their servers and downloads.
@@ -852,9 +842,6 @@ impl App {
             preferences: Preferences::default(),
             claude: Claude::default(),
             following: None,
-            own_tools: HashMap::new(),
-            own_tools_hold: own_tools::Hold::None,
-            own_tools_error: None,
             voice: Voice::default(),
             local: LocalModels::default(),
             phone: PhoneState::default(),
@@ -969,7 +956,6 @@ impl App {
             self.follow_context(),
             self.follow_files(),
             self.follow_notes(),
-            self.follow_own_tools(),
             self.follow_phone(),
             self.follow_pictures(),
         ]);
@@ -1004,7 +990,6 @@ impl App {
     fn feature_event(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Claude(event) => self.claude_event(event),
-            Message::OwnTools(event) => self.own_tools_event(event),
             Message::Voice(event) => self.voice_event(event),
             Message::Local(event) => self.local_event(event),
             Message::Phone(event) => self.phone_event(event),
@@ -1042,7 +1027,6 @@ impl App {
             Message::SessionMenu(action) => return self.session_menu(action),
             Message::Goal(event) => return self.goal_event(event),
             message @ (Message::Claude(_)
-            | Message::OwnTools(_)
             | Message::Voice(_)
             | Message::Local(_)
             | Message::Phone(_)
@@ -1333,8 +1317,6 @@ impl App {
                 };
                 self.client = Some(connected.client.clone());
                 let ask_host = self.ask_phone_host(connected.client.clone());
-                self.own_tools_hold = own_tools::Hold::None;
-                self.own_tools_error = None;
                 self.workspace.resync(connected.snapshot.clone());
                 self.forget_catalogs();
                 // Unread marks saved from last time come back, with one for
@@ -1417,7 +1399,6 @@ impl App {
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
                 self.client = None;
-                self.withdraw_own_tools();
             }
         }
         Task::none()
@@ -1598,7 +1579,6 @@ impl App {
             self.restore = self.other_tabs.remove(&location.label());
             self.location = location;
             self.status = Status::Connecting { attempt: 1 };
-            self.withdraw_own_tools();
             self.client = None;
             self.active = None;
             self.tabs.clear();

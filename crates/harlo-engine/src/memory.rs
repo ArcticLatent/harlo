@@ -85,38 +85,95 @@ pub struct Draft {
     pub replaces: Option<String>,
 }
 
-/// Where a session's notes are kept and its project's sessions searched.
+/// What `search_sessions` is asked to find.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Find {
+    /// The conversations, and notes, that have these words.
+    Words(String),
+    /// The message with this ID, and the ones around it.
+    Message(String),
+    /// The session with this ID, from its start.
+    Session(String),
+}
+
+/// One call of `search_sessions`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lookup {
+    /// What to find.
+    pub find: Find,
+    /// Whether to look in every project's conversations rather than the
+    /// session's own project's.
+    pub everywhere: bool,
+}
+
+impl Lookup {
+    /// The action the rules decide this call by: the project's own
+    /// conversations are `search_sessions`, every project's ask.
+    #[must_use]
+    pub fn action(&self) -> &'static str {
+        if self.everywhere {
+            crate::rules::SEARCH_EVERYWHERE
+        } else {
+            "search_sessions"
+        }
+    }
+
+    /// The words or the ID asked for.
+    #[must_use]
+    pub fn asked(&self) -> &str {
+        let (Find::Words(asked) | Find::Message(asked) | Find::Session(asked)) = &self.find;
+        asked
+    }
+}
+
+/// Where a session's notes are kept and earlier sessions searched.
 pub trait Memory: Send + Sync + std::fmt::Debug {
+    /// Whether notes are kept: without them there's no `remember`, and a
+    /// search finds conversations only.
+    fn notes(&self) -> bool;
+
     /// Keeps `draft`, kept by step `message`; returns the note.
     ///
     /// # Errors
     ///
-    /// Fails, with a message for the model, when the note it replaces
-    /// doesn't exist or the note can't be stored.
+    /// Fails, with a message for the model, when notes aren't kept, the
+    /// note it replaces doesn't exist or the note can't be stored.
     fn remember(&self, draft: Draft, message: &str) -> Result<Note, String>;
 
-    /// The project's conversations and notes that match `query`, written
-    /// for the model.
+    /// What `lookup` finds in earlier conversations, written for the
+    /// model: matching sessions and messages, one message with the ones
+    /// around it, or one session from its start.
     ///
     /// # Errors
     ///
-    /// Fails, with a message for the model, when the query has no words
-    /// or the search fails.
-    fn search(&self, query: &str) -> Result<String, String>;
-
-    /// What message `message` of one of the project's conversations says,
-    /// with the messages around it, written for the model.
-    ///
-    /// # Errors
-    ///
-    /// Fails, with a message for the model, when the project has no such
-    /// message or the read fails.
-    fn read(&self, message: &str) -> Result<String, String>;
+    /// Fails, with a message for the model, when a query has no words,
+    /// there's no such message or session where it looks, or the read
+    /// fails.
+    fn look(&self, lookup: &Lookup) -> Result<String, String>;
 }
 
-/// The memory tools' definitions, as a model is told about them.
+/// The memory tools' definitions, as a model is told about them:
+/// `search_sessions`, and with `notes` kept, `remember`.
 #[must_use]
-pub fn definitions() -> Vec<Value> {
+pub fn definitions(notes: bool) -> Vec<Value> {
+    let searched = if notes {
+        "earlier conversations and notes, including replaced notes,"
+    } else {
+        "earlier conversations"
+    };
+    let search = json!({
+        "name": "search_sessions",
+        "description": format!("Searches this project's {searched} to find what was done or why something was decided. Lists matching sessions, and matching messages with a snippet."),
+        "parameters": { "type": "object", "properties": {
+            "query": { "type": "string", "description": "Words to look for." },
+            "message": { "type": "string", "description": "Instead of searching: the ID of a listed message, to read it whole with the ones around it." },
+            "session": { "type": "string", "description": "Instead of searching: the ID of a listed session, to read it from its start." },
+            "everywhere": { "type": "boolean", "description": "Look in every project's conversations, not only this one's." }
+        } }
+    });
+    if !notes {
+        return vec![search];
+    }
     vec![
         json!({
             "name": "remember",
@@ -127,14 +184,7 @@ pub fn definitions() -> Vec<Value> {
                 "replaces": { "type": "string", "description": "The ID of the note this one replaces." }
             }, "required": ["text"] }
         }),
-        json!({
-            "name": "search_sessions",
-            "description": "Searches this project's earlier conversations and notes, including replaced notes, to find why something was decided. Lists matching messages by session, with a snippet.",
-            "parameters": { "type": "object", "properties": {
-                "query": { "type": "string", "description": "Words to look for." },
-                "message": { "type": "string", "description": "Instead of searching: the ID of a listed message, to read it whole with the ones around it." }
-            } }
-        }),
+        search,
     ]
 }
 
