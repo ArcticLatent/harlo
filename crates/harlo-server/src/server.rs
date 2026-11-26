@@ -179,6 +179,9 @@ pub struct Server {
     pub(crate) catalog: Mutex<Arc<harlo_engine::catalog::Catalog>>,
     /// Browser sign-ins under way.
     pub(crate) attempts: crate::oauth::Attempts,
+    /// Held while sign-in tokens are refreshed: a refresh token works
+    /// once, so two refreshes at a time would end the sign-in.
+    pub(crate) refreshing: tokio::sync::Mutex<()>,
     /// MCP server connections.
     pub(crate) mcp: crate::mcp::Mcp,
     /// The models Claude Code last listed.
@@ -285,6 +288,7 @@ impl Server {
             global: Mutex::new(global),
             catalog: Mutex::new(Arc::new(harlo_engine::catalog::Catalog::bundled())),
             attempts: Mutex::default(),
+            refreshing: tokio::sync::Mutex::default(),
             mcp: crate::mcp::Mcp::default(),
             claude_models: Mutex::default(),
             config_dir: harlo_engine::config_folder(config_home),
@@ -863,6 +867,7 @@ impl Server {
     /// The model is the config's small one when it names one, else the
     /// session's own, without its variant: a title needs no long thought.
     async fn name_session(self: Arc<Self>, session: Session, first: String, provisional: String) {
+        self.fresh_sign_ins().await;
         let folder = self.folder(&session.location.directory);
         let small = folder
             .config
@@ -1012,6 +1017,7 @@ impl Server {
         session: &Session,
         stop: &CancellationToken,
     ) -> Result<Chosen, (&'static str, Option<String>)> {
+        self.fresh_sign_ins().await;
         let mut folder = self.folder(&session.location.directory);
         // What the project's own config asks for waits for the person.
         if let Some(held) = folder.withheld.clone()
@@ -1246,7 +1252,7 @@ impl Server {
     /// # Errors
     ///
     /// When there's no such session or model, or the model fails.
-    pub(crate) async fn aside(&self, id: &str, prompt: &str) -> Result<Value, Refusal> {
+    pub(crate) async fn aside(self: &Arc<Self>, id: &str, prompt: &str) -> Result<Value, Refusal> {
         let session = self.session(id)?;
         let (answer, cost) = self
             .ask_model(&session, prompt, &CancellationToken::new())
@@ -1263,11 +1269,12 @@ impl Server {
     ///
     /// When no model is set up, the store fails, or the model fails.
     pub(crate) async fn ask_model(
-        &self,
+        self: &Arc<Self>,
         session: &Session,
         prompt: &str,
         stop: &CancellationToken,
     ) -> Result<(harlo_engine::generate::Answer, f64), String> {
+        self.fresh_sign_ins().await;
         let folder = self.folder(&session.location.directory);
         let agent = folder.agent(session.agent.as_deref());
         let model = agent
@@ -1308,10 +1315,11 @@ impl Server {
     ///
     /// When there's no such model, or the model fails.
     pub(crate) async fn write_text(
-        &self,
+        self: &Arc<Self>,
         prompt: &str,
         model: Option<harlo_engine::ModelRef>,
     ) -> Result<String, Refusal> {
+        self.fresh_sign_ins().await;
         let (global, _) = self.global();
         let model = model
             .or_else(|| global.default_model())

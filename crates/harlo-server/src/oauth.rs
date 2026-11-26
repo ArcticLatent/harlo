@@ -95,6 +95,23 @@ const WAIT: Duration = Duration::from_mins(10);
 /// How long before expiry a token is refreshed.
 const MARGIN_MS: i64 = 5 * 60 * 1000;
 
+/// How long a model request waits for a stale sign-in to be refreshed
+/// before it goes out as it is.
+///
+/// A refresh takes a second or so. With no network it can hang for its
+/// whole minute; the request would fail then anyway, and says why sooner.
+const REFRESH_WAIT: Duration = Duration::from_secs(15);
+
+/// Whether the credential `value` is a `ChatGPT` sign-in whose token has
+/// run out or is about to.
+fn stale(value: &Value) -> bool {
+    value["type"] == "oauth"
+        && value["methodID"] == CHATGPT
+        && value["expires"]
+            .as_i64()
+            .is_none_or(|expires| expires <= now() + MARGIN_MS)
+}
+
 /// A browser sign-in under way.
 pub(crate) struct Attempt {
     /// `pending`, `complete` or `failed`, and why it failed.
@@ -541,20 +558,39 @@ impl Server {
         }
     }
 
+    /// Refreshes a `ChatGPT` sign-in whose token has run out, before a
+    /// model request is made with it.
+    ///
+    /// The timer refreshes tokens every minute, which leaves the request
+    /// sent before its turn comes: right after the server starts, or after
+    /// the computer wakes with no network yet. Waits [`REFRESH_WAIT`] at
+    /// most; a refresh that takes longer goes on by itself.
+    pub(crate) async fn fresh_sign_ins(self: &Arc<Self>) {
+        let waiting = self
+            .store
+            .credentials()
+            .is_ok_and(|all| all.iter().any(|c| stale(&c["value"])));
+        if !waiting {
+            return;
+        }
+        // (In a task of its own: a refresh cut short after `OpenAI` has
+        // answered would lose the new refresh token, and the sign-in.)
+        let server = Arc::clone(self);
+        let refreshed = tokio::spawn(async move { server.refresh_tokens().await });
+        let _ = tokio::time::timeout(REFRESH_WAIT, refreshed).await;
+    }
+
     /// Refreshes the `ChatGPT` tokens about to run out; forgets a sign-in
     /// `OpenAI` ended.
     async fn refresh_tokens(&self) {
+        // One at a time: whoever comes second finds the tokens fresh.
+        let _one = self.refreshing.lock().await;
         let Ok(credentials) = self.store.credentials() else {
             return;
         };
         for c in credentials {
             let value = &c["value"];
-            if value["type"] != "oauth"
-                || value["methodID"] != CHATGPT
-                || value["expires"]
-                    .as_i64()
-                    .is_some_and(|e| e > now() + MARGIN_MS)
-            {
+            if !stale(value) {
                 continue;
             }
             let client = value["metadata"]["clientID"].as_str().unwrap_or_default();
