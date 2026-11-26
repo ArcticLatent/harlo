@@ -240,7 +240,9 @@ pub struct Config {
     pub cached_instructions: bool,
     /// Whether scripts may call the session's own tools: read, search,
     /// edit, write and run commands, each under the tool's own rules
-    /// (`experimental.scriptTools`, on unless turned off).
+    /// (`experimental.scriptTools`, off unless turned on: measured on
+    /// small jobs it cost 12% more prompt tokens with a shell and 35%
+    /// more without one, and with a shell no script used it).
     pub script_tools: bool,
     /// Whether `read` can list what a source file declares instead of its
     /// text (`experimental.outline`, on unless turned off: over four jobs
@@ -352,9 +354,7 @@ impl Config {
             source,
             providers,
             cached_instructions,
-            script_tools: value["experimental"]["scriptTools"]
-                .as_bool()
-                .unwrap_or(true),
+            script_tools: value["experimental"]["scriptTools"] == true,
             outline: value["experimental"]["outline"].as_bool().unwrap_or(true),
             model: model_ref(&value["model"]),
             small_model: model_ref(&value["small_model"]),
@@ -781,13 +781,13 @@ mod tests {
         let empty = tempfile::tempdir().expect("dir");
         let none = Config::load(empty.path()).expect("loaded");
         assert_eq!(none, Config::from_value(&Value::Null, None));
-        assert!(none.outline && none.script_tools && none.model.is_none());
-        let off = Config::parse(
-            r#"{ "experimental": { "outline": false, "scriptTools": false } }"#,
+        assert!(none.outline && !none.script_tools && none.model.is_none());
+        let changed = Config::parse(
+            r#"{ "experimental": { "outline": false, "scriptTools": true } }"#,
             None,
         )
         .expect("parsed");
-        assert!(!off.outline && !off.script_tools);
+        assert!(!changed.outline && changed.script_tools);
     }
 
     #[test]

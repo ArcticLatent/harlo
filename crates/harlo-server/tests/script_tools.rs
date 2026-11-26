@@ -61,6 +61,13 @@ fn configure(sandbox: &Sandbox, change: impl FnOnce(&mut serde_json::Value)) {
     std::fs::write(&path, config.to_string()).expect("config");
 }
 
+/// Lets scripts call the session's own tools, which is off by default.
+fn turn_on(sandbox: &Sandbox) {
+    configure(sandbox, |config| {
+        config["experimental"]["scriptTools"] = true.into();
+    });
+}
+
 /// Starts a session under `rules` whose scripted model runs `code` as a
 /// script, then says "Done."; returns the session's ID.
 async fn start(sandbox: &Sandbox, client: &Client, rules: &[Rule], code: &str) -> String {
@@ -154,6 +161,7 @@ fn execute_description(sandbox: &Sandbox) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_reads_searches_and_changes_files_in_one_step() {
     let sandbox = Sandbox::start().await;
+    turn_on(&sandbox);
     fill(
         &sandbox,
         &[
@@ -213,6 +221,7 @@ async fn a_script_reads_searches_and_changes_files_in_one_step() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scripts_call_asks_where_the_tool_would() {
     let sandbox = Sandbox::start().await;
+    turn_on(&sandbox);
     fill(
         &sandbox,
         &[
@@ -278,6 +287,7 @@ async fn a_scripts_call_asks_where_the_tool_would() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refusal_without_a_reason_stops_the_script_and_the_turn() {
     let sandbox = Sandbox::start().await;
+    turn_on(&sandbox);
     fill(&sandbox, &[("a.txt", "old a\n")]);
     let client = sandbox.client();
     let session = start(&sandbox, &client, &[Rule::any("edit", Effect::Ask)], TWO).await;
@@ -305,6 +315,7 @@ async fn a_refusal_without_a_reason_stops_the_script_and_the_turn() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_has_only_the_tools_the_rules_leave() {
     let sandbox = Sandbox::start().await;
+    turn_on(&sandbox);
     fill(&sandbox, &[("a.txt", "old a\n")]);
     let client = sandbox.client();
     let rules = [
@@ -334,11 +345,8 @@ catch (e) { return text + String(e); }"#;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn scripts_have_none_of_it_when_it_is_turned_off() {
+async fn scripts_have_none_of_it_unless_it_is_turned_on() {
     let sandbox = Sandbox::start().await;
-    configure(&sandbox, |config| {
-        config["experimental"]["scriptTools"] = false.into();
-    });
     fill(&sandbox, &[("a.txt", "alpha\n")]);
     let client = sandbox.client();
     let code = r#"return await tools.project.read({path: "a.txt"});"#;

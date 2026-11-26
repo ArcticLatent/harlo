@@ -537,6 +537,12 @@ async fn a_phone_reads_an_edit_before_refusing_it_with_a_reason() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_phone_reads_a_script_and_gets_a_sessions_pictures() {
     let sandbox = Sandbox::start().await;
+    // Scripts reach the session's own tools only where that's turned on.
+    let config = sandbox.root().join("config/harlo/harlo.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config).expect("config")).expect("JSON");
+    settings["experimental"]["scriptTools"] = true.into();
+    std::fs::write(&config, settings.to_string()).expect("config");
     let client = sandbox.client();
     let session = client
         .create_session(&sandbox.project_str())
