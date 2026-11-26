@@ -68,7 +68,10 @@ jobs:
           dist/opt/harlo/bin/harlo --version
           dist/opt/harlo/bin/harlo-server --version
           ./dist/harlo-*.AppImage --appimage-extract-and-run --version
-          desktop-file-validate packaging/harlo.desktop
+          # This runner's validator is older than SingleMainWindow (Desktop
+          # Entry 1.5) and calls it an error, so it checks the rest.
+          grep -v '^SingleMainWindow=' packaging/harlo.desktop >"$RUNNER_TEMP/harlo.desktop"
+          desktop-file-validate "$RUNNER_TEMP/harlo.desktop"
 
       - uses: actions/upload-artifact@v6
         with:
