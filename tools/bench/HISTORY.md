@@ -88,3 +88,80 @@ Tool calls:
 - off: edit 4, execute 6, glob 5, grep 4, read 7, write 1
 - on: edit 4, execute 1, glob 4, grep 5, read 3, write 1
 
+## 2026-11-25 22:20 · cold-cache · openai/gpt-6.2-sol
+
+Revision 2ee0b44f with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: instructions; task: session (textwrap, argparse, difflib). System prompt as the opening developer message (on) against instructions (off), section 23's open measurement; clearing as by default in both.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | +++ |    22 |    19 |       0 |    803,289 |  15% |   1,920 |   1.392 |   1.421 |
+|  on | +++ |    32 |    24 |       0 |  1,273,877 |  18% |   1,962 |   2.113 |   2.317 |
+| off | +++ |    29 |    23 |       0 |  1,187,525 |  12% |   1,866 |   2.121 |   2.305 |
+|  on | +++ |    27 |    19 |       0 |  1,058,546 |  15% |   1,719 |   1.813 |   2.011 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 1 / 0 / 0 / 0% / 0.000; 1 / 0 / 0 / 0% / 0.000; 17 / 18 / 626,614 / 12% / 1.126; 3 / 1 / 176,675 / 26% / 0.295
+- on: 20 / 18 / 551,961 / 12% / 0.981; 6 / 4 / 354,200 / 8% / 0.688; 3 / 1 / 183,029 / 17% / 0.339; 3 / 1 / 184,687 / 59% / 0.309
+- off: 17 / 18 / 494,222 / 5% / 0.949; 6 / 3 / 342,976 / 20% / 0.684; 3 / 1 / 174,428 / 26% / 0.290; 3 / 1 / 175,899 / 0% / 0.383
+- on: 17 / 15 / 474,931 / 17% / 0.800; 5 / 3 / 287,983 / 9% / 0.558; 3 / 1 / 176,993 / 0% / 0.385; 2 / 0 / 118,639 / 48% / 0.268
+
+Tool calls:
+
+- off: edit 4, glob 2, outline 3, read 16, write 1
+- on: edit 4, glob 3, outline 3, read 21, write 1
+- off: edit 4, glob 1, outline 3, read 20, write 1
+- on: edit 4, glob 2, outline 3, read 16, write 1
+- off: a step failed: {'message': "The model's server refused the request (400): Bad Request", 'type': 'provider'}
+- off: a step failed: {'message': "The model's server refused the request (400): Bad Request", 'type': 'provider'}
+
+## 2026-11-25 22:26 · cold-cache · openai/gpt-6.2-sol
+
+Revision 2ee0b44f with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: files; task: jobs (textwrap, argparse, difflib, longest). Scripts that call every project tool (section 30), on against off; no shell, as in section 29's run.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | ++++ |    29 |     7 |       0 |     59,805 |   0% |   1,317 |   0.133 |   0.134 |
+|  on | ++++ |    36 |     8 |       0 |     87,572 |   1% |   1,486 |   0.187 |   0.189 |
+| off | ++++ |    26 |     7 |       0 |     52,036 |   0% |   1,259 |   0.117 |   0.118 |
+|  on | ++++ |    29 |     7 |       0 |     63,490 |   2% |   1,433 |   0.138 |   0.140 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 8 / 3 / 12,812 / 0% / 0.031; 7 / 1 / 11,442 / 0% / 0.026; 10 / 2 / 25,522 / 0% / 0.055; 4 / 1 / 10,029 / 0% / 0.022
+- on: 14 / 3 / 31,701 / 4% / 0.067; 10 / 2 / 20,175 / 0% / 0.044; 8 / 2 / 24,804 / 0% / 0.054; 4 / 1 / 10,892 / 0% / 0.024
+- off: 7 / 3 / 11,498 / 0% / 0.028; 9 / 1 / 15,393 / 0% / 0.035; 6 / 2 / 15,107 / 0% / 0.033; 4 / 1 / 10,038 / 0% / 0.022
+- on: 11 / 3 / 22,634 / 7% / 0.048; 6 / 1 / 9,694 / 0% / 0.022; 8 / 2 / 20,264 / 0% / 0.045; 4 / 1 / 10,898 / 0% / 0.024
+
+Tool calls:
+
+- off: edit 4, execute 8, glob 4, grep 1, outline 3, read 4, write 1
+- on: edit 4, execute 13, glob 5, grep 1, outline 3, read 5, write 1
+- off: edit 4, execute 6, glob 5, grep 1, outline 3, read 4, write 1
+- on: edit 5, execute 6, glob 5, grep 1, outline 3, read 4, write 1
+
+## 2026-11-25 22:31 · cold-cache · openai/gpt-6.2-sol
+
+Revision 2ee0b44f with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: files; task: jobs (textwrap, argparse, difflib, longest). The agent has a shell, in the sandbox. Scripts that call every project tool, on against off, with a shell as a real session has one.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | ++++ |    24 |     5 |       0 |     39,107 |   0% |   1,754 |   0.096 |   0.097 |
+|  on | ++++ |    25 |     6 |       0 |     48,786 |   8% |   1,788 |   0.108 |   0.110 |
+| off | ++++ |    27 |     7 |       0 |     52,377 |   2% |   1,749 |   0.120 |   0.121 |
+|  on | ++++ |    24 |     5 |       0 |     53,420 |   0% |   1,499 |   0.122 |   0.124 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 8 / 3 / 14,408 / 0% / 0.036; 6 / 1 / 9,297 / 0% / 0.023; 6 / 1 / 10,462 / 0% / 0.025; 4 / 0 / 4,940 / 0% / 0.013
+- on: 8 / 3 / 15,942 / 11% / 0.036; 6 / 1 / 10,637 / 0% / 0.026; 7 / 2 / 16,270 / 6% / 0.035; 4 / 0 / 5,937 / 21% / 0.013
+- off: 9 / 3 / 15,977 / 8% / 0.037; 6 / 1 / 10,054 / 0% / 0.024; 8 / 3 / 21,398 / 0% / 0.047; 4 / 0 / 4,948 / 0% / 0.013
+- on: 8 / 1 / 15,292 / 0% / 0.038; 6 / 1 / 11,599 / 0% / 0.027; 6 / 2 / 14,999 / 0% / 0.034; 4 / 1 / 11,530 / 0% / 0.025
+
+Tool calls:
+
+- off: edit 4, glob 4, grep 2, outline 1, read 4, shell 4, write 1
+- on: edit 4, glob 4, grep 2, outline 1, read 5, shell 4, write 1
+- off: edit 5, glob 4, grep 2, outline 2, read 5, shell 4, write 1
+- on: edit 4, glob 4, grep 3, outline 2, read 3, shell 3, write 1
+

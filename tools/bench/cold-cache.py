@@ -324,6 +324,13 @@ def run(server, arm, args):
     if args.compare == "files":
         # Scripts in both arms, as a session has them; the on arm adds the files to them.
         config["permissions"].append({"action": "execute", "resource": "*", "effect": "allow"})
+    if args.shell:
+        # A shell, as a real session has one, inside the sandbox for agents'
+        # commands: they change the project and the temporary folders only.
+        # The server's home is a scratch one, so the sandbox's own list of
+        # secret places covers nothing real: the real home is hidden whole.
+        config["permissions"].append({"action": "shell", "resource": "*", "effect": "allow"})
+        config["sandbox"] = {"hidden": [str(Path.home())]}
     server.configure(config)
     project = server.project()
     session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
@@ -415,6 +422,8 @@ def main():
     parser.add_argument("--task", choices=["session", "jobs"], default="session",
                         help="one session of four prompts that starts by reading two long files (the default), "
                              "or four jobs, each in a session of its own with nothing read beforehand")
+    parser.add_argument("--shell", action="store_true",
+                        help="let the agent run commands, in the sandbox, with the real home folder hidden")
     parser.add_argument("--wait", type=int, default=0, help="seconds of rest before each prompt")
     parser.add_argument("--limit", type=int, default=900, help="seconds a prompt may take")
     parser.add_argument("--prices", help="IN,WRITE,READ,OUT in dollars per million tokens")
@@ -480,6 +489,7 @@ def main():
         f"Revision {revision}{' with uncommitted changes' if dirty else ''}; paid by {paid}; rest before each prompt: "
         f"{args.wait or 'none (every prompt counts as rested)'}; prices {args.prices}; the on arm turns on: {args.compare}; "
         f"task: {args.task} ({', '.join(name for name, _ in (JOB_CHECKS if args.task == 'jobs' else CHECKS))})."
+        + (" The agent has a shell, in the sandbox." if args.shell else "")
         + (f" {args.note}" if args.note else ""),
         "",
         "| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |",
