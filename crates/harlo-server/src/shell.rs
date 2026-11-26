@@ -66,17 +66,22 @@ impl Jobs for SessionJobs {
     }
 
     fn asked_to_move<'a>(&'a self, _message: &'a str, call: &'a str) -> Asked<'a> {
+        // Listed now, not when the future is first polled: that is only
+        // once the command has started, and by then its call has been
+        // announced as running, so someone may already have asked. An
+        // early ask isn't lost: `notify_one` keeps it for the wait below.
+        let asked = Arc::new(tokio::sync::Notify::new());
+        let key = (self.session.clone(), call.to_owned());
+        lock(&self.server.live)
+            .waited
+            .insert(key.clone(), Arc::clone(&asked));
+        // (Dropped with the future, when the command ends.)
+        let listed = Waited {
+            server: &self.server,
+            key,
+        };
         Box::pin(async move {
-            let asked = Arc::new(tokio::sync::Notify::new());
-            let key = (self.session.clone(), call.to_owned());
-            lock(&self.server.live)
-                .waited
-                .insert(key.clone(), Arc::clone(&asked));
-            // (Dropped with this future, when the command ends.)
-            let _listed = Waited {
-                server: &self.server,
-                key,
-            };
+            let _listed = listed;
             asked.notified().await;
         })
     }
@@ -427,5 +432,55 @@ impl Server {
             .or_default()
             .push((message, "steer".to_owned()));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use harlo_engine::jobs::Jobs as _;
+
+    use super::SessionJobs;
+    use crate::{PhoneHost, Server, Store};
+
+    /// A server with nothing in it, its files under `scratch`.
+    fn server(scratch: &Path) -> Arc<Server> {
+        let config = harlo_engine::Config::load(scratch).expect("no configuration is a valid one");
+        Arc::new(Server::new(
+            Store::in_memory().expect("a store"),
+            config,
+            scratch,
+            None,
+            PhoneHost::new(None, scratch.join("phone.json")),
+            scratch.join("snapshot"),
+            Vec::new(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn a_command_can_be_moved_before_it_has_started() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let server = server(scratch.path());
+        let jobs = SessionJobs {
+            server: Arc::clone(&server),
+            session: "ses_1".to_owned(),
+        };
+
+        // The call is announced as running before its command has started,
+        // which is when the wait is first polled: an ask in between counts.
+        let asked = jobs.asked_to_move("msg_1", "call_1");
+        server
+            .move_to_background("ses_1", "call_1")
+            .expect("listed from its call");
+        tokio::time::timeout(Duration::from_secs(5), asked)
+            .await
+            .expect("an early ask is kept");
+
+        // The wait is over, so there is nothing left to move.
+        let late = server.move_to_background("ses_1", "call_1");
+        assert!(late.is_err(), "{late:?}");
     }
 }
