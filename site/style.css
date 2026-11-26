@@ -290,6 +290,41 @@ table { width: 100%; border-collapse: collapse; font-size: 15px; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
 
+/* The documentation: the list of its parts stays beside the text on a wide
+   screen, and sits above it on a narrow one. */
+.docs > .wrap { display: grid; grid-template-columns: 216px minmax(0, 760px); grid-template-areas: "toc head" "toc body"; gap: 0 72px; align-items: start; }
+.docs-head { grid-area: head; }
+.docs article { grid-area: body; }
+.docs .toc { grid-area: toc; position: sticky; top: 84px; max-height: calc(100vh - 108px); overflow-y: auto; scrollbar-width: thin; font-size: 14px; }
+.docs .toc p { margin: 0 0 10px; font: 12px/1.4 "JetBrains Mono", ui-monospace, monospace; color: var(--faint); }
+.docs .toc ol { list-style: none; padding: 0; margin: 0; }
+.docs .toc li { margin: 0; }
+.docs .toc a { display: block; padding: 5px 0 5px 14px; border-left: 1px solid var(--rule); color: var(--muted); text-decoration: none; line-height: 1.35; }
+.docs .toc a:hover { color: var(--fg); }
+.docs .toc a[aria-current] { color: var(--fg); border-left-color: var(--accent); }
+.docs article > section { border-top: 1px solid var(--rule); margin-top: 48px; }
+.docs article > section:first-child { margin-top: 40px; }
+.docs article > section > h2 { margin-top: 36px; }
+.docs [id] { scroll-margin-top: 84px; }
+.docs h3 { margin-top: 30px; }
+.docs figure.frame { margin: 22px 0 26px; }
+.docs pre { font-size: 13.5px; line-height: 1.55; }
+.docs kbd { display: inline-block; font-size: 0.8em; line-height: 1.5; color: var(--fg); background: var(--card); border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+.docs i { color: var(--muted); }
+/* A term, then what it means. */
+.terms { margin: 14px 0; }
+.terms dt { font-weight: 600; margin-top: 16px; }
+.terms dd { margin: 3px 0 0; color: var(--muted); }
+.docs table { margin: 14px 0 6px; }
+.docs td:first-child { white-space: nowrap; padding-right: 20px; }
+.docs td:has(kbd):not(:last-child) { white-space: nowrap; }
+.docs td { color: var(--muted); }
+.docs td:first-child { color: var(--fg); }
+.docs table.keys th { padding-top: 22px; color: var(--fg); }
+.docs table.keys tr:first-child th { padding-top: 10px; }
+/* A table wider than a phone scrolls by itself, not the page. */
+.scroll { overflow-x: auto; }
+
 /* The foot. */
 footer.foot { border-top: 1px solid var(--rail); color: var(--faint); font-size: 14px; }
 footer.foot .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; padding-top: 30px; padding-bottom: 40px; }
@@ -298,6 +333,10 @@ footer.foot a { color: var(--muted); text-decoration: none; }
 footer.foot a:hover { color: var(--fg); }
 
 @media (max-width: 900px) {
+  .docs > .wrap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "toc" "body"; }
+  .docs .toc { position: static; max-height: none; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--rule); background: var(--card); }
+  .docs .toc ol { columns: 2; column-gap: 24px; }
+  .docs .toc a { border-left: 0; padding-left: 0; break-inside: avoid; }
   .also { grid-template-columns: 1fr 1fr; }
   .specs.three { grid-template-columns: 1fr; }
   .feature-head { grid-template-columns: 1fr; }
@@ -314,6 +353,8 @@ footer.foot a:hover { color: var(--fg); }
   .systems { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
+  .docs .toc ol { columns: 1; }
+  .docs td:first-child, .docs td:has(kbd):not(:last-child) { white-space: normal; }
   .wrap { padding: 0 16px; }
   /* No rails at phone width: the column is the screen. */
   header.top .wrap, main > * > .wrap, footer.foot .wrap, .page { border-left: 0; border-right: 0; }

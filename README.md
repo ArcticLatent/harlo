@@ -15,6 +15,7 @@ Written in Rust and drawn with Slint, not Electron.</p>
 <p align="center">
   <a href="https://harlo.run/download"><b>Download</b></a> ·
   <a href="https://harlo.run">Website</a> ·
+  <a href="https://harlo.run/docs">Docs</a> ·
   <a href="#on-your-iphone">iPhone app</a> ·
   <a href="https://harlo.run/support">Support</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>

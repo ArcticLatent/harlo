@@ -3,6 +3,10 @@
 /download.html  /download  301
 /privacy.html  /privacy  301
 /support.html  /support  301
+/docs.html  /docs  301
+/documentation  /docs  301
+/guide  /docs  301
+/manual  /docs  301
 /privacy-policy  /privacy  301
 /help  /support  301
 /github  https://github.com/ArcticLatent/harlo  302
