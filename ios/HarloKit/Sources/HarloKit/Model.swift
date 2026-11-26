@@ -745,16 +745,51 @@ public final class HarloModel {
     // ---- sessions ---------------------------------------------------------------
 
     public func open(_ s: SessionSummary) {
+        cameFrom = []
+        show(s)
+    }
+
+    /// Opens a subagent's own session (a card's `child`) in place of the
+    /// open one; `back` returns to the session it was opened from.
+    public func openChild(_ key: String, title: String) {
+        guard let from = session, !key.isEmpty else { return }
+        cameFrom.append(SessionSummary(["key": .string(from.key), "title": .string(from.title),
+                                        "harness": .string(from.harness), "where": .string(from.folder)]))
+        show(SessionSummary(["key": .string(key), "title": .string(title), "harness": .string(from.harness),
+                             "where": .string(from.folder)]))
+    }
+
+    /// Whether the open session was opened from another's card: `back`
+    /// then leads there.
+    public var opensFromAnother: Bool { !cameFrom.isEmpty }
+
+    /// Goes back to the session a subagent's was opened from; to the
+    /// list when it was opened from there.
+    public func back() {
+        if let parent = cameFrom.popLast() {
+            show(parent)
+        } else {
+            session = nil
+        }
+    }
+
+    /// Closes the open session: back to the list, wherever it was opened
+    /// from.
+    public func close() {
+        cameFrom = []
+        session = nil
+    }
+
+    /// The sessions to go back to, the nearest last.
+    private var cameFrom: [SessionSummary] = []
+
+    private func show(_ s: SessionSummary) {
         if unreadMarks.contains(s.key) { markUnread(s, false) }
         if demo { return demoOpen(s) }
         let open = OpenSession(key: s.key, title: s.title, harness: s.harness)
         open.folder = s.location
         session = open
         Task { await reopen(open) }
-    }
-
-    public func close() {
-        session = nil
     }
 
     /// The connection the open session was opened on.

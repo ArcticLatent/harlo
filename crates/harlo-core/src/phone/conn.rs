@@ -23,6 +23,7 @@ use super::rows::{self, Rows};
 use super::work;
 use super::{Hub, Sealed, Server, key_bytes, lock, now_secs, random_id};
 use crate::composer::{self, Draft, Outgoing};
+use crate::server::{Catalog, Client};
 use crate::workspace::{Event, EventKind, Message};
 
 /// What the phone calls the agent behind every session: Harlo's own,
@@ -162,9 +163,9 @@ async fn greet(link: &mut Link, hub: &Hub) -> Option<(super::Device, [u8; 32])> 
 }
 
 /// What this Harlo does for a phone that an older one didn't, by the names
-/// the app looks for: a session's pictures, and a refusal's reason passed on
-/// to the agent.
-const FEATURES: [&str; 2] = ["pictures", "reasons"];
+/// the app looks for: a session's pictures, a refusal's reason passed on
+/// to the agent, and the plan's limits.
+const FEATURES: [&str; 3] = ["pictures", "reasons", "limits"];
 
 /// One phone's connection, from its hello to its last frame.
 pub(crate) async fn connection(mut link: Link, hub: Arc<Hub>) {
@@ -186,6 +187,7 @@ pub(crate) async fn connection(mut link: Link, hub: Arc<Hub>) {
         device,
         key_b64: super::b64(&key),
         wants_sessions: false,
+        wants_limits: false,
         sessions_dirty: false,
         open: None,
         later_tx,
@@ -228,6 +230,9 @@ struct Conn {
     device: super::Device,
     key_b64: String,
     wants_sessions: bool,
+    /// Whether the phone asked for the plan's limits, and so hears of
+    /// each newer reading.
+    wants_limits: bool,
     sessions_dirty: bool,
     open: Option<Open>,
     later_tx: mpsc::UnboundedSender<Later>,
@@ -446,6 +451,8 @@ impl Conn {
         let mut sessions = self.hub.sessions.subscribe();
         let mut servers = self.hub.server.subscribe();
         let mut devices = self.hub.devices_changed.subscribe();
+        let mut limits = self.hub.limits.subscribe();
+        let mut questions = self.hub.questions.subscribe();
         let mut tick = tokio::time::interval(FLUSH_EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -478,6 +485,23 @@ impl Conn {
                     if lock(&self.hub.devices).find_by_key(&self.key_b64).is_none() {
                         let _ = link.outgoing.send(sealed.seal(&json!({ "ev": "revoked" }))).await;
                         break;
+                    }
+                    Vec::new()
+                }
+                Ok(()) = limits.changed() => {
+                    let mut reading = limits.borrow_and_update().clone();
+                    if self.wants_limits {
+                        reading["ev"] = json!("limits");
+                        vec![reading]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                Ok(()) = questions.changed() => {
+                    questions.borrow_and_update();
+                    // Their rows go out with the next flush.
+                    if let Some(open) = &mut self.open {
+                        open.dirty = true;
                     }
                     Vec::new()
                 }
@@ -524,7 +548,8 @@ impl Conn {
                 .hub
                 .current()
                 .is_some_and(|s| lock(&s.workspace).needs_user(&open.key));
-            let jobs = open.aside.event(&open.key, open.rows.entries(), waits);
+            let mut jobs = open.aside.event(&open.key, open.rows.entries(), waits);
+            add_questions(&self.hub, &open.key, &mut jobs);
             if jobs != open.sent_jobs {
                 out.push(jobs.clone());
                 open.sent_jobs = jobs;
@@ -657,6 +682,12 @@ impl Conn {
                     Vec::new(),
                 )
             }
+            // The limits are this computer's, whatever the server does.
+            _ if op == "limits" => {
+                self.wants_limits = true;
+                super::limits::refresh(&self.hub, super::limits::FRESH_FOR);
+                (self.hub.limits.current(), Vec::new())
+            }
             None if op == "ping" => (json!({ "pong": true }), Vec::new()),
             None => (
                 error("Harlo isn't connected to its server right now."),
@@ -669,6 +700,21 @@ impl Conn {
         }
         reply["id"] = id;
         std::iter::once(reply).chain(after).collect()
+    }
+
+    /// Does the one thing the row `row` beside session `key`'s
+    /// conversation offers: Stop, Pause, Resume, or a side question's
+    /// Dismiss.
+    async fn job_action(&self, client: &Client, key: &str, row: &str) -> Value {
+        let acted = match self.hub.questions.dismiss(key, row) {
+            // (Already gone is as good as dismissed.)
+            Some(_) => Ok(()),
+            None => aside::act(client, key, row).await,
+        };
+        match acted {
+            Ok(()) => json!({ "ok": true }),
+            Err(why) => error(why),
+        }
     }
 
     /// Answers one request; `Null` when the reply comes later.
@@ -752,10 +798,8 @@ impl Conn {
                     .await,
             ),
             "jobAction" => {
-                match aside::act(client, key, m["row"].as_str().unwrap_or_default()).await {
-                    Ok(()) => json!({ "ok": true }),
-                    Err(why) => error(why),
-                }
+                self.job_action(client, key, m["row"].as_str().unwrap_or_default())
+                    .await
             }
             "picture" => self.picture(key, m).await,
             "push" => {
@@ -791,7 +835,8 @@ impl Conn {
         let directory = folder_of(server, key);
         let beside = Aside::load(&server.client, key, directory.as_deref()).await;
         let waits = lock(&server.workspace).needs_user(key);
-        let jobs = beside.event(key, rows.entries(), waits);
+        let mut jobs = beside.event(key, rows.entries(), waits);
+        add_questions(&self.hub, key, &mut jobs);
         let todos = aside::todos_event(key, rows.entries());
         let mut after = vec![
             json!({ "ev": "reset", "key": key, "rows": now, "earlier": earlier }),
@@ -885,9 +930,10 @@ impl Conn {
     /// Sends a phone's message, off the loop.
     fn spawn_send(&self, m: Value, server: Arc<Server>) {
         let later = self.later_tx.clone();
+        let hub = Arc::clone(&self.hub);
         tokio::spawn(async move {
             let key = m["key"].as_str().unwrap_or_default();
-            let mut reply = match send(&server, key, &m).await {
+            let mut reply = match send(&hub, &server, key, &m).await {
                 Ok(()) => json!({ "ok": true }),
                 Err(e) => error(e),
             };
@@ -899,8 +945,9 @@ impl Conn {
     /// Starts a session with the phone's first message, off the loop.
     fn spawn_new(&self, m: Value, server: Arc<Server>) {
         let later = self.later_tx.clone();
+        let hub = Arc::clone(&self.hub);
         tokio::spawn(async move {
-            let mut reply = match start(&server, &m).await {
+            let mut reply = match start(&hub, &server, &m).await {
                 Ok(key) => json!({ "key": key, "harness": HARNESS }),
                 Err(e) => error(e),
             };
@@ -910,28 +957,50 @@ impl Conn {
     }
 }
 
+/// Adds session `key`'s side questions to its `jobs` event.
+fn add_questions(hub: &Hub, key: &str, jobs: &mut Value) {
+    if let Some(items) = jobs["items"].as_array_mut() {
+        items.extend(hub.questions.rows(key));
+    }
+}
+
 /// Sends `m`'s text and photos to session `key`, as its `mode` says.
-async fn send(server: &Server, key: &str, m: &Value) -> Result<(), String> {
+///
+/// A side question (`/btw`) is asked without touching the run, and a
+/// command of the user's own (`!ls`) is started: neither waits for it.
+async fn send(hub: &Arc<Hub>, server: &Server, key: &str, m: &Value) -> Result<(), String> {
     let text = m["text"].as_str().unwrap_or_default();
     let files = photos(&m["images"]);
     if text.trim().is_empty() && files.is_empty() {
         return Err("The message is empty.".to_owned());
     }
     let mode = m["mode"].as_str().unwrap_or_default();
-    if mode == "stopAndSend" {
-        server
-            .client
-            .interrupt(key)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
     let delivery = if mode == "followUp" {
         Delivery::Queue
     } else {
         Delivery::Steer
     };
     let client = &server.client;
-    let sent = match typed(server, key, text, delivery).await {
+    let outgoing = match typed(server, key, text, delivery).await {
+        Outgoing::Aside(question) => {
+            return super::questions::ask(hub, client, key, &question);
+        }
+        // (With photos, it's a message for the agent.)
+        Outgoing::Shell(command) if files.is_empty() => {
+            let (client, key) = (client.clone(), key.to_owned());
+            // The server answers once the command ends, which can be
+            // long; its row comes with the server's events.
+            tokio::spawn(async move {
+                let _ = client.run_shell(&key, &command).await;
+            });
+            return Ok(());
+        }
+        outgoing => outgoing,
+    };
+    if mode == "stopAndSend" {
+        client.interrupt(key).await.map_err(|e| e.to_string())?;
+    }
+    let sent = match outgoing {
         Outgoing::Command { name, arguments } => {
             client.run_command(key, &name, &arguments, delivery).await
         }
@@ -940,8 +1009,8 @@ async fn send(server: &Server, key: &str, m: &Value) -> Result<(), String> {
             prompt.files.extend(files);
             client.prompt(key, &prompt).await
         }
-        // The phone has no side questions or commands of its own to run:
-        // those go to the agent as they were typed.
+        // (A side question was asked above; what is left is a command
+        // sent with photos, which goes to the agent as it was typed.)
         Outgoing::Aside(_) | Outgoing::Shell(_) => {
             let mut prompt = Prompt::new(text, delivery);
             prompt.files = files;
@@ -956,7 +1025,12 @@ async fn send(server: &Server, key: &str, m: &Value) -> Result<(), String> {
 /// what's typed in it.
 async fn typed(server: &Server, key: &str, text: &str, delivery: Delivery) -> Outgoing {
     let plain = || Outgoing::Prompt(Prompt::new(text, delivery));
-    if !text.trim_start().starts_with('/') {
+    let first = text.trim_start();
+    if first.starts_with(composer::SHELL) {
+        // (A command needs nothing of the folder's catalog.)
+        return composer::outgoing(text, &Draft::default(), &Catalog::default(), "", delivery);
+    }
+    if !first.starts_with('/') {
         return plain();
     }
     let Some(directory) = folder_of(server, key) else {
@@ -982,6 +1056,8 @@ fn commands(key: &str, catalog: &crate::server::Catalog) -> Value {
         list.push(json!({ "name": composer::COMPACT,
                           "description": "Summarize the conversation to free up context" }));
     }
+    list.push(json!({ "name": composer::ASIDE,
+                      "description": "Ask a side question, without adding it to the conversation" }));
     list.extend(catalog.skills.iter().map(|s| {
         json!({ "name": s.name,
                 "description": s.description.clone().unwrap_or_else(|| "Skill".to_owned()) })
@@ -990,7 +1066,17 @@ fn commands(key: &str, catalog: &crate::server::Catalog) -> Value {
 }
 
 /// Starts a session in the chosen project with its first message.
-async fn start(server: &Server, m: &Value) -> Result<String, String> {
+async fn start(hub: &Arc<Hub>, server: &Server, m: &Value) -> Result<String, String> {
+    let asks = m["text"]
+        .as_str()
+        .and_then(|text| text.trim_start().strip_prefix('/'))
+        .and_then(|rest| rest.split_whitespace().next())
+        == Some(composer::ASIDE);
+    if asks {
+        return Err(
+            "Open a session first: a side question asks about its conversation.".to_owned(),
+        );
+    }
     let index = m["project"].as_i64().unwrap_or(-1);
     let directory = match usize::try_from(index) {
         Ok(i) => real_projects(server)
@@ -1025,7 +1111,7 @@ async fn start(server: &Server, m: &Value) -> Result<String, String> {
     if !approval.is_empty() {
         super::work::put_in_mode(server, &session.id, approval).await?;
     }
-    send(server, &session.id, m).await?;
+    send(hub, server, &session.id, m).await?;
     Ok(session.id)
 }
 

@@ -28,6 +28,8 @@ struct ToolCard: View {
     var running: Bool { row.state == "running" }
     var symbol: String { Style.toolSymbol(row.title) }
     var canOpen: Bool { hasOutput || !row.error.isEmpty }
+    /// A subagent's card leads to the session it works in.
+    var opensChild: Bool { !row.child.isEmpty }
     /// Something for the opened card besides why it failed.
     var hasOutput: Bool { !row.text.isEmpty || !row.diff.isEmpty || !shownCommand.isEmpty }
     /// The command, shown opened when its line says what it's for instead.
@@ -39,9 +41,7 @@ struct ToolCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                if canOpen { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } }
-            } label: {
+            Button(action: tapped) {
                 HStack(spacing: 12) {
                     IconSquare(symbol: symbol, size: 38)
                     VStack(alignment: .leading, spacing: 3) {
@@ -72,7 +72,12 @@ struct ToolCard: View {
                     }
                     Spacer(minLength: 4)
                     trailing
-                    if canOpen {
+                    if opensChild {
+                        Image(systemName: "chevron.right")
+                            .scaledFont(13, .semibold)
+                            .foregroundStyle(Color(p.muted))
+                            .accessibilityHidden(true)
+                    } else if canOpen {
                         Image(systemName: open ? "chevron.up" : "chevron.down")
                             .scaledFont(13, .semibold)
                             .foregroundStyle(Color(p.muted))
@@ -82,6 +87,7 @@ struct ToolCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityHint(opensChild ? "Opens the subagent's session" : "")
             if !row.images.isEmpty && model.showsPictures {
                 PictureStrip(paths: row.images, side: 72)
                     .padding(.horizontal, 12)
@@ -119,6 +125,15 @@ struct ToolCard: View {
 
     var failed: Bool {
         row.result.hasSuffix("failed") || row.result.hasPrefix("exit") || row.state == "error"
+    }
+
+    /// Opens the subagent's session, or folds and unfolds the card.
+    func tapped() {
+        if opensChild {
+            model.openChild(row.child, title: row.subtitle)
+        } else if canOpen {
+            withAnimation(.easeOut(duration: 0.15)) { open.toggle() }
+        }
     }
 
     @ViewBuilder var trailing: some View {

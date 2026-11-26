@@ -296,6 +296,7 @@ impl App {
                 listen: std::net::SocketAddr::from(([0, 0, 0, 0], state.port)),
                 paused: self.preferences.phone_paused,
                 theme,
+                claude: Some(self.claude_program()),
             };
             return Task::perform(
                 async move {

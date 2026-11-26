@@ -606,6 +606,44 @@ final class ModelPartsTests: XCTestCase {
         XCTAssertFalse(ToolName.isCommand("read"))
     }
 
+    @MainActor
+    func testASubagentsCardOpensItsSessionAndGoingBackReturns() {
+        let card = Row(["key": "s", "kind": "tool", "title": "Subagent: explore", "subtitle": "Find the file", "child": "ses_child"])
+        XCTAssertEqual(card.child, "ses_child")
+        XCTAssertEqual(Row(["key": "t", "kind": "tool", "title": "bash"]).child, "", "an older harlo doesn't say")
+
+        let m = HarloModel(store: MemoryStore(), deviceName: "iPhone")
+        m.startDemo()
+        // Nothing is open: there is nowhere to open it from.
+        m.openChild(card.child, title: card.subtitle)
+        XCTAssertNil(m.session)
+        m.open(SessionSummary(["key": "live:2", "title": "Parent"]))
+        XCTAssertFalse(m.opensFromAnother)
+        m.openChild(card.child, title: card.subtitle)
+        XCTAssertEqual(m.session?.key, "ses_child")
+        XCTAssertEqual(m.session?.title, "Find the file")
+        XCTAssertTrue(m.opensFromAnother)
+        // Back leads to the session it was opened from, then to the list.
+        m.back()
+        XCTAssertEqual(m.session?.key, "live:2")
+        XCTAssertFalse(m.opensFromAnother)
+        m.back()
+        XCTAssertNil(m.session)
+        // Closing goes to the list at once, and forgets the way back.
+        m.open(SessionSummary(["key": "live:2", "title": "Parent"]))
+        m.openChild(card.child, title: card.subtitle)
+        m.close()
+        XCTAssertNil(m.session)
+        XCTAssertFalse(m.opensFromAnother)
+        // Opened from the list, a session goes back to the list.
+        m.open(SessionSummary(["key": "live:2", "title": "Parent"]))
+        m.openChild(card.child, title: card.subtitle)
+        m.open(SessionSummary(["key": "live:3", "title": "Another"]))
+        XCTAssertFalse(m.opensFromAnother)
+        m.back()
+        XCTAssertNil(m.session)
+    }
+
     func testRowsSayWhatACallIsForAndShowACommandsEnd() {
         let lines = (1...3000).map { "line \($0)" }.joined(separator: "\n")
         let r = Row(["key": "t", "kind": "tool", "title": "bash", "text": .string(lines), "label": "Run the tests", "command": "cargo test", "model": "codex/gpt-6.1-sol"])

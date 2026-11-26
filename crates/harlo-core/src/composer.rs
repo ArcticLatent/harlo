@@ -18,6 +18,12 @@ pub const COMPACT: &str = "compact";
 /// session's context, without adding to the conversation.
 pub const ASIDE: &str = "btw";
 
+/// What the model is told before a side question, so it answers from
+/// what it already knows and does nothing.
+pub const ASIDE_PROMPT: &str = "The user is asking a quick side question about the conversation so \
+                                far. Answer directly and concisely in markdown from what you \
+                                already know. Do not call any tools and do not take any actions.";
+
 /// What starts a shell command: `!ls` runs `ls` in the session's folder.
 pub const SHELL: char = '!';
 

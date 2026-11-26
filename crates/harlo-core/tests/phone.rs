@@ -8,6 +8,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod claude_stand_in;
 #[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 mod test_phone;
@@ -21,9 +22,21 @@ use serde_json::{Value, json};
 use support::Sandbox;
 use test_phone::{TestPhone, connect};
 
-/// Starts phone access for the sandbox's server, keeping its files in `folder`.
+/// Starts phone access for the sandbox's server, keeping its files in
+/// `folder`, with no Claude Code to ask for plan limits.
 async fn phone_for(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
+    phone_with(sandbox, folder, None).await
+}
+
+/// Starts phone access as [`phone_for`] does, with `claude` as the Claude
+/// Code whose plan limits phones are shown.
+async fn phone_with(
+    sandbox: &Sandbox,
+    folder: &std::path::Path,
+    claude: Option<std::path::PathBuf>,
+) -> Phone {
     Phone::start(Settings {
+        claude: claude.map(Into::into),
         theme: serde_json::Value::Null,
         folder: folder.to_owned(),
         name: "Test computer".to_owned(),
@@ -556,12 +569,13 @@ async fn a_phone_reads_a_script_and_gets_a_sessions_pictures() {
         phone.text().contains("markdown counted").then_some(())
     })
     .await;
+    // (The row's last words can reach the phone after the answer does.)
     let ran = p
-        .rows
-        .iter()
-        .find(|r| r["tool"] == "execute")
-        .expect("the script's row")
-        .clone();
+        .until("the script's row, ended", |phone, _| {
+            let row = phone.rows.iter().find(|r| r["tool"] == "execute")?;
+            (row["result"] != "").then(|| row.clone())
+        })
+        .await;
     assert_eq!(ran["subtitle"], "Read the file");
     assert_eq!(ran["result"], "1 call");
     assert_eq!(
@@ -604,4 +618,207 @@ async fn a_phone_reads_a_script_and_gets_a_sessions_pictures() {
         )
         .await;
     assert!(missing["error"].is_string(), "{missing}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_is_shown_the_plans_limits_once_they_are_read() {
+    let sandbox = Sandbox::start().await;
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let claude = claude_stand_in::write(folder.path(), 42);
+    let phone = phone_with(&sandbox, folder.path(), Some(claude)).await;
+    let code = phone.offer().code;
+    let mut p = connect(
+        phone.address(),
+        &Identity::generate(),
+        &phone.public_key(),
+        &code,
+    )
+    .await
+    .expect("pairs");
+
+    // Asked, Harlo answers at once with what it has: nothing yet.
+    let first = p.call(json!({ "op": "limits" })).await;
+    assert_eq!(first["here"]["accounts"], json!([]), "{first}");
+    assert_eq!(first["hosts"], json!({}));
+
+    // The reading follows as an event, and is what the next asking gets.
+    let read = p
+        .until("the limits", |_, message| {
+            (message["ev"] == "limits").then(|| message.clone())
+        })
+        .await;
+    let account = &read["here"]["accounts"][0];
+    assert_eq!(account["provider"], "Claude");
+    assert_eq!(account["plan"], "Max");
+    assert_eq!(account["account"], "a@example.com");
+    assert_eq!(
+        account["windows"],
+        json!([{ "label": "Session (5 h)", "usedFraction": 0.42,
+                 "resetsAt": claude_stand_in::RESETS_AT_MS, "status": "ok" }])
+    );
+    let again = p.call(json!({ "op": "limits" })).await;
+    assert_eq!(again["here"], read["here"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_claude_code_a_phone_is_shown_no_limits() {
+    let sandbox = Sandbox::start().await;
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    let limits = p.call(json!({ "op": "limits" })).await;
+    assert_eq!(limits["here"]["accounts"], json!([]), "{limits}");
+}
+
+/// The rows beside session `key`'s conversation, once `pick` takes them.
+async fn job_rows<T>(
+    p: &mut TestPhone,
+    what: &str,
+    key: &str,
+    mut pick: impl FnMut(&[Value]) -> Option<T>,
+) -> T {
+    p.until(what, |_, m| {
+        if m["ev"] != "jobs" || m["key"] != key {
+            return None;
+        }
+        pick(m["items"].as_array().map_or(&[], Vec::as_slice))
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_asks_a_side_question_and_runs_a_command_of_its_own() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    listed(&mut p, &session.id).await;
+    let key = session.id.as_str();
+    p.call(json!({ "op": "open", "key": key })).await;
+    let commands = p
+        .until("the commands", |_, m| {
+            (m["ev"] == "commands").then(|| m["commands"].clone())
+        })
+        .await;
+    assert!(
+        commands
+            .as_array()
+            .is_some_and(|list| list.iter().any(|c| c["name"] == "btw")),
+        "{commands}"
+    );
+
+    // A side question is a row beside the conversation: asked, then
+    // answered, and gone once dismissed. The conversation gets nothing.
+    let none = p
+        .call(json!({ "op": "send", "key": key, "text": "/btw " }))
+        .await;
+    assert_eq!(none["error"], "Add a question after /btw.", "{none}");
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": "/btw say Port **7872**." }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let answered = job_rows(&mut p, "the answer", key, |items| {
+        items
+            .iter()
+            .find(|row| row["title"] == "Side question" && row["working"] == false)
+            .cloned()
+    })
+    .await;
+    assert_eq!(answered["text"], "say Port **7872**.");
+    assert_eq!(answered["detail"], "Port **7872**.");
+    assert_eq!(answered["note"], "Answered");
+    assert_eq!(answered["action"], "Dismiss");
+    assert!(
+        !p.text().contains("7872"),
+        "nothing joins the conversation: {}",
+        p.text()
+    );
+    let dismissed = p
+        .call(json!({ "op": "jobAction", "key": key, "row": answered["id"] }))
+        .await;
+    assert_eq!(dismissed["ok"], true, "{dismissed}");
+    job_rows(&mut p, "the row gone", key, |items| {
+        items.is_empty().then_some(())
+    })
+    .await;
+
+    // A first message can't be one: there is no conversation to ask about.
+    let first = p
+        .call(json!({ "op": "new", "project": 0, "text": "/btw why?" }))
+        .await;
+    assert!(
+        first["error"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("Open a session first"),
+        "{first}"
+    );
+
+    // `!` runs the rest as the person's own command, with no model: its
+    // output joins the conversation.
+    let ran = p
+        .call(json!({ "op": "send", "key": key, "text": "!echo from-the-phone > made.txt; cat made.txt" }))
+        .await;
+    assert_eq!(ran["ok"], true, "{ran}");
+    p.until("the command's output", |phone, _| {
+        phone.text().contains("from-the-phone").then_some(())
+    })
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(sandbox.project().join("made.txt")).expect("made.txt"),
+        "from-the-phone\n"
+    );
+    let asked = std::fs::read_to_string(sandbox.root().join("model.jsonl")).unwrap_or_default();
+    assert!(
+        !asked.contains("echo from-the-phone"),
+        "no model was asked to run it"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_opens_a_subagents_own_session_from_its_card() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("session");
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let (_phone, mut p) = paired(&sandbox, folder.path()).await;
+    listed(&mut p, &session.id).await;
+    let key = session.id.as_str();
+    p.call(json!({ "op": "open", "key": key })).await;
+
+    let call = r#"{"agent":"explore","description":"Find the file","prompt":"say Found a.txt."}"#;
+    let script = format!("tool subagent {call} ;; say Parent done.");
+    let sent = p
+        .call(json!({ "op": "send", "key": key, "text": script }))
+        .await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    p.until("the parent's answer", |phone, _| {
+        phone.text().contains("Parent done.").then_some(())
+    })
+    .await;
+
+    // The card names the session the subagent worked in.
+    let card = p
+        .rows
+        .iter()
+        .find(|r| r["title"] == "Subagent: explore")
+        .expect("the subagent's card")
+        .clone();
+    assert_eq!(card["subtitle"], "Find the file");
+    let child = card["child"].as_str().unwrap_or_default().to_owned();
+    assert!(!child.is_empty() && child != key, "{card}");
+
+    // Opened by that, it shows what the subagent was asked and said.
+    let opened = p.call(json!({ "op": "open", "key": child })).await;
+    assert_eq!(opened["key"], child.as_str(), "{opened}");
+    p.until("the subagent's answer", |phone, _| {
+        phone.text().contains("Found a.txt.").then_some(())
+    })
+    .await;
 }

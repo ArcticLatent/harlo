@@ -17,6 +17,7 @@
 use std::ffi::OsString;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub(crate) use harlo_core::claude::resets_in;
 use harlo_core::claude::{self, Alert, ClaudeCode, Limit, Login, Watch};
 use harlo_core::server::Integration;
 
@@ -122,6 +123,12 @@ impl App {
     pub fn with_claude_program(mut self, program: impl Into<OsString>) -> Self {
         self.claude.program = program.into();
         self
+    }
+
+    /// The Claude Code this window asks, which phones' plan limits come
+    /// from too.
+    pub(super) fn claude_program(&self) -> OsString {
+        self.claude.program.clone()
     }
 
     /// Applies something that happened to the subscription.
@@ -338,57 +345,14 @@ pub(super) fn watch_usage() -> Task<Message> {
 
 /// A limit's notification: its summary, its body, and whether it's a reset.
 fn limit_notice(alert: &Alert, now: i64) -> (String, String, bool) {
-    match alert {
-        Alert::UsedUp(limit) => {
-            let body = limit.resets_at.map_or_else(
-                || "Claude models wait until it resets.".to_owned(),
-                |at| format!("It resets {}.", resets_in(at - now)),
-            );
-            (format!("{} is used up", limit_name(limit)), body, false)
-        }
-        Alert::Reset(limit) => (
-            format!("{} has reset", limit_name(limit)),
-            "You can use it again.".to_owned(),
-            true,
-        ),
-    }
-}
-
-/// A limit in a notification: "Claude's weekly limit".
-fn limit_name(limit: &Limit) -> String {
-    let what = match (limit.kind.as_str(), limit.model.as_deref()) {
-        ("session", _) => "session".to_owned(),
-        (_, Some(model)) => format!("{} {model}", limit.group),
-        _ => limit.group.clone(),
-    };
-    format!("Claude's {what} limit")
+    let (summary, body) = alert.words(now);
+    (summary, body, matches!(alert, Alert::Reset(_)))
 }
 
 /// `time` in whole seconds since the Unix epoch.
 pub(crate) fn epoch_seconds(time: SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-}
-
-/// When something `seconds` from now happens, briefly: "in 2 h 14 min".
-pub(crate) fn resets_in(seconds: i64) -> String {
-    if seconds <= 60 {
-        return "now".to_owned();
-    }
-    let minutes = seconds / 60;
-    let (days, hours, minutes) = (minutes / 1440, minutes / 60 % 24, minutes % 60);
-    if days > 0 {
-        let unit = if days == 1 { "day" } else { "days" };
-        if hours > 0 {
-            format!("in {days} {unit} {hours} h")
-        } else {
-            format!("in {days} {unit}")
-        }
-    } else if hours > 0 {
-        format!("in {hours} h {minutes} min")
-    } else {
-        format!("in {minutes} min")
-    }
 }
 
 #[cfg(test)]

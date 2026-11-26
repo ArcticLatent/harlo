@@ -365,6 +365,61 @@ pub enum Alert {
     Reset(Limit),
 }
 
+impl Alert {
+    /// What to tell at `now` (seconds since the Unix epoch): a title, such
+    /// as "Claude's weekly limit is used up", and a line under it.
+    #[must_use]
+    pub fn words(&self, now: i64) -> (String, String) {
+        match self {
+            Self::UsedUp(limit) => {
+                let body = limit.resets_at.map_or_else(
+                    || "Claude models wait until it resets.".to_owned(),
+                    |at| format!("It resets {}.", resets_in(at - now)),
+                );
+                (format!("{} is used up", limit.owned_name()), body)
+            }
+            Self::Reset(limit) => (
+                format!("{} has reset", limit.owned_name()),
+                "You can use it again.".to_owned(),
+            ),
+        }
+    }
+}
+
+impl Limit {
+    /// The limit in a notification: "Claude's weekly limit".
+    fn owned_name(&self) -> String {
+        let what = match (self.kind.as_str(), self.model.as_deref()) {
+            ("session", _) => "session".to_owned(),
+            (_, Some(model)) => format!("{} {model}", self.group),
+            _ => self.group.clone(),
+        };
+        format!("Claude's {what} limit")
+    }
+}
+
+/// When something `seconds` from now happens, briefly: "in 2 h 14 min".
+#[must_use]
+pub fn resets_in(seconds: i64) -> String {
+    if seconds <= 60 {
+        return "now".to_owned();
+    }
+    let minutes = seconds / 60;
+    let (days, hours, minutes) = (minutes / 1440, minutes / 60 % 24, minutes % 60);
+    if days > 0 {
+        let unit = if days == 1 { "day" } else { "days" };
+        if hours > 0 {
+            format!("in {days} {unit} {hours} h")
+        } else {
+            format!("in {days} {unit}")
+        }
+    } else if hours > 0 {
+        format!("in {hours} h {minutes} min")
+    } else {
+        format!("in {minutes} min")
+    }
+}
+
 /// Follows the plan's limits from one reading to the next, and says what's
 /// worth telling: a limit used up, and one nearly or fully used resetting.
 /// Each is told once.

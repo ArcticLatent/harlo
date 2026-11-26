@@ -22,8 +22,10 @@ mod aside;
 mod conn;
 mod crypto;
 mod devices;
+mod limits;
 mod pictures;
 mod push;
+mod questions;
 mod relay;
 mod requests;
 mod rows;
@@ -31,6 +33,7 @@ pub mod theme;
 mod work;
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -160,6 +163,9 @@ pub struct Settings {
     /// The theme phones draw in, as [`theme::theme`] makes it; null for
     /// Harlo's own.
     pub theme: serde_json::Value,
+    /// The Claude Code whose plan limits phones are shown (see
+    /// [`claude::program`](crate::claude::program)); none shows them none.
+    pub claude: Option<OsString>,
 }
 
 /// The server phones see, once connected.
@@ -194,6 +200,10 @@ pub(crate) struct Hub {
     activities: activity::Activities,
     /// The sessions pinned on phones, kept in `pins.json`.
     pins: Mutex<std::collections::BTreeSet<String>>,
+    /// The plan limits phones are shown.
+    limits: limits::Limits,
+    /// The side questions asked from phones.
+    questions: questions::Questions,
     pub(crate) server: watch::Sender<Option<Arc<Server>>>,
     pub(crate) events: broadcast::Sender<Arc<Event>>,
     /// Bumped when the session list may have changed.
@@ -237,6 +247,17 @@ impl Hub {
 
     pub(crate) fn current(&self) -> Option<Arc<Server>> {
         self.server.borrow().clone()
+    }
+
+    /// Whether notifications are held back for now.
+    pub(crate) fn notifications_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Questions and approvals waiting, in all: the app icon's badge.
+    pub(crate) fn waiting(&self) -> usize {
+        self.current()
+            .map_or(0, |server| waiting(&lock(&server.workspace)))
     }
 
     /// The theme phones draw in.
@@ -315,6 +336,8 @@ pub struct Phone {
     address: SocketAddr,
     follow: Mutex<JoinHandle<()>>,
     listener: JoinHandle<()>,
+    /// Reads the plan limits for notifications.
+    limits: JoinHandle<()>,
 }
 
 impl std::fmt::Debug for Phone {
@@ -329,6 +352,7 @@ impl Drop for Phone {
     fn drop(&mut self) {
         lock(&self.follow).abort();
         self.listener.abort();
+        self.limits.abort();
     }
 }
 
@@ -363,6 +387,8 @@ impl Phone {
             theme: Mutex::new(settings.theme),
             avatar_pick: Mutex::new(None),
             pins: Mutex::new(pins),
+            limits: limits::Limits::new(settings.claude),
+            questions: questions::Questions::default(),
             activities: activity::Activities::default(),
             server: watch::Sender::new(None),
             events: broadcast::Sender::new(EVENT_BACKLOG),
@@ -378,11 +404,13 @@ impl Phone {
             let _ = axum::serve(listener, router).await;
         });
         let follow = tokio::spawn(follow(Arc::clone(&hub), settings.location));
+        let limits = tokio::spawn(limits::watch(Arc::clone(&hub)));
         Ok(Self {
             hub,
             address,
             follow: Mutex::new(follow),
             listener,
+            limits,
         })
     }
 
@@ -636,6 +664,20 @@ async fn follow(hub: Arc<Hub>, location: Location) {
     }
 }
 
+/// How many of `workspace`'s sessions wait for an answer or an approval.
+fn waiting(workspace: &Workspace) -> usize {
+    workspace
+        .sidebar(SystemTime::now())
+        .iter()
+        .flat_map(|p| {
+            p.sessions
+                .iter()
+                .chain(p.worktrees.iter().flat_map(|w| &w.sessions))
+        })
+        .filter(|s| s.waiting)
+        .count()
+}
+
 /// The notification an event makes, if any: a question or an approval
 /// asked, or a top-level session's run finished or failed.
 fn alert(server: &Server, kind: &crate::workspace::EventKind) -> Option<Alert> {
@@ -685,16 +727,7 @@ fn alert(server: &Server, kind: &crate::workspace::EventKind) -> Option<Alert> {
         .title
         .clone()
         .unwrap_or_else(|| "New session".to_owned());
-    let badge = workspace
-        .sidebar(SystemTime::now())
-        .iter()
-        .flat_map(|p| {
-            p.sessions
-                .iter()
-                .chain(p.worktrees.iter().flat_map(|w| &w.sessions))
-        })
-        .filter(|s| s.waiting)
-        .count();
+    let badge = waiting(&workspace);
     Some(Alert {
         what,
         key,

@@ -106,6 +106,9 @@ public struct Row: Equatable, Sendable, Identifiable {
     /// Tool rows: why a failed call failed, whole ("" none; `result` then
     /// says it in a word: "Declined", "Failed").
     public var error = ""
+    /// A subagent's card: the session it works in ("" none, or an older
+    /// harlo that doesn't say).
+    public var child = ""
 
     public var id: String { key }
 
@@ -134,6 +137,7 @@ public struct Row: Equatable, Sendable, Identifiable {
         commandSpans = commandHtml.isEmpty ? [] : RichText.codeLine(commandHtml)
         callId = v["callId"].text
         error = v["error"].text
+        child = v["child"].text
     }
 
     public init(key: String, kind: String, html: String = "", text: String = "", title: String = "", subtitle: String = "",

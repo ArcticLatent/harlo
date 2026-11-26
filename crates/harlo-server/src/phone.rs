@@ -196,6 +196,7 @@ impl PhoneHost {
             listen: SocketAddr::from(([0, 0, 0, 0], wanted.port)),
             paused: wanted.paused,
             theme: wanted.theme.clone(),
+            claude: Some(harlo_core::claude::program()),
         })
         .await
         .map_err(|e| format!("Couldn't listen for phones: {e}"))?;

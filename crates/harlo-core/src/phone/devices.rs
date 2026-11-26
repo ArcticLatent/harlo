@@ -30,6 +30,10 @@ pub struct Device {
 
 /// A phone's push registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "what the phone's own switches say, each on or off, saved as they are"
+)]
 pub struct PushTarget {
     /// Its APNs device token, as lowercase hex.
     pub token: String,
@@ -39,10 +43,13 @@ pub struct PushTarget {
     pub asks: bool,
     /// Whether it wants finished and failed runs.
     pub done: bool,
+    /// Whether it wants plan limits used up and reset.
+    pub limits: bool,
 }
 
 impl PushTarget {
-    /// Reads a registration the phone sent, `{ token, sandbox, asks, done }`.
+    /// Reads a registration the phone sent, `{ token, sandbox, asks, done,
+    /// limits }`; what it doesn't say, it wants.
     #[must_use]
     pub fn from_json(v: &Value) -> Option<Self> {
         let token = v["token"].as_str()?.trim();
@@ -52,11 +59,13 @@ impl PushTarget {
             sandbox: v["sandbox"].as_bool().unwrap_or(false),
             asks: v["asks"].as_bool().unwrap_or(true),
             done: v["done"].as_bool().unwrap_or(true),
+            limits: v["limits"].as_bool().unwrap_or(true),
         })
     }
 
     fn to_json(&self) -> Value {
-        json!({ "token": self.token, "sandbox": self.sandbox, "asks": self.asks, "done": self.done })
+        json!({ "token": self.token, "sandbox": self.sandbox, "asks": self.asks,
+                "done": self.done, "limits": self.limits })
     }
 }
 

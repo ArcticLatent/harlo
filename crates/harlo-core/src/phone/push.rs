@@ -1,5 +1,6 @@
 //! Notifications to the phone app while it's closed: a question or an
-//! approval waiting, a run finished or failed.
+//! approval waiting, a run finished or failed, a plan limit used up or
+//! reset.
 //!
 //! Only a holder of the app's push key can send them, so they go through
 //! the relay, which has it. What a notification says is sealed for the
@@ -30,6 +31,10 @@ pub enum What {
     Failed,
     /// Settings' "Send a test notification".
     Test,
+    /// A plan limit is used up; the alert's key is the limit's tag.
+    Limit,
+    /// A plan limit, nearly or fully used, has reset.
+    Reset,
 }
 
 /// One notification.
@@ -73,6 +78,8 @@ pub fn payload(alert: &Alert, channel: &Channel) -> Value {
         What::Done => ("done", "A session finished", ""),
         What::Failed => ("failed", "A session stopped with an error", ""),
         What::Test => ("test", "Harlo can reach this phone", ""),
+        What::Limit => ("limit", "A plan limit is used up", ""),
+        What::Reset => ("reset", "A plan limit has reset", ""),
     };
     let mut content = json!({ "k": kind, "s": alert.key, "t": clip(&alert.title, 80),
                               "b": clip(&alert.body, 300) });
@@ -96,11 +103,12 @@ pub fn payload(alert: &Alert, channel: &Channel) -> Value {
     json!({ "aps": aps, "h": channel.seal(content.to_string().as_bytes()) })
 }
 
-/// Whether a phone that wants `asks` and `done` notifications wants this one.
-fn wants(what: &What, asks: bool, done: bool) -> bool {
+/// Whether the phone registered as `push` wants this notification.
+fn wants(what: &What, push: &super::devices::PushTarget) -> bool {
     match what {
-        What::Ask(_) => asks,
-        What::Done | What::Failed => done,
+        What::Ask(_) => push.asks,
+        What::Done | What::Failed => push.done,
+        What::Limit | What::Reset => push.limits,
         What::Test => true,
     }
 }
@@ -121,11 +129,7 @@ pub(crate) async fn deliver(
     let devices: Vec<super::Device> = lock(&hub.devices)
         .list()
         .iter()
-        .filter(|d| {
-            d.push
-                .as_ref()
-                .is_some_and(|p| wants(&alert.what, p.asks, p.done))
-        })
+        .filter(|d| d.push.as_ref().is_some_and(|p| wants(&alert.what, p)))
         .filter(|d| everyone || !online.contains(&d.id))
         .cloned()
         .collect();

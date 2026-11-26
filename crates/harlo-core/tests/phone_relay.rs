@@ -7,6 +7,7 @@
 
 // Rust guideline compliant 2026-10-09
 
+mod claude_stand_in;
 #[path = "../../harlo-client/tests/support/mod.rs"]
 mod support;
 
@@ -171,9 +172,21 @@ impl TestPhone {
     }
 }
 
-/// Starts phone access for the sandbox's server, keeping its files in `folder`.
+/// Starts phone access for the sandbox's server, keeping its files in
+/// `folder`, with no Claude Code to ask for plan limits.
 async fn start_phone(sandbox: &Sandbox, folder: &std::path::Path) -> Phone {
+    start_phone_with(sandbox, folder, None).await
+}
+
+/// Starts phone access as [`start_phone`] does, with `claude` as the
+/// Claude Code whose plan limits phones are shown.
+async fn start_phone_with(
+    sandbox: &Sandbox,
+    folder: &std::path::Path,
+    claude: Option<std::path::PathBuf>,
+) -> Phone {
     Phone::start(Settings {
+        claude: claude.map(Into::into),
         theme: serde_json::Value::Null,
         folder: folder.to_owned(),
         name: "Test computer".to_owned(),
@@ -436,4 +449,74 @@ async fn an_activity_handed_over_after_a_quick_answer_ends_as_done() {
         "{:?}",
         activity_pushes()
     );
+}
+
+/// A plan limit that is used up is told to the phones whose app is
+/// closed, once, sealed for each; a phone that turned those notifications
+/// off hears nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_app_is_told_when_a_plan_limit_is_used_up() {
+    let (relay, relay_address) = start_relay().await;
+    let sandbox = Sandbox::start().await;
+    let folder = tempfile::tempdir().expect("scratch folder");
+    let claude = claude_stand_in::write(folder.path(), 100);
+    let phone = start_phone_with(&sandbox, folder.path(), Some(claude)).await;
+    let hosting = phone
+        .relay(&format!("http://{relay_address}"))
+        .expect("a relay");
+    online(&hosting).await;
+
+    // Two phones allow notifications and close their apps; the second
+    // wants none about limits.
+    let key = Identity::generate();
+    for (key, token, limits) in [
+        (&key, "AAAA01", true),
+        (&Identity::generate(), "BBBB02", false),
+    ] {
+        let mut p = pair_through(&phone.offer(), key).await;
+        let registered = p
+            .call(json!({ "op": "push", "token": token, "limits": limits }))
+            .await;
+        assert_eq!(registered["ok"], true, "{registered}");
+    }
+    wait_for("the phones gone", || async {
+        phone.connected().is_empty().then_some(())
+    })
+    .await;
+
+    // A third opens its app, which asks for the limits: they are read.
+    let mut open = pair_through(&phone.offer(), &Identity::generate()).await;
+    let first = open.call(json!({ "op": "limits" })).await;
+    assert_eq!(first["here"]["accounts"], json!([]), "{first}");
+
+    let harlo = key_bytes(&phone.public_key()).expect("key");
+    let told = wait_for("the limit's notification", || async {
+        let pushes = relay.pushes.lock().expect("pushes").clone();
+        pushes.into_iter().find(|p| p["token"] == "aaaa01")
+    })
+    .await;
+    assert_eq!(
+        told["payload"]["aps"]["alert"]["body"],
+        "A plan limit is used up"
+    );
+    let sealed = told["payload"]["h"].as_str().expect("sealed");
+    let content: Value =
+        serde_json::from_slice(&key.channel(&harlo).open(sealed).expect("opens")).expect("JSON");
+    assert_eq!(content["k"], "limit");
+    assert_eq!(content["s"], "claude:session");
+    assert_eq!(content["t"], "Claude's session limit is used up");
+    assert!(
+        content["b"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("It resets in "),
+        "{content}"
+    );
+
+    // Asked again, the limits are the same: nobody is told twice, and the
+    // phone that wants no such notification got none.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pushes = relay.pushes.lock().expect("pushes").clone();
+    assert_eq!(pushes.len(), 1, "{pushes:#?}");
+    drop(open);
 }

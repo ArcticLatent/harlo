@@ -192,6 +192,11 @@ impl TestPhone {
             }
         }
         self.seen = kept;
+        // What a pick reads off the phone itself (its rows) may already be
+        // so, with no message left to say it.
+        if let Some(found) = pick(self, &Value::Null) {
+            return found;
+        }
         let deadline = tokio::time::Instant::now() + WAIT;
         loop {
             assert!(

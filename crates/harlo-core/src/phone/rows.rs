@@ -221,15 +221,17 @@ pub fn row(entry: &Entry) -> Value {
             json!({ "key": key, "kind": "thinking", "text": clip(text), "state": "done" })
         }
         Entry::Tool { .. } => tool_row(entry),
+        // (`child` is the subagent's own session, which the phone opens
+        // from the card.)
         Entry::Subagent {
             key,
             agent,
             task,
+            child,
             status,
-            ..
         } => json!({
             "key": key, "kind": "tool", "title": format!("Subagent: {agent}"), "subtitle": task,
-            "state": state(*status),
+            "state": state(*status), "child": child.clone().unwrap_or_default(),
         }),
         Entry::Report { key, report } => {
             let text = format!(

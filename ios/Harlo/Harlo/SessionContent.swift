@@ -177,7 +177,14 @@ struct SessionContent: View {
         .toolbarVisibility(.visible, for: .navigationBar)
         // (The conversation gets the room; Back returns to the tabs.)
         .toolbarVisibility(.hidden, for: .tabBar)
+        // (A subagent's session, opened from its card, leads back there.)
+        .navigationBarBackButtonHidden(model.opensFromAnother)
         .toolbar {
+            if model.opensFromAnother {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Back to the session", systemImage: "chevron.backward", action: model.back)
+                }
+            }
             // The session's tile (its model's maker, the agent as a tag), its
             // name, and the agent · project · branch.
             ToolbarItem(placement: .principal) {

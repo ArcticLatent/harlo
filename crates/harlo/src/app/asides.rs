@@ -8,14 +8,10 @@
 
 // Rust guideline compliant 2026-10-09
 
+use harlo_core::composer::ASIDE_PROMPT;
+
 use super::{App, Message, Panel};
 use crate::task::Task;
-
-/// What the model is told before the question, so it answers from what
-/// it already knows and does nothing.
-const ASIDE_PROMPT: &str = "The user is asking a quick side question about the conversation so \
-                            far. Answer directly and concisely in markdown from what you already \
-                            know. Do not call any tools and do not take any actions.";
 
 /// Where a side question's answer stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
