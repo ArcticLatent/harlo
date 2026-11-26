@@ -24,16 +24,16 @@ extension HarloModel {
         let command: JSON = ["id": "r2", "method": "select", "title": "Allow tool: bash", "message": "bash: cargo test -p harlo-relay",
                              "options": ["Approve", "Deny"], "approval": true, "asked": .int((t - 480) * 1000)]
         m.sessions = [
-            s("live:1", "Fix the session list's scrolling", "harlo", "pi", "busy", 20, pinned: true, model: "GPT-5", maker: "openai"),
-            s("live:2", "Add photos to the phone composer", "harlo", "pi", "input", 300, branch: "phone-photos", requests: [approval], model: "Sonnet 5", maker: "anthropic"),
-            s("live:3", "Why does the relay drop idle phones?", "harlo", "pi", "unread", 3600, model: "GLM 5.3", maker: "zai-coding-plan"),
-            s("/s/4", "Release notes for 0.4", "harlo", "pi", "", 86400 * 2, model: "Kimi K3.1 Pro", maker: "kimi-for-coding"),
-            s("/s/5", "Tidy the README", "website", "pi", "", 86400 * 5, model: "GLM 5.3", maker: "zai-coding-plan"),
-            s("/s/6", "Benchmark the markdown renderer", "", "pi", "", 86400 * 12, host: "nas"),
-            s("/s/7", "Split the relay's config", "harlo", "pi", "", 86400 * 3, branch: "relay-config", settled: "Merged"),
+            s("live:1", "Fix the session list's scrolling", "harlo", "harlo", "busy", 20, pinned: true, model: "GPT-5", maker: "openai"),
+            s("live:2", "Add photos to the phone composer", "harlo", "harlo", "input", 300, branch: "phone-photos", requests: [approval], model: "Sonnet 5", maker: "anthropic"),
+            s("live:3", "Why does the relay drop idle phones?", "harlo", "harlo", "unread", 3600, model: "GLM 5.3", maker: "zai-coding-plan"),
+            s("/s/4", "Release notes for 0.4", "harlo", "harlo", "", 86400 * 2, model: "Kimi K3.1 Pro", maker: "kimi-for-coding"),
+            s("/s/5", "Tidy the README", "website", "harlo", "", 86400 * 5, model: "GLM 5.3", maker: "zai-coding-plan"),
+            s("/s/6", "Benchmark the markdown renderer", "", "harlo", "", 86400 * 12, host: "nas"),
+            s("/s/7", "Split the relay's config", "harlo", "harlo", "", 86400 * 3, branch: "relay-config", settled: "Merged"),
         ]
         if busier {
-            m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "pi", "input", 600, requests: [command]), at: 2)
+            m.sessions.insert(s("live:5", "Run the relay's tests", "harlo", "harlo", "input", 600, requests: [command]), at: 2)
         }
         m.limits = sampleLimits(now: now)
         return m
@@ -58,7 +58,7 @@ extension HarloModel {
 
     /// The sample session `openSample` opens.
     static func sampleSession(asking: Bool = false, now: Date = Date.now) -> OpenSession {
-        let s = OpenSession(key: "live:1", title: "Fix the session list's scrolling", harness: "pi")
+        let s = OpenSession(key: "live:1", title: "Fix the session list's scrolling", harness: "harlo")
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         s.liveKey = "live:1"
         s.loading = false
@@ -80,7 +80,7 @@ extension HarloModel {
             Row(key: "u1", kind: "user", text: "The session list jumps to the top when a session finishes. Can you find out why and fix it?"),
             Row(key: "t1", kind: "thinking", text: "The list is rebuilt on every status change…", group: "g1", summary: "Thought, read 2 files, edited 1 file, ran 1 command",
                 time: ms - 95_000, runMs: 18_000),
-            Row(key: "c1", kind: "tool", text: "crates/harlo-app/qml/Sidebar.qml", title: "read", subtitle: "Sidebar.qml", state: "done", group: "g1", result: "214 lines"),
+            Row(key: "c1", kind: "tool", text: "crates/harlo/ui/sidebar.slint", title: "read", subtitle: "sidebar.slint", state: "done", group: "g1", result: "214 lines"),
             Row(key: "c2", kind: "tool", text: "", title: "read", subtitle: "sidebar.rs", state: "done", group: "g1", result: "460 lines"),
             Row(key: "c2b", kind: "tool", text: "", title: "edit", subtitle: "sidebar.rs", state: "done", group: "g1", result: "+4 −2",
                 diff: "     for project in input.projects {\n-        rows.clear();\n+        let fresh = project_rows(project, input);\n+        merge_by_key(&mut rows, fresh);"),
@@ -125,7 +125,7 @@ public struct Samples: Sendable {
         ["ts": 1_760_000_090_000, "kind": "command", "tool": "bash", "target": "cargo test -p harlo-core", "result": "128 passed"],
     ]])
     public var markdown = "# Fix the session list's scrolling\n\n*Harlo · GPT-5 · `~/Projects/harlo`*\n\n---\n\n## You\n\nThe session list jumps to the top when a session's status changes. Keep the scroll position.\n\n## Harlo\n\n- **read** `crates/harlo-core/src/sidebar.rs` → 214 lines\n- **edit** `crates/harlo-core/src/sidebar.rs` → +8 −2\n\nThe list is now updated in place, so it keeps its position.\n"
-    public var files: [String] = ["crates/harlo-core/src/sidebar.rs", "crates/harlo-app/qml/Sidebar.qml", "crates/harlo-core/src/listdiff.rs", "README.md"]
+    public var files: [String] = ["crates/harlo-core/src/sidebar.rs", "crates/harlo/ui/sidebar.slint", "crates/harlo-core/src/listdiff.rs", "README.md"]
     public var file = FileText(["path": "crates/harlo-core/src/sidebar.rs", "total": 4, "lines": [
         "<span class=\"s2\">pub</span> <span class=\"s2\">fn</span> <span class=\"s5\">build</span>(input: <span class=\"s8\">&amp;</span><span class=\"s7\">SidebarInput</span>) -&gt; <span class=\"s7\">Vec</span>&lt;<span class=\"s7\">SidebarRow</span>&gt; {",
         "    <span class=\"s2\">let</span> <span class=\"s2\">mut</span> rows <span class=\"s8\">=</span> <span class=\"s7\">Vec</span>::<span class=\"s5\">new</span>();",
@@ -138,22 +138,22 @@ public struct Samples: Sendable {
         "remote": [["name": "origin/relay-limits", "date": 1_759_800_000]]])
 
     public static let standard = Samples(
-        choices: NewSessionChoices(["projects": [["id": 1, "name": "harlo", "where": "~/Projects/harlo", "agent": "pi"],
-                                                 ["id": 2, "name": "website", "where": "~/Projects/website", "agent": "pi"]],
-                                    "agents": [["id": "pi", "label": "pi"]],
-                                    "defaultAgent": "pi",
+        choices: NewSessionChoices(["projects": [["id": 1, "name": "harlo", "where": "~/Projects/harlo", "agent": "harlo"],
+                                                 ["id": 2, "name": "website", "where": "~/Projects/website", "agent": "harlo"]],
+                                    "agents": [["id": "harlo", "label": "Harlo"]],
+                                    "defaultAgent": "harlo",
                                     "machines": [["host": "nas", "connected": false]],
-                                    "approvals": ["pi": "write"],
-                                    "models": [["harness": "pi", "model": "openai/gpt-5"], ["harness": "pi", "model": "anthropic/claude-sonnet-4-5"]],
-                                    "templates": [["id": "t1", "name": "Review a PR", "harness": "pi", "approval": "always-ask", "text": "Review the open pull request: correctness first, then tests."],
-                                                  ["id": "t2", "name": "Fix the failing tests", "harness": "pi", "model": "openai/gpt-5", "approval": "write", "text": "Run the tests and fix what fails."]]]),
+                                    "approvals": ["harlo": "write"],
+                                    "models": [["harness": "harlo", "model": "openai/gpt-5"], ["harness": "harlo", "model": "anthropic/claude-sonnet-4-5"]],
+                                    "templates": [["id": "t1", "name": "Review a PR", "harness": "harlo", "approval": "always-ask", "text": "Review the open pull request: correctness first, then tests."],
+                                                  ["id": "t2", "name": "Fix the failing tests", "harness": "harlo", "model": "openai/gpt-5", "approval": "write", "text": "Run the tests and fix what fails."]]]),
         models: [ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "reasoning": true]),
                  ModelChoice(["provider": "anthropic", "providerName": "Anthropic", "id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5", "name": "GPT-5", "reasoning": true]),
                  ModelChoice(["provider": "openai", "id": "gpt-5-mini", "name": "GPT-5 mini", "reasoning": false])],
         changes: Changes(["branch": "main", "ahead": 1, "files": [
             ["path": "crates/harlo-core/src/sidebar.rs", "status": "M"],
-            ["path": "crates/harlo-app/qml/Sidebar.qml", "status": "M"],
+            ["path": "crates/harlo/ui/sidebar.slint", "status": "M"],
             ["path": "crates/harlo-core/tests/sidebar_order.rs", "status": "?", "untracked": true],
             ["path": "docs/old-notes.md", "status": "D"]]]),
         diff: FileDiff(["path": "crates/harlo-core/src/sidebar.rs", "added": 4, "removed": 2, "hunks": [[

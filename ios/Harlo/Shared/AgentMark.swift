@@ -13,7 +13,7 @@ struct AgentMark: View {
             .fill(Color(.sRGB, red: t.fill.r, green: t.fill.g, blue: t.fill.b, opacity: t.fill.a))
             .frame(width: size, height: size)
             .overlay {
-                Image(harness == "pi" ? "Mark-pi" : "Mark-demo")
+                Image(harness == "harlo" ? "Mark-harlo" : "Mark-demo")
                     .resizable()
                     .renderingMode(.template)
                     .scaledToFit()

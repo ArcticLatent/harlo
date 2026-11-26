@@ -1014,8 +1014,8 @@ final class MachinesTests: XCTestCase {
         XCTAssertEqual(SessionInfo(["modelId": "opencode-go/claude-haiku-5-5", "maker": "anthropic"]).maker, "anthropic")
         // Claude Code on Claude: Claude's own mark; any other maker, or
         // another agent: the maker, with the agent as a tag.
-        XCTAssertTrue(Palette.modelFirst(harness: "pi", maker: "anthropic"))
-        XCTAssertFalse(Palette.modelFirst(harness: "pi", maker: ""))
+        XCTAssertTrue(Palette.modelFirst(harness: "harlo", maker: "anthropic"))
+        XCTAssertFalse(Palette.modelFirst(harness: "harlo", maker: ""))
     }
 }
 
@@ -1050,13 +1050,13 @@ final class HelperTests: XCTestCase {
 
     @MainActor func testOpeningAgainShowsOnlyWhatsCurrent() {
         let s = OpenSession(key: "live:1")
-        s.opened(liveKey: "live:1", harness: "pi")
+        s.opened(liveKey: "live:1", harness: "harlo")
         let todo: JSON = ["ev": "todos", "key": "live:1", "phases": [["name": "Fix", "tasks": [["content": "Run the tests", "status": "in_progress"]]]]]
         s.take(Event(todo)!)
         XCTAssertEqual(s.todos.count, 1)
         // Opened again, harlo sends what's current: none left, none show.
         s.liveKey = ""
-        s.opened(liveKey: "live:2", harness: "pi")
+        s.opened(liveKey: "live:2", harness: "harlo")
         XCTAssertTrue(s.todos.isEmpty)
     }
 

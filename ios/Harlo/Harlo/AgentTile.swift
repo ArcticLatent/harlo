@@ -30,7 +30,7 @@ struct AgentTile: View {
             .accessibilityLabel(modelFirst ? AgentTile.makerName(maker) : Style.harnessLabel(harness))
     }
 
-    static let known = ["pi", "demo"]
+    static let known = ["harlo", "demo"]
 
     /// A maker's name, for VoiceOver.
     static func makerName(_ id: String) -> String {

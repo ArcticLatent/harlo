@@ -79,6 +79,6 @@ enum Live {
     }
 
     static func agent(_ id: String) -> String {
-        ["harlo": "Harlo", "claude": "Claude", "pi": "pi", "demo": "Demo"][id] ?? id
+        ["harlo": "Harlo", "demo": "Demo"][id] ?? id
     }
 }

@@ -214,7 +214,7 @@ public final class OpenSession {
     public var canUnqueue: Bool { harness == "demo" || harness == "harlo" }
 
     /// The agent can branch at one of the user's messages (edit & resend).
-    public var canBranch: Bool { harness == "pi" || harness == "harlo" }
+    public var canBranch: Bool { harness == "harlo" }
     public var items: [TranscriptItem] { TranscriptItem.build(rows, opened: opened) }
 
     /// Opens a folded run, or folds an open one (`open`: how it shows now).
@@ -1176,7 +1176,7 @@ public final class HarloModel {
     public func connect(_ host: String) async -> RemoteMachine? {
         if demo || samples != nil {
             try? await Task.sleep(for: .milliseconds(600))
-            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["pi"])
+            return RemoteMachine(host: host, connected: true, home: "/home/robin", agents: ["harlo"])
         }
         return await with(session: false) { c, _ in try await c.connect(host) }
     }
