@@ -26,6 +26,8 @@ fn sample() -> Layout {
             Tabs {
                 open: vec!["ses_a".into(), "ses_b".into()],
                 active: Some("ses_b".into()),
+                unread: vec!["ses_c".into()],
+                followed: 1_800_000_000_000,
             },
         )]),
     }

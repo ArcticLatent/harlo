@@ -682,6 +682,9 @@ pub struct App {
     models_for: Option<String>,
     /// The sessions with an answer nobody has looked at yet.
     pub unread: HashSet<String>,
+    /// When the newest run heard of from this server ended, in
+    /// milliseconds since the Unix epoch; 0 before one was.
+    followed: i64,
     /// The picker whose menu is open.
     pub picker: Option<Picker>,
     /// The open menu's filter text.
@@ -827,6 +830,7 @@ impl App {
             picker_filter: String::new(),
             system_fonts: None,
             unread: HashSet::new(),
+            followed: 0,
             picker_index: 0,
             picker_scroll: 0.0,
             drafts: HashMap::new(),
@@ -902,8 +906,10 @@ impl App {
         let current = self.restore.clone().unwrap_or_else(|| Tabs {
             open: self.tabs.clone(),
             active: self.active.clone(),
+            unread: self.unread_saved(),
+            followed: self.followed,
         });
-        if !current.open.is_empty() {
+        if !current.is_empty() {
             tabs.insert(self.location.label(), current);
         }
         let mut expanded: Vec<String> = self.expanded.iter().cloned().collect();
@@ -1331,9 +1337,13 @@ impl App {
                 self.own_tools_error = None;
                 self.workspace.resync(connected.snapshot.clone());
                 self.forget_catalogs();
+                // Unread marks saved from last time come back, with one for
+                // each answer that arrived meanwhile.
+                let saved = self.restore.take();
+                self.catch_up_unread(saved.as_ref());
                 // Tabs saved from last time reopen, unless the user turned
                 // that off, then load below.
-                if let Some(saved) = self.restore.take().filter(|_| self.preferences.reopen_tabs) {
+                if let Some(saved) = saved.filter(|_| self.preferences.reopen_tabs) {
                     for id in saved.open {
                         if self.workspace.session(&id).is_some() && !self.tabs.contains(&id) {
                             self.timelines.insert(id.clone(), Timeline::new(&id));
@@ -1372,7 +1382,7 @@ impl App {
             Update::Event(event) => {
                 let fetches = self.workspace.apply(&event.kind, event.time);
                 let notice = self.notice(&event.kind);
-                self.track_unread(&event.kind);
+                self.track_unread(&event.kind, event.time);
                 if let EventKind::SessionDeleted { session_id }
                 | EventKind::SessionArchived { session_id } = &event.kind
                 {
@@ -1576,10 +1586,15 @@ impl App {
             let left = self.restore.take().unwrap_or_else(|| Tabs {
                 open: std::mem::take(&mut self.tabs),
                 active: self.active.take(),
+                unread: self.unread_saved(),
+                followed: self.followed,
             });
-            if !left.open.is_empty() {
+            if !left.is_empty() {
                 self.other_tabs.insert(self.location.label(), left);
             }
+            // The marks belong to the server left.
+            self.unread.clear();
+            self.followed = 0;
             self.restore = self.other_tabs.remove(&location.label());
             self.location = location;
             self.status = Status::Connecting { attempt: 1 };

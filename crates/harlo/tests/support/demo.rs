@@ -110,6 +110,8 @@ pub fn snapshot() -> Snapshot {
             created: now_ms - (age as f64) * 1000.0,
             updated: now_ms - (age as f64) * 1000.0,
             archived: None,
+            idle: None,
+            outcome: None,
             revert: None,
             permissions: Vec::new(),
             cost: 0.0,
@@ -161,14 +163,21 @@ pub fn layout() -> Layout {
 /// tools stay off: offered, they'd attach for the real home folder on the
 /// test's server. Their own test turns them on with a scratch home.
 pub fn new_app() -> App {
-    let mut app = App::new(Location::Local, vec![Location::Local], layout());
+    new_app_with(layout())
+}
+
+/// A new app as [`new_app`] makes one, with `layout` as saved last time.
+pub fn new_app_with(layout: Layout) -> App {
+    let mut app = App::new(Location::Local, vec![Location::Local], layout);
     // Not the mockup's home folder, whatever `HOME` the test runs with:
     // its sessions stay a project.
     "/home/demo".clone_into(&mut app.home);
     app.preferences.own_tools = false;
     // Never the real speech models' folder.
     app.voice.models = None;
-    app
+    // Nor the real Claude Code: nothing is there unless a test names a
+    // stand-in.
+    app.with_claude_program("/nonexistent/harlo-tests/claude")
 }
 
 /// An app connected to the mockup's server, with the clock at [`now`].

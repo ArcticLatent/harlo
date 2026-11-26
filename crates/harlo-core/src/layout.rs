@@ -334,7 +334,8 @@ impl Default for Layout {
     }
 }
 
-/// The sessions open on one server.
+/// The sessions open on one server, and the ones with an answer nobody
+/// has looked at yet.
 ///
 /// Layouts saved while the main area could be split into panes also hold
 /// that arrangement; it's ignored when read.
@@ -345,6 +346,20 @@ pub struct Tabs {
     pub open: Vec<String>,
     /// The session shown, if any.
     pub active: Option<String>,
+    /// IDs of the sessions with an unread answer, sorted.
+    pub unread: Vec<String>,
+    /// When the newest run Harlo heard of from this server ended, in
+    /// milliseconds since the Unix epoch; 0 before it heard of one. Runs
+    /// that ended later did so while Harlo wasn't following the server.
+    pub followed: i64,
+}
+
+impl Tabs {
+    /// Whether there is nothing here worth keeping.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.open.is_empty() && self.unread.is_empty() && self.followed == 0
+    }
 }
 
 /// Where the layout and notes are saved: a SQLite file.

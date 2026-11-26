@@ -246,6 +246,7 @@ fn the_reopen_tabs_switch_turns_off_reopening() {
             Tabs {
                 open: vec!["ses_demo_03".into()],
                 active: Some("ses_demo_03".into()),
+                ..Tabs::default()
             },
         )]);
         let mut app = App::new(Location::Local, vec![Location::Local], layout).with_preferences(

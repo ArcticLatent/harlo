@@ -47,6 +47,8 @@ fn session(id: &str, project: &str, directory: &str, hours_ago: f64) -> Session 
         created: NOW_MS - hours_ago * HOUR_MS,
         updated: NOW_MS - hours_ago * HOUR_MS,
         archived: None,
+        idle: None,
+        outcome: None,
         revert: None,
         permissions: Vec::new(),
         cost: 0.0,
@@ -669,4 +671,39 @@ fn sessions_started_without_a_project_are_listed_last_as_other_sessions() {
     ws.resync(snapshot());
     ws.set_other_folder(Some("/home/me".into()));
     assert!(ws.sidebar(now()).iter().all(|p| !p.other));
+}
+
+#[test]
+fn sessions_that_answered_since_a_time_are_told_apart() {
+    let mut snapshot = snapshot();
+    let ended = |s: &mut Session, at: f64, outcome: &str| {
+        s.idle = Some(at);
+        s.outcome = Some(outcome.to_owned());
+    };
+    let mut answered = session("s_answered", "p1", "/code/app", 1.0);
+    ended(&mut answered, 2_000.0, "succeeded");
+    let mut failed = session("s_failed", "p1", "/code/app", 1.0);
+    ended(&mut failed, 2_500.4, "failed");
+    let mut stopped = session("s_stopped", "p1", "/code/app", 1.0);
+    ended(&mut stopped, 3_000.0, "interrupted");
+    let mut earlier = session("s_earlier", "p1", "/code/app", 1.0);
+    ended(&mut earlier, 1_000.0, "succeeded");
+    let mut working = session("s_working", "p1", "/code/app", 1.0);
+    ended(&mut working, 2_000.0, "succeeded");
+    let mut helper = session("s_helper", "p1", "/code/app", 1.0);
+    ended(&mut helper, 2_000.0, "succeeded");
+    helper.parent_id = Some("s_answered".to_owned());
+    snapshot
+        .sessions
+        .extend([answered, failed, stopped, earlier, working, helper]);
+    snapshot.active = vec!["s_working".to_owned()];
+    let mut ws = Workspace::default();
+    ws.resync(snapshot);
+
+    let mut since: Vec<&str> = ws.answered_since(1_000).collect();
+    since.sort_unstable();
+    assert_eq!(since, ["s_answered", "s_failed"]);
+    assert_eq!(ws.answered_since(2_500).count(), 0, "nothing later");
+    assert_eq!(ws.last_ended(), 3_000);
+    assert_eq!(Workspace::default().last_ended(), 0);
 }

@@ -99,6 +99,17 @@ pub struct Workspace {
     other: Option<String>,
 }
 
+/// A server's time in whole milliseconds.
+#[must_use]
+pub fn millis(time: f64) -> i64 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "milliseconds since 1970 fit an i64 for any real date"
+    )]
+    let whole = time.round() as i64;
+    whole
+}
+
 impl Workspace {
     /// Creates an empty workspace whose sidebar lists `order` first.
     #[must_use]
@@ -439,6 +450,32 @@ impl Workspace {
     #[must_use]
     pub fn session(&self, id: &str) -> Option<&Session> {
         self.sessions.get(id)
+    }
+
+    /// The sessions with an answer from after `since` (milliseconds since
+    /// the Unix epoch): their last run ended later, by itself.
+    ///
+    /// A subagent's session isn't one (its run ends inside its parent's,
+    /// which says so), nor is a session at work again or one the user
+    /// stopped.
+    pub fn answered_since(&self, since: i64) -> impl Iterator<Item = &str> {
+        self.sessions.values().filter_map(move |session| {
+            let told = matches!(session.outcome.as_deref(), Some("succeeded" | "failed"));
+            let later = session.idle.is_some_and(|at| millis(at) > since);
+            (told && later && session.parent_id.is_none() && !self.busy.contains(&session.id))
+                .then_some(session.id.as_str())
+        })
+    }
+
+    /// When the newest run of any session here ended, in milliseconds
+    /// since the Unix epoch; 0 when none has run.
+    #[must_use]
+    pub fn last_ended(&self) -> i64 {
+        self.sessions
+            .values()
+            .filter_map(|session| session.idle.map(millis))
+            .max()
+            .unwrap_or(0)
     }
 
     /// Returns a session's waiting prompts, oldest first.

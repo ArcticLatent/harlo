@@ -411,6 +411,8 @@ fn snapshot() -> Snapshot {
             created: now,
             updated: now,
             archived: None,
+            idle: None,
+            outcome: None,
             revert: None,
             permissions: Vec::new(),
             cost: 0.0,

@@ -269,6 +269,11 @@ pub struct Session {
     pub updated: f64,
     /// When it was archived, in milliseconds since the Unix epoch, if it was.
     pub archived: Option<f64>,
+    /// When its last run ended, in milliseconds since the Unix epoch, if
+    /// it has run.
+    pub idle: Option<f64>,
+    /// How its last run ended: `succeeded`, `failed` or `interrupted`.
+    pub outcome: Option<String>,
     /// A staged undo, when one is waiting to be kept or cancelled.
     pub revert: Option<Revert>,
     /// The session's own permission rules, applied after its agent's.
@@ -292,6 +297,8 @@ impl From<g::SessionInfo> for Session {
             created: v.time.created,
             updated: v.time.updated,
             archived: v.time.archived,
+            idle: v.time.idle,
+            outcome: v.outcome.map(|o| o.to_string()),
             revert: v.revert.map(Revert::from),
             permissions: v
                 .permissions
