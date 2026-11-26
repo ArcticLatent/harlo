@@ -50,7 +50,9 @@ jobs:
       - name: Tests
         run: |
           # A scratch home: nothing a test does can reach the runner's own.
-          export CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$(mktemp -d)"
+          # Not under /tmp, where the sandbox for agents' commands closes
+          # nothing, so its tests would have nothing to test.
+          export CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$(mktemp -d -p "$RUNNER_TEMP")"
           export XDG_CONFIG_HOME="$HOME/config" XDG_DATA_HOME="$HOME/data" XDG_STATE_HOME="$HOME/state" XDG_CACHE_HOME="$HOME/cache"
           export HARLO_RELAY=http://127.0.0.1:9 HARLO_UPDATE_MANIFEST_URL=http://127.0.0.1:9 HARLO_UPDATE_CHANGELOG_URL=http://127.0.0.1:9
           cargo test --locked --workspace

@@ -399,6 +399,10 @@ impl Reach {
 /// hidden place isn't opened itself: each thing in it is, except the
 /// hidden one, and so on down. Links aren't followed: what they lead to
 /// is opened, or not, where it really is.
+///
+/// A folder the command may change is opened whole whatever lies in it:
+/// the kernel has no way to let new things be made in a folder and keep
+/// one of its things closed.
 #[must_use]
 fn grants(reach: &Reach) -> Vec<(PathBuf, May)> {
     let mut out = Vec::new();
@@ -424,7 +428,7 @@ fn open(reach: &Reach, path: &Path, out: &mut Vec<(PathBuf, May)>, seen: &mut Ha
     if may == May::Nothing || !seen.insert(path.to_path_buf()) {
         return;
     }
-    if !reach.hides_in(path) {
+    if may == May::Change || !reach.hides_in(path) {
         out.push((path.to_path_buf(), may));
         return;
     }
@@ -665,9 +669,11 @@ mod tests {
             reach.may(&root.join("data/harlo/worktrees/mine/a.rs")),
             May::Change
         );
-        // Nothing is hidden inside a folder commands may change.
+        // Nothing is hidden inside a folder commands may change, and the
+        // folder is opened itself: new things can be made in it.
         assert_eq!(reach.may(&root.join("proj/.env")), May::Change);
         let granted = grants(&reach);
+        assert!(granted.contains(&(root.join("proj"), May::Change)));
         assert!(granted.contains(&(root.join("data/harlo/skills"), May::Read)));
         assert!(granted.contains(&(root.join("data/harlo/worktrees/mine"), May::Change)));
         assert!(

@@ -3,8 +3,9 @@
 //! only when a person says so.
 //!
 //! The scratch server here lives outside the temporary folders, which
-//! the sandbox leaves open. Where the kernel has no Landlock there is no
-//! sandbox to test, and the tests say so and pass.
+//! the sandbox leaves open. Where the kernel has no Landlock, or the only
+//! place for a scratch folder is a temporary one, there is no sandbox to
+//! test, and the tests say so and pass.
 
 // Rust guideline compliant 2026-10-09
 
@@ -16,13 +17,27 @@ use std::time::Duration;
 use harlo_client::{Client, Delivery, Effect, EventKind, Message, PermissionReply, Prompt, Rule};
 use support::{Sandbox, turn_requests, until};
 
-/// Whether this system can confine commands; says so when it can't.
-fn confines() -> bool {
-    let can = harlo_engine::sandbox::supported();
-    if !can {
+/// The folders the sandbox leaves open to every command.
+const OPEN_TO_ALL: [&str; 3] = ["/tmp", "/var/tmp", "/dev/shm"];
+
+/// A scratch server whose commands the sandbox holds; none, with a word
+/// on why, where this system can't confine commands or the scratch
+/// folder landed in a temporary folder, where nothing is closed to them.
+async fn confined() -> Option<Sandbox> {
+    if !harlo_engine::sandbox::supported() {
         eprintln!("no Landlock on this system: nothing to test");
+        return None;
     }
-    can
+    let sandbox = Sandbox::start_outside_tmp().await;
+    let root = std::fs::canonicalize(sandbox.dir.path()).expect("the scratch folder");
+    if OPEN_TO_ALL.iter().any(|open| root.starts_with(open)) {
+        eprintln!(
+            "the scratch folder {} is in a temporary folder: nothing to test",
+            root.display()
+        );
+        return None;
+    }
+    Some(sandbox)
 }
 
 async fn idles(client: &Client, session: &str) -> usize {
@@ -93,10 +108,9 @@ fn system_prompt(root: &Path) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_command_changes_its_project_and_reads_no_secrets() {
-    if !confines() {
+    let Some(sandbox) = confined().await else {
         return;
-    }
-    let sandbox = Sandbox::start_outside_tmp().await;
+    };
     let (client, project, root) = (sandbox.client(), sandbox.project(), sandbox.dir.path());
     std::fs::create_dir_all(root.join("home/.ssh")).expect("keys");
     std::fs::write(root.join("home/.ssh/id_ed25519"), "PRIVATE KEY\n").expect("key");
@@ -115,12 +129,14 @@ async fn a_command_changes_its_project_and_reads_no_secrets() {
     run(
         &client,
         &session.id,
-        &shell("echo in > inside.txt; echo out > ../outside.txt; mktemp > /dev/null && echo temp"),
+        &shell(
+            "echo in > inside.txt; echo out > ../outside.txt; mktemp > /dev/null && echo made-one",
+        ),
     )
     .await;
     let result = last_result(root);
-    assert!(result.contains("Permission denied"), "{result}");
-    assert!(result.contains("temp"), "{result}");
+    assert_eq!(result.matches("Permission denied").count(), 1, "{result}");
+    assert!(result.contains("made-one"), "{result}");
     assert_eq!(
         std::fs::read_to_string(project.join("inside.txt")).expect("inside.txt"),
         "in\n"
@@ -177,10 +193,9 @@ async fn a_command_changes_its_project_and_reads_no_secrets() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn leaving_the_sandbox_waits_for_a_person_even_when_nothing_else_asks() {
-    if !confines() {
+    let Some(sandbox) = confined().await else {
         return;
-    }
-    let sandbox = Sandbox::start_outside_tmp().await;
+    };
     let (client, project, root) = (sandbox.client(), sandbox.project(), sandbox.dir.path());
     let session = client
         .create_session(project.to_str().expect("utf-8"))
@@ -228,10 +243,9 @@ async fn leaving_the_sandbox_waits_for_a_person_even_when_nothing_else_asks() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_users_configuration_turns_the_sandbox_off() {
-    if !confines() {
+    let Some(sandbox) = confined().await else {
         return;
-    }
-    let sandbox = Sandbox::start_outside_tmp().await;
+    };
     let (client, project, root) = (sandbox.client(), sandbox.project(), sandbox.dir.path());
     let config = root.join("config/harlo/harlo.json");
     let text = std::fs::read_to_string(&config).expect("config");
@@ -255,4 +269,41 @@ async fn the_users_configuration_turns_the_sandbox_off() {
     );
     assert!(!system_prompt(root).contains("sandbox"));
     assert!(!offered_leaving(root));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_temporary_folder_takes_new_files_though_something_hidden_lies_in_it() {
+    let Some(sandbox) = confined().await else {
+        return;
+    };
+    let (client, project, root) = (sandbox.client(), sandbox.project(), sandbox.dir.path());
+    // Something to hide where every command may write, as an SSH agent's
+    // socket often is.
+    let elsewhere = tempfile::tempdir_in("/tmp").expect("a folder in /tmp");
+    let socket = elsewhere.path().join("agent.sock");
+    std::fs::write(&socket, "").expect("the hidden thing");
+    let config = root.join("config/harlo/harlo.json");
+    let text = std::fs::read_to_string(&config).expect("config");
+    let hides = serde_json::json!({ "hidden": [socket] }).to_string();
+    let hidden = text.replacen('{', &format!("{{\n  \"sandbox\": {hides},"), 1);
+    std::fs::write(&config, hidden).expect("config");
+    let session = client
+        .create_session(project.to_str().expect("utf-8"))
+        .await
+        .expect("session");
+    client
+        .set_permissions(&session.id, &[Rule::any("*", Effect::Allow)])
+        .await
+        .expect("trusted");
+
+    run(
+        &client,
+        &session.id,
+        &shell("made=$(mktemp) && echo made-one && rm \"$made\"; echo in > inside.txt"),
+    )
+    .await;
+    let result = last_result(root);
+    assert!(result.contains("made-one"), "{result}");
+    assert!(!result.contains("Permission denied"), "{result}");
+    assert!(project.join("inside.txt").exists());
 }
