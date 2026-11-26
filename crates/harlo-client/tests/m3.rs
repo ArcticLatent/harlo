@@ -263,6 +263,12 @@ async fn a_queued_prompt_can_steer_or_be_cancelled() {
         active.contains(&session.id).then_some(())
     })
     .await;
+    // A run is active a moment before it has taken its own prompt.
+    wait_for("the run to take its prompt", || async {
+        let inbox = client.inbox(&session.id).await.ok()?;
+        inbox.is_empty().then_some(())
+    })
+    .await;
 
     let queued = Prompt::new("say queued", Delivery::Queue);
     client.prompt(&session.id, &queued).await.expect("queued");
