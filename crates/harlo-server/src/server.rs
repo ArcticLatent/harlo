@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harlo_engine::instructions::Instruction;
@@ -193,6 +193,8 @@ pub struct Server {
     shadows: Mutex<HashMap<String, harlo_engine::snapshot::Shadow>>,
     /// The server's own files, which no agent's tool reads or changes.
     pub(crate) sealed: Vec<PathBuf>,
+    /// Whether this system can confine commands (asked once, at start).
+    confines: bool,
     /// What the person answered about projects' own settings since the
     /// server started, by the key they're saved under.
     pub(crate) trust: Mutex<HashMap<String, bool>>,
@@ -292,6 +294,7 @@ impl Server {
             shadows: Mutex::default(),
             trust: Mutex::default(),
             sealed,
+            confines: harlo_engine::sandbox::supported(),
             events,
             emitting: Mutex::new(()),
             live: Mutex::default(),
@@ -1061,6 +1064,57 @@ impl Server {
         })
     }
 
+    /// Whether agents' commands run in the sandbox: on a system that can
+    /// confine them, unless the user's own configuration turns it off. A
+    /// project's configuration has no say.
+    pub(crate) fn confining(&self) -> bool {
+        self.confines && self.global().0.sandbox.enabled
+    }
+
+    /// The sandbox agents' commands run in, with the folders of `skills`
+    /// open to them; none when commands aren't confined.
+    ///
+    /// The server's own folders are hidden: its configuration, which
+    /// holds provider keys and the permission rules, and where it keeps
+    /// its sessions, its password and the phones it trusts.
+    fn sandbox(
+        &self,
+        skills: &[harlo_engine::skills::Skill],
+    ) -> Option<harlo_engine::sandbox::Sandbox> {
+        if !self.confining() {
+            return None;
+        }
+        let home = dirs::home_dir().unwrap_or_default();
+        let named = |paths: &[String]| -> Vec<PathBuf> {
+            paths
+                .iter()
+                .map(|path| match path.strip_prefix("~/") {
+                    Some(rest) => home.join(rest),
+                    None => PathBuf::from(path),
+                })
+                .collect()
+        };
+        let setting = self.global().0.sandbox;
+        let mut hidden = vec![self.config_dir.clone(), crate::service::state_folder()];
+        hidden.extend(self.snapshots.parent().map(Path::to_path_buf));
+        hidden.extend(self.sealed.iter().cloned());
+        hidden.extend(named(&setting.hidden));
+        let mut shown = vec![self.snapshots.with_file_name("plans")];
+        shown.extend(
+            skills
+                .iter()
+                .filter_map(|s| s.path.parent().map(Path::to_path_buf)),
+        );
+        Some(harlo_engine::sandbox::Sandbox {
+            // This program, as it runs now: a newer one may have taken its
+            // place on disk since.
+            helper: PathBuf::from("/proc/self/exe"),
+            writable: named(&setting.writable),
+            hidden,
+            shown,
+        })
+    }
+
     /// The engine's turn for session `session`, from what was `chosen`.
     async fn turn_for(self: &Arc<Self>, session: &Session, chosen: Chosen) -> Turn {
         let Chosen {
@@ -1080,6 +1134,7 @@ impl Server {
         if let Some(own) = &agent.system {
             system = format!("{own}\n\n{system}");
         }
+        let skills = self.skills_for(&session.location.directory).await;
         Turn {
             cwd: PathBuf::from(&directory),
             agent: agent.id.clone(),
@@ -1119,7 +1174,8 @@ impl Server {
                 spec.output,
                 folder.config.compact_at,
             )),
-            skills: self.skills_for(&session.location.directory).await,
+            sandbox: self.sandbox(&skills),
+            skills,
             todo: folder.config.todo,
             sealed: self.sealed.clone(),
             steering: Some(Arc::new(crate::agents::SessionSteering {
@@ -1426,6 +1482,10 @@ impl Server {
         let (notes, date, found) =
             self.steady_parts(session, &git::project_id(directory).await, found);
         let mut prompt = BASE_PROMPT.to_owned();
+        if self.confining() {
+            prompt.push_str("\n\n");
+            prompt.push_str(&harlo_engine::sandbox::told(Path::new(directory)));
+        }
         if !found.is_empty() {
             prompt.push_str("\n\n");
             prompt.push_str(&harlo_engine::instructions::render(&found));

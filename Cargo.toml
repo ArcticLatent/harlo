@@ -23,6 +23,10 @@ frizbee = { version = "0.13.0", default-features = false }
 regex = { version = "1.13.2", default-features = false }
 ignore = { version = "0.4.35", default-features = false }
 globset = { version = "0.4.22", default-features = false }
+# The sandbox the agent's commands run in: the kernel's Landlock, through
+# the library its maintainers publish (MIT OR Apache-2.0). No helper
+# program has to be installed, and no user namespaces are needed.
+landlock = "0.4.8"
 # Reads a shell command into the commands it runs, so permission rules are
 # checked against each of them (MIT). A hand-written splitter can't follow
 # quoting, substitutions and redirections; this is the grammar editors use.

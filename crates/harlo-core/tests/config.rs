@@ -257,3 +257,43 @@ fn the_catalog_entries_are_valid_servers() {
         }
     }
 }
+
+#[test]
+fn the_sandbox_is_on_unless_turned_off_and_keeps_the_folders_it_names() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path();
+    let read = || fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(config::sandbox(folder).expect("no file yet"));
+
+    // Without folders, the setting is the plain switch.
+    fs::write(folder.join("harlo.json"), "{\n  // mine\n}\n").expect("a file");
+    config::set_sandbox(folder, false).expect("off");
+    assert!(
+        read().contains("\"sandbox\": false") && read().contains("// mine"),
+        "{}",
+        read()
+    );
+    assert!(!config::sandbox(folder).expect("read"));
+    config::set_sandbox(folder, true).expect("on");
+    assert!(!read().contains("sandbox"), "{}", read());
+    assert!(config::sandbox(folder).expect("read"));
+
+    // With folders, the switch goes beside them.
+    let named = "{\n  \"sandbox\": { \"writable\": [\"~/notes\"] }\n}\n";
+    fs::write(folder.join("harlo.json"), named).expect("a file");
+    assert!(config::sandbox(folder).expect("folders only"));
+    config::set_sandbox(folder, false).expect("off");
+    assert!(
+        read().contains("\"enabled\": false") && read().contains("~/notes"),
+        "{}",
+        read()
+    );
+    assert!(!config::sandbox(folder).expect("read"));
+    config::set_sandbox(folder, true).expect("on");
+    assert!(
+        !read().contains("enabled") && read().contains("~/notes"),
+        "{}",
+        read()
+    );
+    assert!(config::sandbox(folder).expect("read"));
+}

@@ -272,6 +272,8 @@ pub enum Plan {
         timeout_ms: Option<u64>,
         /// Whether it runs in the background.
         background: bool,
+        /// Whether it asked to run outside the sandbox.
+        outside: bool,
     },
 }
 
@@ -314,16 +316,15 @@ fn shell_call(input: &Map<String, Value>) -> Result<Plan, String> {
         .get("command")
         .and_then(Value::as_str)
         .ok_or_else(|| "shell needs `command`, as text.".to_owned())?;
+    let flag = |name: &str| input.get(name).and_then(Value::as_bool).unwrap_or(false);
     Ok(Plan::Shell {
         command: command.to_owned(),
         timeout_ms: input
             .get("timeout")
             .and_then(Value::as_u64)
             .filter(|t| *t > 0),
-        background: input
-            .get("background")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        background: flag("background"),
+        outside: flag(crate::rules::OUTSIDE_SANDBOX),
     })
 }
 
@@ -460,6 +461,18 @@ pub(crate) fn offer_outline(definitions: &mut [Value]) {
     read["parameters"]["properties"]["outline"] = json!({
         "type": "boolean",
         "description": "List the file's functions and types with their lines, not its text."
+    });
+}
+
+/// Adds the `outside_sandbox` argument to the `shell` tool among
+/// `definitions`, for where commands run in a sandbox.
+pub(crate) fn offer_leaving(definitions: &mut [Value]) {
+    let Some(shell) = definitions.iter_mut().find(|d| d["name"] == "shell") else {
+        return;
+    };
+    shell["parameters"]["properties"][crate::rules::OUTSIDE_SANDBOX] = json!({
+        "type": "boolean",
+        "description": "Run it outside the sandbox: only after it failed because of the sandbox. The user is asked first."
     });
 }
 
@@ -951,11 +964,15 @@ impl Plan {
                 changed: Vec::new(),
                 pictures: Vec::new(),
             }),
+            // (Where there is a sandbox, the turn runs commands itself.)
             Self::Shell {
                 command,
                 timeout_ms,
                 ..
-            } => Ok(shell::run(&command, cwd, timeout_ms.unwrap_or(SHELL_TIMEOUT_MS), stop).await),
+            } => {
+                let limit = timeout_ms.unwrap_or(SHELL_TIMEOUT_MS);
+                Ok(shell::run(&command, cwd, None, limit, stop).await)
+            }
         }
     }
 }

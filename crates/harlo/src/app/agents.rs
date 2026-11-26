@@ -1,8 +1,12 @@
-//! Settings → Agents: The server's agents, and the approvals it saved when
-//! someone chose "Allow always".
+//! Settings → Agents: The server's agents, whether their commands run in
+//! its sandbox, and the approvals it saved when someone chose "Allow
+//! always".
 
 // Rust guideline compliant 2026-10-09
 
+use std::path::Path;
+
+use harlo_core::config;
 use harlo_core::server::SavedApproval;
 
 use crate::task::Task;
@@ -19,6 +23,12 @@ pub enum ApprovalEvent {
     Remove(usize),
     /// Removing one ended.
     Removed(Result<(), String>),
+    /// The server's sandbox setting, as read from its config.
+    Sandbox(Result<bool, String>),
+    /// Turn the sandbox for agents' commands on or off.
+    ToggleSandbox,
+    /// The sandbox was turned on or off, or why it couldn't be.
+    SandboxSet(Result<bool, String>),
 }
 
 /// The saved approvals Settings → Agents shows.
@@ -30,13 +40,40 @@ pub struct Approvals {
     pub error: Option<String>,
     /// Whether a removal is under way.
     pub busy: bool,
+    /// Whether agents' commands run in the server's sandbox, once read.
+    pub sandbox: Load<bool>,
+    /// Why the sandbox couldn't be turned on or off.
+    pub sandbox_error: Option<String>,
 }
 
 impl App {
     /// Handles `event` on the saved approvals.
     pub(super) fn approval_event(&mut self, event: ApprovalEvent) -> Task<Message> {
+        let folder = self.global_config().map(Path::to_path_buf);
         let page = &mut self.sheets.approvals;
         match event {
+            ApprovalEvent::Sandbox(read) => {
+                page.sandbox = match read {
+                    Ok(on) => Load::Loaded(on),
+                    Err(why) => Load::Failed(why),
+                };
+            }
+            ApprovalEvent::ToggleSandbox => {
+                let (Load::Loaded(on), Some(folder)) = (&page.sandbox, folder) else {
+                    return Task::none();
+                };
+                let on = !*on;
+                page.sandbox_error = None;
+                return Task::perform(config::set_sandbox_later(folder, on), move |result| {
+                    approval_message(ApprovalEvent::SandboxSet(
+                        result
+                            .map(|()| on)
+                            .map_err(|e| format!("Couldn't change harlo.json: {e}")),
+                    ))
+                });
+            }
+            ApprovalEvent::SandboxSet(Ok(on)) => page.sandbox = Load::Loaded(on),
+            ApprovalEvent::SandboxSet(Err(why)) => page.sandbox_error = Some(why),
             ApprovalEvent::Loaded(result) => {
                 page.list = match result {
                     Ok(mut list) => {
@@ -81,18 +118,40 @@ impl App {
         Task::none()
     }
 
-    /// Lists the saved approvals again.
+    /// Lists the saved approvals again, and reads the server's sandbox
+    /// setting where Harlo may change it.
     pub(super) fn load_approvals(&mut self) -> Task<Message> {
+        let sandbox = self.load_sandbox();
         let Some(client) = self.client.clone() else {
             self.sheets.approvals.list = Load::Idle;
-            return Task::none();
+            return sandbox;
         };
         if !matches!(self.sheets.approvals.list, Load::Loaded(_)) {
             self.sheets.approvals.list = Load::Loading;
         }
-        Task::perform(
+        let approvals = Task::perform(
             async move { client.saved_approvals().await.map_err(|e| e.to_string()) },
             |result| approval_message(ApprovalEvent::Loaded(result)),
+        );
+        Task::batch([approvals, sandbox])
+    }
+
+    /// Reads whether agents' commands run in the sandbox, from the config
+    /// of the server on this computer.
+    fn load_sandbox(&mut self) -> Task<Message> {
+        self.sheets.approvals.sandbox_error = None;
+        let Some(folder) = self.global_config().map(Path::to_path_buf) else {
+            self.sheets.approvals.sandbox = Load::Idle;
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || config::sandbox(&folder))
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|read| read.map_err(|e| e.to_string()))
+            },
+            |read| approval_message(ApprovalEvent::Sandbox(read)),
         )
     }
 

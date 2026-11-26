@@ -250,11 +250,14 @@ pub enum Setting {
     Notes,
     /// [`Preferences::check_updates`].
     CheckUpdates,
+    /// Whether agents' commands run in the server's sandbox: its config,
+    /// not a preference.
+    Sandbox,
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -275,6 +278,7 @@ impl Setting {
         Self::PhoneRelay,
         Self::Notes,
         Self::CheckUpdates,
+        Self::Sandbox,
     ];
 }
 
@@ -913,6 +917,9 @@ impl App {
                 return self.schedule_event(super::ScheduleEvent::ToggleAllowed);
             }
             Setting::Notes => return self.memory_event(super::MemoryEvent::Toggle),
+            Setting::Sandbox => {
+                return self.approval_event(super::ApprovalEvent::ToggleSandbox);
+            }
             Setting::KeepInTray => {
                 self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
             }
@@ -1021,6 +1028,7 @@ impl App {
             | Setting::Phone
             | Setting::PhoneRelay
             | Setting::Notes
+            | Setting::Sandbox
             | Setting::CheckUpdates => {
                 return;
             }

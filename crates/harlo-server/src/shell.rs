@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use harlo_engine::jobs::{self, Adopted, Asked, Jobs};
+use harlo_engine::sandbox::Confined;
 use harlo_engine::tools::shell::{Ended, Ran, Running, capped, execute};
 use harlo_engine::{Created, Message, ShellOutput, ShellRun, ShellTime, ascending_id, now};
 use serde_json::{Value, json};
@@ -49,8 +50,11 @@ impl Jobs for SessionJobs {
         _call: &str,
         command: &str,
         cwd: &Path,
+        confined: Option<Confined>,
     ) -> Result<String, String> {
-        Ok(self.server.start_shell_job(&self.session, command, cwd))
+        Ok(self
+            .server
+            .start_shell_job(&self.session, command, cwd, confined))
     }
 
     fn takes_over_after(&self) -> Option<Duration> {
@@ -118,8 +122,14 @@ fn kept(text: &str) -> (String, bool) {
 
 impl Server {
     /// Starts `command` in `cwd` for session `session` as a background
-    /// job; returns its ID.
-    fn start_shell_job(self: &Arc<Self>, session: &str, command: &str, cwd: &Path) -> String {
+    /// job, in the sandbox when it is `confined`; returns its ID.
+    fn start_shell_job(
+        self: &Arc<Self>,
+        session: &str,
+        command: &str,
+        cwd: &Path,
+        confined: Option<Confined>,
+    ) -> String {
         let (id, stop) = self.list_shell_job(session, command, cwd);
         let server = Arc::clone(self);
         let (session, job, command, cwd) = (
@@ -129,7 +139,7 @@ impl Server {
             cwd.to_path_buf(),
         );
         tokio::spawn(async move {
-            let ran = execute(&command, &cwd, None, &stop).await;
+            let ran = execute(&command, &cwd, confined.as_ref(), None, &stop).await;
             server.shell_job_ended(&session, &job, &command, &cwd, ran);
         });
         id
@@ -339,9 +349,11 @@ impl Server {
             Some(&directory),
             Some(id),
         );
+        // (A person's own command isn't confined.)
         let ran = execute(
             command,
             Path::new(&directory),
+            None,
             None,
             &CancellationToken::new(),
         )

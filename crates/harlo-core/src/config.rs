@@ -24,6 +24,13 @@ const MODEL: &str = "model";
 /// The key that turns off the snapshots undo uses, when `false`.
 const SNAPSHOTS: &str = "snapshots";
 
+/// The key of the sandbox agents' commands run in: `false` turns it off,
+/// and so does [`ENABLED`] in an object that also names folders.
+const SANDBOX: &str = "sandbox";
+
+/// Whether the sandbox is on, inside an object under [`SANDBOX`].
+const ENABLED: &str = "enabled";
+
 /// The object holding the server's experimental switches.
 const EXPERIMENTAL: &str = "experimental";
 
@@ -183,6 +190,62 @@ pub fn set_snapshots(folder: &Path, on: bool) -> Result<(), Error> {
 /// cancelled.
 pub async fn set_snapshots_later(folder: PathBuf, on: bool) -> Result<(), Error> {
     later(folder, move |folder| set_snapshots(folder, on)).await
+}
+
+/// The `sandbox` setting of the global file at `path`, when it has one.
+fn sandbox_setting(path: &Path) -> Result<Option<jsonc_parser::cst::CstNode>, Error> {
+    Ok(parse(path)?
+        .and_then(|root| root.object_value())
+        .and_then(|object| object.get(SANDBOX))
+        .and_then(|prop| prop.value()))
+}
+
+/// Whether agents' commands run in the sandbox, where they change only
+/// their project and can't read places that hold secrets: on unless the
+/// global file in `folder` turns it off.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn sandbox(folder: &Path) -> Result<bool, Error> {
+    let Some(setting) = sandbox_setting(&file(folder))? else {
+        return Ok(true);
+    };
+    let enabled = match setting.as_object() {
+        Some(object) => object.get(ENABLED).and_then(|prop| prop.value()),
+        None => Some(setting),
+    };
+    let off = enabled
+        .and_then(|value| value.as_boolean_lit())
+        .is_some_and(|value| !value.value());
+    Ok(!off)
+}
+
+/// Turns the sandbox for agents' commands on or off in the global file in
+/// `folder`. On, the default, removes the setting; folders the file names
+/// for the sandbox stay.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does.
+pub fn set_sandbox(folder: &Path, on: bool) -> Result<(), Error> {
+    let off = (!on).then_some(CstInputValue::from(false));
+    let names_folders = sandbox_setting(&file(folder))?.is_some_and(|s| s.as_object().is_some());
+    if names_folders {
+        set_at(folder, &[SANDBOX, ENABLED], off)
+    } else {
+        set(folder, SANDBOX, off)
+    }
+}
+
+/// Sets the sandbox as [`set_sandbox`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_sandbox`], or an error when the thread is
+/// cancelled.
+pub async fn set_sandbox_later(folder: PathBuf, on: bool) -> Result<(), Error> {
+    later(folder, move |folder| set_sandbox(folder, on)).await
 }
 
 /// Whether the server runs automations (Harlo's schedules): the top-level

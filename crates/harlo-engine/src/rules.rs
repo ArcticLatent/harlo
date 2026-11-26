@@ -14,6 +14,12 @@
 //!
 //! A file outside the project is decided twice: by its tool's own action,
 //! and as `external_directory` on its full path.
+//!
+//! A command that asks to run outside the sandbox is decided as
+//! `outside_sandbox`, part by part like any command. Only a rule that
+//! names that action covers it: one for every action (`*`) doesn't, so a
+//! session that runs everything unasked still asks before a command
+//! leaves the sandbox.
 
 // Rust guideline compliant 2026-10-09
 
@@ -49,6 +55,17 @@ const RUNNERS: &[&str] = &[
 /// tool's own.
 pub const OUTSIDE: &str = "external_directory";
 
+/// The action a command is decided under when it asks to run outside the
+/// sandbox. Rules for every action (`*`) don't cover it, and with no rule
+/// that names it, it asks.
+pub const OUTSIDE_SANDBOX: &str = "outside_sandbox";
+
+/// Whether `action` is running a command, in the sandbox or outside it:
+/// decided for each command the line runs.
+fn runs_a_command(action: &str) -> bool {
+    action == "shell" || action == OUTSIDE_SANDBOX
+}
+
 /// The patterns "always" would allow for `action` on `resources`.
 ///
 /// For a shell command, each command it runs: its program (and subcommand)
@@ -65,10 +82,12 @@ pub fn save_patterns(action: &str, resources: &[String]) -> Vec<String> {
     };
     for resource in resources {
         match action {
-            "shell" => match crate::command::parts(resource).filter(|p| !p.is_empty()) {
-                Some(parts) => parts.iter().for_each(|part| add(command_pattern(part))),
-                None => add(exactly(resource.trim())),
-            },
+            "shell" | OUTSIDE_SANDBOX => {
+                match crate::command::parts(resource).filter(|p| !p.is_empty()) {
+                    Some(parts) => parts.iter().for_each(|part| add(command_pattern(part))),
+                    None => add(exactly(resource.trim())),
+                }
+            }
             OUTSIDE => add(folder_pattern(resource)),
             "webfetch" => add(site_pattern(resource)),
             _ => {}
@@ -161,7 +180,13 @@ impl Rule {
             .resource
             .strip_suffix(" *")
             .is_some_and(|lead| glob(lead, resource));
-        glob(&self.action, action) && (bare || glob(&self.resource, resource))
+        // Leaving the sandbox is covered only by a rule that says so.
+        let names = if action == OUTSIDE_SANDBOX {
+            self.action == action
+        } else {
+            glob(&self.action, action)
+        };
+        names && (bare || glob(&self.resource, resource))
     }
 }
 
@@ -236,7 +261,7 @@ pub fn outside_rules() -> Vec<Rule> {
 /// command (`*`).
 #[must_use]
 pub fn decide(layers: &[(&str, &[Rule])], action: &str, resource: &str) -> Decision {
-    if action != "shell" {
+    if !runs_a_command(action) {
         return decide_one(layers, action, resource);
     }
     let parts = crate::command::parts(resource).filter(|p| !p.is_empty());
@@ -465,6 +490,34 @@ mod tests {
             save_patterns(REMEMBER_USER, &["Use tabs.".to_owned()]),
             ["*"]
         );
+    }
+
+    #[test]
+    fn leaving_the_sandbox_asks_until_a_rule_names_it() {
+        let agent = agent_rules();
+        // "Don't ask": everything runs unasked.
+        let trusting = [Rule::any("*", Effect::Allow)];
+        let layers: [(&str, &[Rule]); 2] = [(AGENT, &agent), ("session", &trusting)];
+        assert_eq!(decide(&layers, "shell", "git push").effect, Effect::Allow);
+        let asked = decide(&layers, OUTSIDE_SANDBOX, "git push");
+        assert_eq!((asked.effect, asked.because), (Effect::Ask, None));
+
+        // "Always" on it covers that command, and no more of the line.
+        assert_eq!(
+            save_patterns(OUTSIDE_SANDBOX, &["git push origin main".to_owned()]),
+            ["git push *"]
+        );
+        let saved = [Rule {
+            action: OUTSIDE_SANDBOX.to_owned(),
+            resource: "git push *".to_owned(),
+            effect: Effect::Allow,
+        }];
+        let layers: [(&str, &[Rule]); 2] = [(AGENT, &agent), ("session", &saved)];
+        let effect = |line: &str| decide(&layers, OUTSIDE_SANDBOX, line).effect;
+        assert_eq!(effect("git push origin main"), Effect::Allow);
+        assert_eq!(effect("git push; cat ~/.ssh/id_ed25519"), Effect::Ask);
+        // It says nothing about commands in the sandbox.
+        assert_eq!(decide(&layers, "shell", "git push").effect, Effect::Ask);
     }
 
     #[test]

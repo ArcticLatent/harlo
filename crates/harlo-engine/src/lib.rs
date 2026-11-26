@@ -34,6 +34,7 @@ mod messages;
 pub mod question;
 mod responses;
 mod rules;
+pub mod sandbox;
 mod script_tools;
 pub mod skills;
 pub mod snapshot;
@@ -46,8 +47,8 @@ pub mod web;
 
 pub use config::{
     CONFIG_FILES, Config, ModelRef, ModelSpec, PROJECT_FOLDER, Price, ProviderSpec, Prune,
-    VariantSpec, config_folder, copy_from_opencode, merge_config, project_config_files,
-    read_config_document,
+    SandboxConfig, VariantSpec, config_folder, copy_from_opencode, merge_config,
+    project_config_files, read_config_document,
 };
 pub use error::Error;
 pub use id::{ascending_id, descending_id, just_before};
@@ -56,6 +57,7 @@ pub use message::{
     Snapshot, StepTime, Tokens, ToolState, ToolTime,
 };
 pub use rules::{
-    AGENT, Decision, Effect, OUTSIDE, REMEMBER_USER, Rule, agent_rules, decide, outside_rules,
+    AGENT, Decision, Effect, OUTSIDE, OUTSIDE_SANDBOX, REMEMBER_USER, Rule, agent_rules, decide,
+    outside_rules,
 };
 pub use turn::{Answer, Ask, Event, Gate, Outcome, Sink, Steering, Turn, now, run};

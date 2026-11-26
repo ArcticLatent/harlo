@@ -84,6 +84,8 @@ pub struct Turn {
     /// Files no tool reads or changes, whatever the rules say, such as
     /// where the server keeps its password; with their links followed.
     pub sealed: Vec<PathBuf>,
+    /// The sandbox commands run in; none runs them unconfined.
+    pub sandbox: Option<crate::sandbox::Sandbox>,
 }
 
 /// Something that happened during a turn.
@@ -360,6 +362,9 @@ fn all(turn: &Turn) -> Vec<Value> {
     let mut definitions = tools::definitions();
     if turn.outline {
         tools::offer_outline(&mut definitions);
+    }
+    if turn.sandbox.is_some() {
+        tools::offer_leaving(&mut definitions);
     }
     definitions.push(crate::question::definition());
     // Skills a rule denies aren't offered.
@@ -1220,14 +1225,53 @@ async fn admit(
         plan.outside(&turn.cwd, &skills)
     };
     // (Searching one file's contents is reading it.)
+    let leaves = leaving(turn, &plan);
+    let own = plan.permission();
+    // Leave to run a command outside the sandbox is leave to run it, so
+    // it isn't asked about twice. What refuses the command still does.
+    let own = (leaves.is_none() || denied(turn, &own)).then_some(own);
     let asked = outside
         .into_iter()
         .chain(plan.reads(&turn.cwd))
-        .chain([plan.permission()]);
+        .chain(leaves)
+        .chain(own);
     for permission in asked {
         permit(turn, &permission, input, message, call, gate, stop).await?;
     }
     Ok(plan)
+}
+
+/// Whether the turn's rules refuse `permission` for one of its resources.
+fn denied(turn: &Turn, permission: &tools::Permission) -> bool {
+    let layers: Vec<(&str, &[Rule])> = turn
+        .rules
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_slice()))
+        .collect();
+    permission
+        .resources
+        .iter()
+        .any(|r| decide(&layers, &permission.action, r).effect == Effect::Deny)
+}
+
+/// What a command that asks to run outside the turn's sandbox needs
+/// permission for, before it is decided as a command; none for any other
+/// call, and where there is no sandbox to leave.
+fn leaving(turn: &Turn, plan: &Plan) -> Option<tools::Permission> {
+    let Plan::Shell {
+        command,
+        outside: true,
+        ..
+    } = plan
+    else {
+        return None;
+    };
+    turn.sandbox.as_ref()?;
+    Some(tools::Permission {
+        action: crate::rules::OUTSIDE_SANDBOX.into(),
+        resources: vec![command.clone()],
+        metadata: Map::new(),
+    })
 }
 
 /// Runs a call that may run.
@@ -1461,6 +1505,23 @@ pub(crate) struct CallOf<'a> {
     pub(crate) call: &'a str,
 }
 
+/// Runs `command` for the model and waits for it: where the turn has
+/// somewhere for background jobs, a slow one carries on there.
+async fn run_shell(
+    turn: &Turn,
+    command: &str,
+    confined: Option<&crate::sandbox::Confined>,
+    timeout_ms: Option<u64>,
+    at: CallOf<'_>,
+    stop: &CancellationToken,
+) -> tools::Output {
+    let Some(jobs) = &turn.jobs else {
+        let limit = timeout_ms.unwrap_or(tools::SHELL_TIMEOUT_MS);
+        return tools::shell::run(command, &turn.cwd, confined, limit, stop).await;
+    };
+    run_command(turn, jobs.as_ref(), command, confined, timeout_ms, at, stop).await
+}
+
 /// Runs `command` for the model where `jobs` can take a command over.
 ///
 /// A command that names no time limit and outruns the usual one carries
@@ -1471,6 +1532,7 @@ async fn run_command(
     turn: &Turn,
     jobs: &dyn crate::jobs::Jobs,
     command: &str,
+    confined: Option<&crate::sandbox::Confined>,
     timeout_ms: Option<u64>,
     at: CallOf<'_>,
     stop: &CancellationToken,
@@ -1482,7 +1544,7 @@ async fn run_command(
     let began = std::time::Instant::now();
     let asked = jobs.asked_to_move(at.message, at.call);
     let (running, asked) =
-        match tools::shell::run_within(command, &turn.cwd, limit, stop, asked).await {
+        match tools::shell::run_within(command, &turn.cwd, confined, limit, stop, asked).await {
             Within::Ended(output) => return output,
             Within::OutOfTime(running) if patience.is_none() => {
                 let ms = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX);
@@ -1593,17 +1655,23 @@ async fn run_plan(
                 command,
                 timeout_ms,
                 background,
+                outside,
             },
             _,
-        ) if turn.jobs.is_some() => {
-            let jobs = turn.jobs.as_ref().ok_or_else(String::new)?;
+        ) => {
+            // In the sandbox, unless it was let out of it.
+            let confined = turn
+                .sandbox
+                .as_ref()
+                .filter(|_| !outside)
+                .map(|sandbox| sandbox.confine(&turn.cwd, &command));
             let at = CallOf { message, call };
-            if background {
+            if background && let Some(jobs) = &turn.jobs {
                 return jobs
-                    .shell(message, call, &command, &turn.cwd)
+                    .shell(message, call, &command, &turn.cwd, confined)
                     .map(|id| in_background(&id));
             }
-            Ok(run_command(turn, jobs.as_ref(), &command, timeout_ms, at, stop).await)
+            Ok(run_shell(turn, &command, confined.as_ref(), timeout_ms, at, stop).await)
         }
         (Plan::Skill { id }, _) => turn
             .skills

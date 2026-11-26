@@ -471,6 +471,7 @@ impl Server {
                 let ran = execute(
                     command,
                     Path::new(&directory),
+                    None,
                     Some(RUN_LIMIT),
                     &CancellationToken::new(),
                 )

@@ -238,6 +238,7 @@ impl Server {
         let ran = execute(
             command,
             Path::new(folder),
+            None,
             Some(START_TIMEOUT),
             &CancellationToken::new(),
         )

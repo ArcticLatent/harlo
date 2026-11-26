@@ -1,7 +1,8 @@
 //! The `shell` tool: one command, without a terminal or input.
 //!
 //! The command runs in its own process group, so stopping it ends
-//! everything it started. Pagers and editors are turned off so nothing
+//! everything it started. An agent's command is started confined, in the
+//! sandbox ([`crate::sandbox`]); a person's own isn't. Pagers and editors are turned off so nothing
 //! waits for a person. Long output keeps its start and end, while it is
 //! read as well as when it is shown: a command that prints without end
 //! takes a fixed amount of memory. What a command printed before it was
@@ -30,6 +31,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::Output;
+use crate::sandbox::Confined;
 
 /// Lines the model sees of a long output.
 const MAX_LINES: usize = 600;
@@ -92,13 +94,15 @@ pub struct Running {
 }
 
 impl Running {
-    /// Starts `command` with `bash` in `cwd`.
+    /// Starts `command` with `bash` in `cwd`, in the sandbox when it is
+    /// `confined`.
     ///
     /// # Errors
     ///
     /// With why, when `bash` couldn't be started.
-    pub fn start(command: &str, cwd: &Path) -> Result<Self, String> {
-        let mut child = spawn(command, cwd).map_err(|e| format!("Couldn't start bash: {e}"))?;
+    pub fn start(command: &str, cwd: &Path, confined: Option<&Confined>) -> Result<Self, String> {
+        let mut child =
+            spawn(command, cwd, confined).map_err(|e| format!("Couldn't start bash: {e}"))?;
         let group = child.id().and_then(|id| i32::try_from(id).ok());
         let (out, err) = (Arc::default(), Arc::default());
         let (out_pipe, err_pipe) = (child.stdout.take(), child.stderr.take());
@@ -185,14 +189,16 @@ impl Drop for Running {
 }
 
 /// Runs `command` with `bash` in `cwd` until it ends, `timeout` passes or
-/// `stop` is cancelled; a stopped command's process group is ended.
+/// `stop` is cancelled; a stopped command's process group is ended. It
+/// runs in the sandbox when it is `confined`.
 pub async fn execute(
     command: &str,
     cwd: &Path,
+    confined: Option<&Confined>,
     timeout: Option<Duration>,
     stop: &CancellationToken,
 ) -> Ran {
-    let mut running = match Running::start(command, cwd) {
+    let mut running = match Running::start(command, cwd, confined) {
         Ok(running) => running,
         Err(why) => {
             return Ran {
@@ -215,8 +221,19 @@ pub async fn execute(
 }
 
 /// Starts `command` with `bash` in `cwd`, in a process group of its own.
-fn spawn(command: &str, cwd: &Path) -> std::io::Result<Child> {
-    let mut cmd = Command::new("bash");
+///
+/// A `confined` one is started by the sandbox's helper, which becomes
+/// `bash` once it has confined itself: the same process, in the same
+/// group.
+fn spawn(command: &str, cwd: &Path, confined: Option<&Confined>) -> std::io::Result<Child> {
+    let mut cmd = match confined.map(Confined::wrapper) {
+        Some((helper, args)) => {
+            let mut cmd = Command::new(helper);
+            cmd.args(args).arg("bash");
+            cmd
+        }
+        None => Command::new("bash"),
+    };
     cmd.arg("-c")
         .arg(command)
         .current_dir(cwd)
@@ -296,13 +313,15 @@ async fn read_into(pipe: Option<impl AsyncRead + Unpin + Send>, kept: &Mutex<Kep
 
 /// Runs `command` in `cwd` for the model; never fails, since what went
 /// wrong is output the model should read.
-pub(super) async fn run(
+pub(crate) async fn run(
     command: &str,
     cwd: &Path,
+    confined: Option<&Confined>,
     timeout_ms: u64,
     stop: &CancellationToken,
 ) -> Output {
-    let ran = execute(command, cwd, Some(Duration::from_millis(timeout_ms)), stop).await;
+    let limit = Some(Duration::from_millis(timeout_ms));
+    let ran = execute(command, cwd, confined, limit, stop).await;
     shown(&ran, timeout_ms)
 }
 
@@ -325,11 +344,12 @@ pub(crate) enum Within {
 pub(crate) async fn run_within(
     command: &str,
     cwd: &Path,
+    confined: Option<&Confined>,
     limit: Duration,
     stop: &CancellationToken,
     asked: impl Future<Output = ()>,
 ) -> Within {
-    let mut running = match Running::start(command, cwd) {
+    let mut running = match Running::start(command, cwd, confined) {
         Ok(running) => running,
         Err(why) => return Within::Ended(said(why, None)),
     };
@@ -499,9 +519,16 @@ mod tests {
     async fn output_exit_codes_and_timeouts() {
         let dir = tempfile::tempdir().expect("dir");
         let stop = CancellationToken::new();
-        let out = run("echo hi; echo oops >&2; exit 3", dir.path(), 10_000, &stop).await;
+        let out = run(
+            "echo hi; echo oops >&2; exit 3",
+            dir.path(),
+            None,
+            10_000,
+            &stop,
+        )
+        .await;
         assert_eq!(out.text, "hi\noops\n(exit code 3)");
-        let slow = run("sleep 30", dir.path(), 100, &stop).await;
+        let slow = run("sleep 30", dir.path(), None, 100, &stop).await;
         assert!(slow.text.starts_with("Stopped after"), "{}", slow.text);
     }
 
@@ -509,7 +536,14 @@ mod tests {
     async fn a_command_out_of_time_keeps_what_it_printed() {
         let dir = tempfile::tempdir().expect("dir");
         let stop = CancellationToken::new();
-        let slow = run("echo compiled 3 of 9; sleep 30", dir.path(), 300, &stop).await;
+        let slow = run(
+            "echo compiled 3 of 9; sleep 30",
+            dir.path(),
+            None,
+            300,
+            &stop,
+        )
+        .await;
         assert_eq!(
             slow.text,
             "compiled 3 of 9\nStopped after 0 s: it took too long."
@@ -520,7 +554,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
             stopping.cancel();
         });
-        let stopped = run("echo halfway; sleep 30", dir.path(), 60_000, &stop).await;
+        let stopped = run("echo halfway; sleep 30", dir.path(), None, 60_000, &stop).await;
         assert_eq!(stopped.text, "halfway\nStopped.");
     }
 
@@ -530,7 +564,14 @@ mod tests {
         let stop = CancellationToken::new();
         // 20 MB of numbered lines, then one last line.
         let command = "seq 1 2600000; echo the end";
-        let ran = execute(command, dir.path(), Some(Duration::from_secs(60)), &stop).await;
+        let ran = execute(
+            command,
+            dir.path(),
+            None,
+            Some(Duration::from_secs(60)),
+            &stop,
+        )
+        .await;
         assert_eq!(ran.ended, Ended::Exited(Some(0)));
         assert!(
             ran.output.len() < 2 * KEPT_BYTES + 100,
@@ -541,7 +582,7 @@ mod tests {
         assert!(ran.output.ends_with("2600000\nthe end\n"));
         assert!(ran.output.contains(" bytes left out) …\n"));
 
-        let shown = run(command, dir.path(), 60_000, &stop).await.text;
+        let shown = run(command, dir.path(), None, 60_000, &stop).await.text;
         assert!(shown.len() <= MAX_BYTES + 100, "{}", shown.len());
         assert!(
             shown.starts_with("1\n") && shown.ends_with("the end"),

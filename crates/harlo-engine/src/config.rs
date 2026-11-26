@@ -204,6 +204,20 @@ pub struct ProviderSpec {
     pub system_first: bool,
 }
 
+/// What the configuration says of the sandbox agents' commands run in
+/// (`sandbox`): `false` turns it off; an object can turn it off
+/// (`enabled`) and name more folders (`writable`, `hidden`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SandboxConfig {
+    /// Whether commands are confined (on unless turned off).
+    pub enabled: bool,
+    /// More folders commands may change, as written (`~/` for the home
+    /// folder).
+    pub writable: Vec<String>,
+    /// More places commands can't read, as written.
+    pub hidden: Vec<String>,
+}
+
 /// What the engine read from the configuration.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[expect(
@@ -261,6 +275,8 @@ pub struct Config {
     pub prune: Prune,
     /// MCP servers (`mcp.servers`), by name, as the file has them.
     pub mcp: Value,
+    /// The sandbox agents' commands run in (`sandbox`).
+    pub sandbox: SandboxConfig,
     /// What it says of web search: the service it names
     /// (`websearch.provider`), an ID or `random`, or `false` when it turns
     /// web search off (`"websearch": false`).
@@ -363,6 +379,14 @@ impl Config {
                     .map_or(Prune::Cold, |s| Prune::After(s.saturating_mul(1_000))),
             },
             mcp: value["mcp"]["servers"].clone(),
+            sandbox: SandboxConfig {
+                enabled: value["sandbox"]
+                    .as_bool()
+                    .or_else(|| value["sandbox"]["enabled"].as_bool())
+                    .unwrap_or(true),
+                writable: strings(&value["sandbox"]["writable"]),
+                hidden: strings(&value["sandbox"]["hidden"]),
+            },
             websearch: if value["websearch"] == false {
                 Some(Value::Bool(false))
             } else {
@@ -764,6 +788,21 @@ mod tests {
         )
         .expect("parsed");
         assert!(!off.outline && !off.script_tools);
+    }
+
+    #[test]
+    fn the_sandbox_is_on_unless_turned_off_and_takes_more_folders() {
+        let sandbox = |text: &str| Config::parse(text, None).expect("parsed").sandbox;
+        assert!(sandbox("{}").enabled);
+        assert!(!sandbox(r#"{ "sandbox": false }"#).enabled);
+        assert!(!sandbox(r#"{ "sandbox": { "enabled": false } }"#).enabled);
+        let more =
+            sandbox(r#"{ "sandbox": { "writable": ["~/notes"], "hidden": ["/srv/keys"] } }"#);
+        assert!(more.enabled);
+        assert_eq!(
+            (more.writable, more.hidden),
+            (vec!["~/notes".to_owned()], vec!["/srv/keys".to_owned()])
+        );
     }
 
     #[test]

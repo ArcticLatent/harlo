@@ -72,6 +72,10 @@ fn approvals_say_what_the_agent_wants() {
         ("run a command", "cargo test")
     );
     assert_eq!(
+        describe(&asked("outside_sandbox", &["git push"])).wants,
+        "run a command outside the sandbox"
+    );
+    assert_eq!(
         describe(&asked("edit", &["a.rs", "b.rs"])).wants,
         "edit 2 files"
     );
@@ -115,6 +119,14 @@ fn always_allow_says_what_it_covers_in_words() {
         ),
         (asked("shell", &["*"]), "every command"),
         (asked("shell", &[]), "every command"),
+        (
+            asked("outside_sandbox", &["git push *"]),
+            "commands starting with “git push”, outside the sandbox",
+        ),
+        (
+            asked("outside_sandbox", &[]),
+            "every command, outside the sandbox",
+        ),
         (asked("edit", &["src/**"]), "edits to everything in “src/”"),
         (asked("edit", &["src/*"]), "edits to everything in “src/”"),
         (

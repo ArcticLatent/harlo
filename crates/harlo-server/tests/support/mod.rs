@@ -87,13 +87,35 @@ impl Sandbox {
 
     /// A sandbox whose server also gets `env`.
     pub async fn start_with_env(env: &[(&str, &str)]) -> Self {
+        Self::start_in(&std::env::temp_dir(), env).await
+    }
+
+    /// A sandbox away from the temporary folders, where the sandbox for
+    /// agents' commands holds: everything may write to the temporary
+    /// folders, so nothing in them is closed to a command.
+    ///
+    /// Its scratch folder is made in a folder of its own under the cache
+    /// folder, and removed with it.
+    pub async fn start_outside_tmp() -> Self {
+        let caches = std::env::var_os("XDG_CACHE_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::home_dir().map(|home| home.join(".cache")))
+            .expect("a cache folder");
+        let base = caches.join("harlo-tests");
+        std::fs::create_dir_all(&base).expect("scratch base");
+        Self::start_in(&base, &[]).await
+    }
+
+    /// A sandbox in a new folder under `base`, whose server also gets `env`.
+    async fn start_in(base: &Path, env: &[(&str, &str)]) -> Self {
         let env: Vec<(String, String)> = env
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         let dir = tempfile::Builder::new()
             .prefix("harlo-server-m1.")
-            .tempdir()
+            .tempdir_in(base)
             .expect("scratch");
         let root = dir.path();
         for sub in ["home", "config/harlo", "data", "state", "cache", "project"] {
@@ -206,6 +228,9 @@ pub fn spawn_server(root: &Path, port: u16, password: &str, env: &[(String, Stri
         .env("HARLO_KEY_CHECK_BASE", "http://127.0.0.1:9")
         // So is the phone relay, unless a test sets its own.
         .env("HARLO_RELAY", "http://127.0.0.1:9")
+        // Never the real Claude Code: nothing is there unless a test puts
+        // a stand-in in its place, or names its own.
+        .env("HARLO_CLAUDE_PATH", root.join("bin/claude"))
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env(
             "DBUS_SESSION_BUS_ADDRESS",

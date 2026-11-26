@@ -74,6 +74,10 @@ impl Shield {
     }
 }
 
+/// The action a command asks under to run outside the sandbox, where it
+/// reaches what the sandbox hides and may change any file of the user's.
+const OUTSIDE_SANDBOX: &str = "outside_sandbox";
+
 /// An approval request in words: what's asked, and what it would act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Described {
@@ -90,6 +94,7 @@ pub fn describe(asked: &Permission) -> Described {
     let wants = match asked.action.as_str() {
         "shell" if count > 1 => "run commands".to_owned(),
         "shell" => "run a command".to_owned(),
+        OUTSIDE_SANDBOX => "run a command outside the sandbox".to_owned(),
         "edit" if count > 1 => format!("edit {count} files"),
         "edit" => "edit a file".to_owned(),
         "read" => "read a file".to_owned(),
@@ -124,7 +129,8 @@ pub fn always_scope(asked: &Permission) -> String {
     if asked.action == "project_config" {
         return "these settings, until the project's config files change,".to_owned();
     }
-    let shell = asked.action == "shell";
+    let outside = asked.action == OUTSIDE_SANDBOX;
+    let shell = asked.action == "shell" || outside;
     let patterns: Vec<Pattern<'_>> = asked
         .save
         .iter()
@@ -135,6 +141,7 @@ pub fn always_scope(asked: &Permission) -> String {
     if patterns.is_empty() {
         return match asked.action.as_str() {
             "shell" => "every command".to_owned(),
+            OUTSIDE_SANDBOX => "every command, outside the sandbox".to_owned(),
             "edit" => "every edit".to_owned(),
             "read" => "every read".to_owned(),
             _ => "every request like this one".to_owned(),
@@ -176,6 +183,9 @@ pub fn always_scope(asked: &Permission) -> String {
         "websearch" => "web searches for ",
         _ => "",
     };
+    if outside {
+        return format!("{phrases}, outside the sandbox");
+    }
     format!("{what}{phrases}")
 }
 

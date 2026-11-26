@@ -9,6 +9,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::time::Duration;
 
+use crate::sandbox::Confined;
 use crate::tools::shell::Running;
 
 /// Where a turn's background jobs start.
@@ -19,8 +20,14 @@ pub trait Jobs: Send + Sync + std::fmt::Debug {
     /// # Errors
     ///
     /// With a message for the model when it can't be started.
-    fn shell(&self, message: &str, call: &str, command: &str, cwd: &Path)
-    -> Result<String, String>;
+    fn shell(
+        &self,
+        message: &str,
+        call: &str,
+        command: &str,
+        cwd: &Path,
+        confined: Option<Confined>,
+    ) -> Result<String, String>;
 
     /// How long a command that names no time limit runs before it is
     /// taken over with [`Self::adopt`]; `None` to stop it at the usual

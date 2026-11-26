@@ -1,6 +1,7 @@
 //! Settings → Agents against a private `harlo-server` with scratch
 //! `HOME`/`XDG_*` folders: the project's agents, and an approval saved with
-//! "Allow always" listed with its project and removed. Never the shared
+//! "Allow always" listed with its project and removed, and the sandbox for
+//! agents' commands turned off in the scratch config. Never the shared
 //! service.
 
 // Rust guideline compliant 2026-10-09
@@ -10,6 +11,8 @@ mod server;
 mod support;
 
 use std::sync::Arc;
+
+use i_slint_backend_testing::AccessibleRole;
 
 use harlo::app::{Load, Message};
 use harlo_core::server::{
@@ -111,4 +114,50 @@ fn agents_and_saved_approvals_are_shown_and_an_approval_removed() {
             .expect("list")
             .is_empty()
     );
+}
+
+#[test]
+fn the_sandbox_for_agents_commands_is_turned_off_in_harlos_config() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let folder = sandbox.root().join("config/harlo");
+    let mut app = demo::new_app();
+    // The sandbox's own config, never the real one.
+    app.config_folder = Some(folder.clone());
+    let _ = app.update(Message::Tick(demo::now()));
+    let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
+        client: sandbox.client(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        snapshot: demo::snapshot(),
+    }))));
+    app.new_folder = Some(sandbox.project_str());
+    let ui = ui(app);
+    ui.press("Settings");
+    ui.press("Agents");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            ui.app().sheets.approvals.sandbox,
+            Load::Loaded(true)
+        )),
+        "on unless the config turns it off"
+    );
+    assert!(ui.shows("Commands"));
+
+    ui.find("Sandbox")
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::Checkbox))
+        .expect("the switch")
+        .invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            ui.app().sheets.approvals.sandbox,
+            Load::Loaded(false)
+        )),
+        "turned off: {:?}",
+        ui.app().sheets.approvals.sandbox_error
+    );
+    assert!(!harlo_core::config::sandbox(&folder).expect("read"));
+    let text = std::fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(text.contains("\"fake\""), "the rest of the config stays");
 }

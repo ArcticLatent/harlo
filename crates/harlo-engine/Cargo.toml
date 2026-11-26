@@ -43,6 +43,9 @@ tokio = { workspace = true, features = ["sync", "time", "process", "fs", "io-uti
 tokio-util = { workspace = true }
 tracing = { workspace = true, features = ["std"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }

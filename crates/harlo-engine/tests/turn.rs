@@ -123,6 +123,7 @@ fn turn(model: &Model, cwd: &Path, prompt: &str, careful: bool) -> Turn {
         steering: None,
         compact_at: None,
         sealed: Vec::new(),
+        sandbox: None,
         skills: Vec::new(),
         todo: false,
         files: None,
@@ -866,4 +867,92 @@ async fn a_full_context_is_summarized_before_the_next_step() {
     );
     assert!(sent.contains("Carry on with the work"), "{sent}");
     assert!(!sent.contains("tool read"), "{sent}");
+}
+
+/// Whether `request` offers the shell tool its way out of the sandbox.
+fn offers_leaving(request: &serde_json::Value) -> bool {
+    request["tools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|tool| tool["function"]["name"] == "shell")
+        .any(|tool| !tool["function"]["parameters"]["properties"]["outside_sandbox"].is_null())
+}
+
+#[tokio::test]
+async fn a_command_asks_once_to_leave_the_sandbox_whatever_else_runs_unasked() {
+    let dir = tempfile::tempdir().expect("dir");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(&project).expect("project");
+    let model = Model::start(dir.path());
+    let leave = r#"tool shell {"command":"echo out","outside_sandbox":true} ;; say Ran."#;
+    // A sandbox whose helper isn't there: a command that goes through it
+    // can't start, so one that runs was let out.
+    let sandbox = harlo_engine::sandbox::Sandbox {
+        helper: dir.path().join("no-helper"),
+        writable: Vec::new(),
+        hidden: Vec::new(),
+        shown: Vec::new(),
+    };
+    let confined = |prompt: &str, session: Vec<Rule>| {
+        let mut turn = turn(&model, &project, prompt, false);
+        turn.sandbox = Some(sandbox.clone());
+        turn.rules.push(("session".to_owned(), session));
+        turn
+    };
+    let person = |answer| Person {
+        answer,
+        asked: Mutex::default(),
+    };
+    let asked_for = |person: &Person| -> Vec<String> {
+        let asked = person.asked.lock().expect("asks");
+        asked.iter().map(|ask| ask.action.clone()).collect()
+    };
+
+    // "Don't ask" runs commands unasked, in the sandbox.
+    let trusting = || vec![Rule::any("*", Effect::Allow)];
+    let (events, nobody) = (Events::default(), person(Answer::Reject(None)));
+    let inside = r#"tool shell {"command":"echo in"} ;; say Ran."#;
+    let stop = CancellationToken::new();
+    run(confined(inside, trusting()), &events, &nobody, &stop).await;
+    assert!(asked_for(&nobody).is_empty());
+    let result = first_result(&events);
+    assert!(result.contains("Couldn't start"), "{result}");
+    assert!(offers_leaving(&requests(dir.path())[0]));
+
+    // Leaving it asks even then, once, and "Always" covers that command.
+    let (events, allows) = (Events::default(), person(Answer::Always));
+    let outcome = run(confined(leave, trusting()), &events, &allows, &stop).await;
+    assert!(matches!(outcome, Outcome::Succeeded), "{outcome:?}");
+    assert_eq!(asked_for(&allows), ["outside_sandbox"]);
+    let saved = allows.asked.lock().expect("asks")[0].save.clone();
+    assert_eq!(saved, ["echo *"]);
+    assert_eq!(first_result(&events).trim(), "out");
+
+    // With the agent's own rules, where a command asks: still one ask.
+    let (events, once) = (Events::default(), person(Answer::Once));
+    run(confined(leave, Vec::new()), &events, &once, &stop).await;
+    assert_eq!(asked_for(&once), ["outside_sandbox"]);
+    assert_eq!(first_result(&events).trim(), "out");
+
+    // A rule that refuses the command refuses it outside too.
+    let refusing = vec![Rule {
+        action: "shell".to_owned(),
+        resource: "echo *".to_owned(),
+        effect: Effect::Deny,
+    }];
+    let (events, once) = (Events::default(), person(Answer::Once));
+    run(confined(leave, refusing), &events, &once, &stop).await;
+    assert_eq!(asked_for(&once), ["outside_sandbox"]);
+    assert!(first_result(&events).contains("Refused"));
+
+    // Where there is no sandbox, there is nothing to leave or to offer.
+    let (events, nobody) = (Events::default(), person(Answer::Reject(None)));
+    let sent = requests(dir.path()).len();
+    let mut open = self::turn(&model, &project, leave, false);
+    open.rules.push(("session".to_owned(), trusting()));
+    run(open, &events, &nobody, &stop).await;
+    assert!(asked_for(&nobody).is_empty());
+    assert_eq!(first_result(&events).trim(), "out");
+    assert!(!offers_leaving(&requests(dir.path())[sent]));
 }

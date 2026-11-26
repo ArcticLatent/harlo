@@ -7,6 +7,8 @@
 //! - `harlo-server service start` starts the background service unless one answers, and
 //!   prints where it is; `service status` only says.
 //! - `harlo-server --version` prints its version.
+//! - `harlo-server confine … -- program args` is how the server starts an agent's
+//!   command in the sandbox: the process confines itself, then becomes the command.
 
 // Rust guideline compliant 2026-10-09
 
@@ -18,6 +20,14 @@ const PASSWORD_VAR: &str = "HARLO_SERVER_PASSWORD";
 
 fn main() -> ExitCode {
     let password = take_password();
+    let mut args = std::env::args_os().skip(1);
+    if args
+        .next()
+        .is_some_and(|first| first == harlo_engine::sandbox::HELPER)
+    {
+        // (Back here only when the command couldn't be started.)
+        return ExitCode::from(harlo_engine::sandbox::enter(args));
+    }
     match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -1,23 +1,48 @@
-//! Settings → Agents' rows: The server's agents in the open project, and the
-//! approvals it saved when someone chose "Always allow".
+//! Settings → Agents' rows: The server's agents in the open project, the
+//! sandbox their commands run in, and the approvals it saved when someone
+//! chose "Always allow".
 
 // Rust guideline compliant 2026-10-09
 
 use harlo_core::server::{Agent, Catalog};
 use lucide_icons::Icon;
 
-use super::{heading, int, note, pair};
-use crate::app::{App, Load, Status};
+use super::{heading, int, note, pair, switch};
+use crate::app::{App, Load, Setting, Status};
 use crate::present::glyph;
 use crate::ui::SheetRow;
 use crate::window;
 
-/// The agents, then the saved approvals.
+/// The agents, the sandbox for their commands, then the saved approvals.
 pub(super) fn agent_rows(app: &App) -> Vec<SheetRow> {
     let mut rows = Vec::new();
     agents(app, &mut rows);
+    commands(app, &mut rows);
     approvals(app, &mut rows);
     rows
+}
+
+/// Whether agents' commands run in the sandbox, with its switch where
+/// Harlo may change the server's config.
+fn commands(app: &App, rows: &mut Vec<SheetRow>) {
+    rows.push(heading("Commands"));
+    let page = &app.sheets.approvals;
+    match &page.sandbox {
+        _ if app.global_config().is_none() => {
+            rows.push(note("Set in harlo.json on the server's computer."));
+        }
+        Load::Loaded(on) => rows.push(switch(
+            Setting::Sandbox,
+            "Sandbox",
+            "Agents' commands change only their project and can't read keys or sign-ins.",
+            *on,
+        )),
+        Load::Failed(why) => rows.push(pair("Sandbox", why, 2)),
+        Load::Idle | Load::Loading => rows.push(pair("Sandbox", "Checking…", 3)),
+    }
+    if let Some(why) = &page.sandbox_error {
+        rows.push(pair("Not changed", why, 2));
+    }
 }
 
 /// The open project's agents, as the server defines them.
@@ -113,10 +138,27 @@ fn approvals(app: &App, rows: &mut Vec<SheetRow>) {
     }
 }
 
-/// `action` with a capital first letter, as a label.
+/// `action` as a label: in words, with a capital first letter.
 fn action_name(action: &str) -> String {
-    let mut chars = action.chars();
+    if action == "outside_sandbox" {
+        return "Shell, outside the sandbox".to_owned();
+    }
+    let words = action.replace('_', " ");
+    let mut chars = words.chars();
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::action_name;
+
+    #[test]
+    fn a_saved_approvals_action_is_named_in_words() {
+        assert_eq!(action_name("shell"), "Shell");
+        assert_eq!(action_name("external_directory"), "External directory");
+        assert_eq!(action_name("outside_sandbox"), "Shell, outside the sandbox");
+        assert_eq!(action_name(""), "");
+    }
 }
