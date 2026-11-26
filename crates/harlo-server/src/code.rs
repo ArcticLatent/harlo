@@ -67,6 +67,69 @@ impl ServerCatalog {
     }
 }
 
+impl ServerCatalog {
+    /// Whether `namespace` is a plugin's to give: the server's own and an
+    /// MCP server's of the same name come first.
+    fn plugins(&self, namespace: &str) -> bool {
+        !["automation", "project"].contains(&namespace)
+            && !self.links.iter().any(|link| link.name == namespace)
+    }
+
+    /// Runs tool `tool` of the plugin whose namespace is `namespace`, which
+    /// may call the session's own tools through `tools`.
+    async fn plugin(
+        &self,
+        namespace: &str,
+        tool: &str,
+        args: Value,
+        tools: Option<&dyn harlo_engine::codemode::SessionTools>,
+    ) -> Result<Value, String> {
+        let program = self
+            .server
+            .plugin_program(namespace)
+            .filter(|_| self.plugins(namespace))
+            .ok_or_else(|| format!("There's no namespace {namespace}."))?;
+        let session = self
+            .session
+            .as_deref()
+            .and_then(|id| self.server.session(id).ok());
+        let session = session
+            .as_ref()
+            .map(|s| (s.id.as_str(), s.location.directory.as_str()));
+        let within = crate::plugins::code::Within { session, tools };
+        program
+            .call(
+                &self.server,
+                crate::plugins::code::Kind::Tool,
+                tool,
+                args,
+                within,
+            )
+            .await
+    }
+
+    /// Runs `tool` of `namespace`, which may call the session's own tools
+    /// through `tools`.
+    async fn called(
+        &self,
+        namespace: &str,
+        tool: &str,
+        args: Value,
+        tools: Option<&dyn harlo_engine::codemode::SessionTools>,
+    ) -> Result<Value, String> {
+        match namespace {
+            "automation" => self.automation(tool, args),
+            other => {
+                let session = self.session.as_deref();
+                match crate::mcp::call(&self.links, other, tool, args.clone(), session).await {
+                    Some(answer) => answer,
+                    None => self.plugin(other, tool, args, tools).await,
+                }
+            }
+        }
+    }
+}
+
 impl Catalog for ServerCatalog {
     fn namespaces(&self) -> Vec<Namespace> {
         let mut all = vec![Namespace {
@@ -104,6 +167,13 @@ impl Catalog for ServerCatalog {
             ],
         }];
         all.extend(crate::mcp::namespaces(&self.links));
+        all.extend(
+            self.server
+                .plugin_programs()
+                .iter()
+                .filter(|program| self.plugins(&program.namespace))
+                .map(|program| program.listed()),
+        );
         all
     }
 
@@ -112,14 +182,24 @@ impl Catalog for ServerCatalog {
     }
 
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a> {
-        Box::pin(async move {
-            match namespace {
-                "automation" => self.automation(tool, args),
-                other => crate::mcp::call(&self.links, other, tool, args, self.session.as_deref())
-                    .await
-                    .unwrap_or_else(|| Err(format!("There's no namespace {other}."))),
-            }
-        })
+        Box::pin(self.called(namespace, tool, args, None))
+    }
+
+    fn reaches_session(&self) -> bool {
+        self.server
+            .plugin_programs()
+            .iter()
+            .any(|program| program.reaches_session() && self.plugins(&program.namespace))
+    }
+
+    fn call_within<'a>(
+        &'a self,
+        namespace: &'a str,
+        tool: &'a str,
+        args: Value,
+        session: &'a dyn harlo_engine::codemode::SessionTools,
+    ) -> Answer<'a> {
+        Box::pin(self.called(namespace, tool, args, Some(session)))
     }
 
     fn call_seen<'a>(
@@ -132,9 +212,14 @@ impl Catalog for ServerCatalog {
             match namespace {
                 "automation" => Ok((self.automation(tool, args)?, Vec::new())),
                 other => {
-                    crate::mcp::call_seen(&self.links, other, tool, args, self.session.as_deref())
-                        .await
-                        .unwrap_or_else(|| Err(format!("There's no namespace {other}.")))
+                    let session = self.session.as_deref();
+                    let seen =
+                        crate::mcp::call_seen(&self.links, other, tool, args.clone(), session)
+                            .await;
+                    match seen {
+                        Some(answer) => answer,
+                        None => Ok((self.plugin(other, tool, args, None).await?, Vec::new())),
+                    }
                 }
             }
         })

@@ -1,12 +1,14 @@
 //! Skills: instructions kept in Markdown files that a model loads when a
 //! task calls for them, or that a person attaches to a prompt.
 //!
-//! They are found in `.claude/skills`, `.agents/skills` and
+//! They are found in installed plugins' `skills` folders, then in
+//! `.claude/skills`, `.agents/skills` and
 //! `.harlo/skills` in the project's folders, the
 //! same in the home folder, the config folder's `skills`, and the folders
 //! the config's `skills` entries name. A folder holding a `SKILL.md` is one
 //! skill named after the folder; a Markdown file at a source's top is one
-//! named after the file. Where two share an ID, the later source wins.
+//! named after the file. Where two share an ID, the later source wins, so
+//! a person's own skill replaces a plugin's.
 
 // Rust guideline compliant 2026-10-09
 
@@ -132,6 +134,8 @@ pub struct Search<'a> {
     /// The config's `skills` entries: folders, relative to the workspace,
     /// from the home folder (`~/`) or absolute.
     pub configured: &'a [String],
+    /// The folders of the plugins in use, in the order they load.
+    pub plugins: &'a [PathBuf],
 }
 
 /// The skills found, by ID.
@@ -152,7 +156,7 @@ pub fn discover(search: &Search<'_>) -> Vec<Skill> {
         }
     }
     folders.reverse();
-    let mut sources: Vec<PathBuf> = Vec::new();
+    let mut sources: Vec<PathBuf> = search.plugins.iter().map(|p| p.join("skills")).collect();
     for kind in [".claude", ".agents"] {
         sources.push(search.home.join(kind).join("skills"));
         sources.extend(folders.iter().map(|f| f.join(kind).join("skills")));
@@ -178,6 +182,12 @@ pub fn discover(search: &Search<'_>) -> Vec<Skill> {
         }
     }
     found.into_values().collect()
+}
+
+/// The skills in `folder`'s `skills` folder, as a plugin carries them.
+#[must_use]
+pub fn in_folder(folder: &Path) -> Vec<Skill> {
+    in_source(&folder.join("skills"))
 }
 
 /// The skills in one source folder.
@@ -321,9 +331,34 @@ mod tests {
             home: &home,
             config_dir: &config,
             configured: &[],
+            plugins: &[],
         });
         let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["notes", "quiet"]);
+
+        // A plugin's skills are found too; the person's own of the same
+        // name replaces a plugin's.
+        let plugin = dir.path().join("plugin");
+        write(
+            plugin.join("skills/notes/SKILL.md"),
+            "---\ndescription: From the plugin.\n---\nPlugin notes.\n",
+        );
+        write(
+            plugin.join("skills/lint/SKILL.md"),
+            "---\ndescription: Lints.\n---\nLint it.\n",
+        );
+        let with_plugin = discover(&Search {
+            workspace: &root,
+            project_root: Some(&root),
+            home: &home,
+            config_dir: &config,
+            configured: &[],
+            plugins: std::slice::from_ref(&plugin),
+        });
+        let ids: Vec<&str> = with_plugin.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["lint", "notes", "quiet"]);
+        assert_eq!(with_plugin[1].content.trim(), "Project notes.");
+        assert_eq!(in_folder(&plugin).len(), 2);
         assert_eq!(skills[0].name, "Notes");
         assert_eq!(skills[0].content.trim(), "Project notes.");
         assert!(skills[0].offered());

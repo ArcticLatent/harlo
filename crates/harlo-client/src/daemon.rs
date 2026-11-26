@@ -1,6 +1,6 @@
 //! What Harlo's own server adds to the API: phone access hosted by the
-//! server, so phones keep working while no desktop is open, and notes kept
-//! between sessions.
+//! server, so phones keep working while no desktop is open, notes kept
+//! between sessions, and plugins.
 //!
 //! A server from before 2.0 doesn't have these routes;
 //! [`Client::hosts_phone`] and [`Client::keeps_notes`] say whether the
@@ -139,7 +139,227 @@ pub struct Note {
     pub superseded_by: Option<String>,
 }
 
+/// Where a plugin stands on the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginState {
+    /// In use.
+    Active,
+    /// Turned off.
+    Off,
+    /// What it asks for hasn't been allowed.
+    Waiting,
+    /// Listed, but not fetched on the server's computer.
+    Missing,
+    /// Unusable; [`Plugin::error`] says why.
+    Failed,
+}
+
+/// A plugin someone published, as the server lists them from GitHub.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PublishedPlugin {
+    /// Its repository, as owner and name.
+    pub name: String,
+    /// The address it's added from.
+    pub src: String,
+    /// What it's for, in its publisher's words.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// How many people starred it.
+    #[serde(default)]
+    pub stars: u64,
+    /// When it last changed, as GitHub writes it.
+    #[serde(default)]
+    pub updated: Option<String>,
+}
+
+/// Something a person fills in for a plugin, such as a token.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PluginSetting {
+    /// The name the plugin's code reads it by.
+    pub key: String,
+    /// What a person is asked for.
+    pub label: String,
+    /// Whether it's a secret, which the server never gives back.
+    #[serde(default)]
+    pub secret: bool,
+    /// Whether it's filled in.
+    #[serde(default)]
+    pub set: bool,
+    /// What it's filled in with, unless it's a secret.
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+/// A plugin added to the server: a package that brings skills, commands,
+/// agents, MCP servers and tools of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plugin {
+    /// Its name.
+    pub name: String,
+    /// Where it comes from: an address or a folder.
+    pub src: String,
+    /// The tag or branch it follows; none follows the default branch.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// The commit it's kept at.
+    pub commit: String,
+    /// Whether it's turned on.
+    pub enabled: bool,
+    /// Where it stands.
+    pub state: PluginState,
+    /// Why it can't be used, when it can't.
+    #[serde(default)]
+    pub error: Option<String>,
+    /// What it's for, in a line.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The version it gives itself.
+    #[serde(default)]
+    pub release: Option<String>,
+    /// What it asks for that waits for a yes, a line each.
+    #[serde(default)]
+    pub asks: Vec<String>,
+    /// How many skills it brings.
+    #[serde(default)]
+    pub skills: usize,
+    /// How many commands it brings.
+    #[serde(default)]
+    pub commands: usize,
+    /// How many agents it brings.
+    #[serde(default)]
+    pub agents: usize,
+    /// The MCP servers it brings, by name.
+    #[serde(default)]
+    pub mcp: Vec<String>,
+    /// The tools its own code gives agents, by name.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// What its code runs for with no one calling, such as `turn.ended`.
+    #[serde(default)]
+    pub events: Vec<String>,
+    /// What a person fills in for it.
+    #[serde(default)]
+    pub settings: Vec<PluginSetting>,
+    /// Why its code last failed when it ran with no one calling.
+    #[serde(default)]
+    pub event_error: Option<String>,
+}
+
 impl Client {
+    /// The plugins added to the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or has no plugins (a server
+    /// from before they existed).
+    pub async fn plugins(&self) -> Result<Vec<Plugin>, Error> {
+        let v = Self::json(self.request(Method::GET, "/harlo/plugins")).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
+    }
+
+    /// Adds the plugin at `src` (an `https://` address, or a folder on the
+    /// server's computer) at `version` (a tag, branch or commit), for
+    /// every client of the server. What it asks for still waits for
+    /// [`Self::approve_plugin`].
+    ///
+    /// # Errors
+    ///
+    /// Fails when it can't be fetched, isn't a plugin, or one of its name
+    /// is there already.
+    pub async fn add_plugin(&self, src: &str, version: Option<&str>) -> Result<Plugin, Error> {
+        let request = self
+            .request(Method::POST, "/harlo/plugins")
+            .json(&serde_json::json!({ "src": src, "version": version }));
+        Self::plugin(request).await
+    }
+
+    /// The plugins people have published, most starred first. The server
+    /// asks GitHub for them.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached, or GitHub can't.
+    pub async fn published_plugins(&self) -> Result<Vec<PublishedPlugin>, Error> {
+        let v = Self::json(self.request(Method::GET, "/harlo/plugin-gallery")).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
+    }
+
+    /// Allows what plugin `name` asks for now.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin.
+    pub async fn approve_plugin(&self, name: &str) -> Result<Plugin, Error> {
+        Self::plugin(self.request(Method::POST, &format!("/harlo/plugins/{name}/approve"))).await
+    }
+
+    /// Moves plugin `name` to the newest commit of what it follows.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin or the newer one can't be
+    /// fetched.
+    pub async fn update_plugin(&self, name: &str) -> Result<Plugin, Error> {
+        Self::plugin(self.request(Method::POST, &format!("/harlo/plugins/{name}/update"))).await
+    }
+
+    /// Fetches plugin `name` where it's listed but missing.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin or it can't be fetched.
+    pub async fn install_plugin(&self, name: &str) -> Result<Plugin, Error> {
+        Self::plugin(self.request(Method::POST, &format!("/harlo/plugins/{name}/install"))).await
+    }
+
+    /// Turns plugin `name` on or off.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin.
+    pub async fn set_plugin_enabled(&self, name: &str, enabled: bool) -> Result<Plugin, Error> {
+        let request = self
+            .request(Method::PATCH, &format!("/harlo/plugins/{name}"))
+            .json(&serde_json::json!({ "enabled": enabled }));
+        Self::plugin(request).await
+    }
+
+    /// Fills in setting `key` of plugin `name` with `value`, or clears it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin or it names no such setting.
+    pub async fn fill_plugin(
+        &self,
+        name: &str,
+        key: &str,
+        value: Option<&str>,
+    ) -> Result<Plugin, Error> {
+        let request = self
+            .request(Method::PUT, &format!("/harlo/plugins/{name}/settings"))
+            .json(&serde_json::json!({ key: value }));
+        Self::plugin(request).await
+    }
+
+    /// Removes plugin `name` from the server.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such plugin.
+    pub async fn remove_plugin(&self, name: &str) -> Result<(), Error> {
+        Self::send(self.request(Method::DELETE, &format!("/harlo/plugins/{name}")))
+            .await
+            .map(drop)
+    }
+
+    /// The plugin a plugin request answers with.
+    async fn plugin(request: reqwest::RequestBuilder) -> Result<Plugin, Error> {
+        let v = Self::json(request).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
+    }
+
     /// Whether the server keeps notes between sessions (Harlo's own
     /// server).
     ///

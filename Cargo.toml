@@ -146,6 +146,8 @@ percent-encoding = { version = "2.3.2", default-features = false, features = ["s
 rmcp = { version = "3.11.0", default-features = false, features = ["server"] }
 # Splitting a typed command line, quotes included, as a shell would (MIT/Apache).
 shell-words = { version = "1.1.1", default-features = false, features = ["std"] }
+# Comparing the Harlo a plugin needs with this one (MIT/Apache).
+semver = { version = "1.0.28", default-features = false, features = ["std"] }
 tempfile = { version = "3.27.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }

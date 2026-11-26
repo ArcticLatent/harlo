@@ -99,6 +99,15 @@ pub type Seen<'a> = Pin<
     Box<dyn Future<Output = Result<(Value, Vec<crate::attachment::File>), String>> + Send + 'a>,
 >;
 
+/// A session's own tools, as code a [`Catalog`] runs for one of its
+/// scripts reaches them.
+pub trait SessionTools: Send + Sync + std::fmt::Debug {
+    /// Runs the session's tool `tool` with `args` as the model's own call
+    /// of it would run: under the session's rules, asking a person where
+    /// they say to.
+    fn call<'a>(&'a self, tool: &'a str, args: Value) -> Answer<'a>;
+}
+
 /// The tools scripts can call, and where their progress goes.
 pub trait Catalog: Send + Sync + std::fmt::Debug {
     /// The namespaces on offer.
@@ -111,6 +120,24 @@ pub trait Catalog: Send + Sync + std::fmt::Debug {
 
     /// Runs `tool` of `namespace` with `args`.
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a>;
+
+    /// Whether a tool of this catalog may itself call the session's own
+    /// tools, through [`Self::call_within`].
+    fn reaches_session(&self) -> bool {
+        false
+    }
+
+    /// Runs `tool` of `namespace` with `args` for a script of a session,
+    /// whose own tools the tool may call through `session`.
+    fn call_within<'a>(
+        &'a self,
+        namespace: &'a str,
+        tool: &'a str,
+        args: Value,
+        _session: &'a dyn SessionTools,
+    ) -> Answer<'a> {
+        self.call(namespace, tool, args)
+    }
 
     /// Runs `tool` of `namespace` with `args` for a call the model made on
     /// its own, and returns the pictures it answered with too. A script's

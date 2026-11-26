@@ -659,7 +659,9 @@ component RowBody inherits VerticalLayout {
         padding-bottom: 4px;
         spacing: 12px;
         if root.entry.name.character-count <= 12: Text {
-            width: 72px;
+            // (A column for short names; a name of a dozen letters is
+            // wider than it and takes what it needs.)
+            width: max(72px, self.preferred-width);
             text: root.entry.name;
             font-size: Size.small;
             color: Theme.text-base;

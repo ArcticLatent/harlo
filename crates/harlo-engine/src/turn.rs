@@ -1292,10 +1292,10 @@ async fn finish(
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
     }
-    // A script that can call the turn's tools may ask and may change the
-    // rules, as they do.
+    // A script that can call the turn's tools, or a tool that can, may
+    // ask and may change the rules, as they do.
     if let Plan::Execute { code } = &plan
-        && turn.script_tools
+        && (turn.script_tools || turn.code.as_ref().is_some_and(|c| c.reaches_session()))
     {
         let at = CallOf { message, call };
         return run_script(turn, code, input, at, gate, stop).await;

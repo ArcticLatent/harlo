@@ -16,7 +16,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use base64::Engine as _;
 use futures_util::{Stream, StreamExt, stream};
 use harlo_engine::{Message, Rule, now};
@@ -65,6 +65,16 @@ fn file_and_harlo_routes() -> Router<Arc<Server>> {
         .route("/harlo/memory", get(memory).put(set_memory))
         .route("/harlo/notes", get(notes))
         .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
+        .route("/harlo/plugins", get(plugins).post(add_plugin))
+        .route("/harlo/plugin-gallery", get(plugin_gallery))
+        .route(
+            "/harlo/plugins/{name}",
+            patch(switch_plugin).delete(remove_plugin),
+        )
+        .route("/harlo/plugins/{name}/approve", post(approve_plugin))
+        .route("/harlo/plugins/{name}/settings", put(fill_plugin))
+        .route("/harlo/plugins/{name}/update", post(update_plugin))
+        .route("/harlo/plugins/{name}/install", post(install_plugin))
         .route("/harlo/phone", get(phone_state).put(want_phone))
         .route("/harlo/phone/pair", post(pair_phone))
         .route("/harlo/phone/device/{id}", delete(remove_phone))
@@ -1478,6 +1488,67 @@ async fn correct_note(
 async fn forget_note(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.forget_note(&id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn plugins(State(server): Shared) -> Answer {
+    ok(json!({ "data": server.plugins()? }))
+}
+
+/// The plugins people have published, asked of GitHub.
+async fn plugin_gallery(State(server): Shared) -> Answer {
+    ok(json!({ "data": server.plugin_gallery().await? }))
+}
+
+/// A plugin to add: where it comes from, and the tag, branch or commit.
+#[derive(Debug, serde::Deserialize)]
+struct NewPlugin {
+    src: String,
+    version: Option<String>,
+}
+
+async fn add_plugin(State(server): Shared, axum::Json(new): axum::Json<NewPlugin>) -> Answer {
+    let plugin = server.add_plugin(&new.src, new.version.as_deref()).await?;
+    ok(json!({ "data": plugin }))
+}
+
+/// Whether a plugin is in use.
+#[derive(Debug, serde::Deserialize)]
+struct PluginSwitch {
+    enabled: bool,
+}
+
+async fn switch_plugin(
+    State(server): Shared,
+    Path(name): Path<String>,
+    axum::Json(switch): axum::Json<PluginSwitch>,
+) -> Answer {
+    ok(json!({ "data": server.enable_plugin(&name, switch.enabled)? }))
+}
+
+async fn remove_plugin(State(server): Shared, Path(name): Path<String>) -> Answer {
+    server.remove_plugin(&name)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn approve_plugin(State(server): Shared, Path(name): Path<String>) -> Answer {
+    ok(json!({ "data": server.approve_plugin(&name)? }))
+}
+
+/// Fills in a plugin's settings: text by key, or null to clear one.
+async fn fill_plugin(
+    State(server): Shared,
+    Path(name): Path<String>,
+    axum::Json(changes): axum::Json<serde_json::Map<String, Value>>,
+) -> Answer {
+    ok(json!({ "data": server.fill_plugin(&name, &changes)? }))
+}
+
+async fn update_plugin(State(server): Shared, Path(name): Path<String>) -> Answer {
+    ok(json!({ "data": server.update_plugin(&name).await? }))
+}
+
+async fn install_plugin(State(server): Shared, Path(name): Path<String>) -> Answer {
+    ok(json!({ "data": server.install_plugin(&name).await? }))
 }
 
 async fn phone_state(State(server): Shared, Query(q): Query<After>) -> Answer {

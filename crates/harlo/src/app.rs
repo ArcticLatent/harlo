@@ -47,6 +47,7 @@ mod notes;
 mod notices;
 mod phone;
 mod pictures;
+mod plugins;
 mod projects;
 mod providers;
 mod schedules;
@@ -85,6 +86,7 @@ pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use phone::{Host as PhoneHost, Paired, PhoneEvent, PhoneState, Shown};
 pub use pictures::{PictureEvent, PicturesState, Pixels, Sent, Thumb, Viewing};
+pub use plugins::{PluginEvent, Plugins};
 pub use projects::{ProjectEvent, Projects, icon_url};
 pub use providers::{Attempt as SignInAttempt, FORM_FIELDS, ProviderEvent, Providers};
 pub use schedules::{
@@ -331,6 +333,8 @@ pub enum Message {
     Update(UpdateEvent),
     /// Something happened in Settings → Memory.
     Memory(MemoryEvent),
+    /// Something happened in Settings → Extensions → Plugins.
+    Plugins(PluginEvent),
     /// Something happened to pictures: a thumbnail, the viewer, the grid.
     Pictures(PictureEvent),
     /// Something happened to a side question.
@@ -994,6 +998,7 @@ impl App {
             Message::Local(event) => self.local_event(event),
             Message::Phone(event) => self.phone_event(event),
             Message::Memory(event) => self.memory_event(event),
+            Message::Plugins(event) => self.plugin_event(event),
             Message::Pictures(event) => self.pictures_event(event),
             Message::Update(event) => self.update_event(event),
             _ => Task::none(),
@@ -1031,6 +1036,7 @@ impl App {
             | Message::Local(_)
             | Message::Phone(_)
             | Message::Memory(_)
+            | Message::Plugins(_)
             | Message::Pictures(_)
             | Message::Update(_)) => return self.feature_event(message),
             Message::SystemDark(dark) => self.set_system_dark(dark),

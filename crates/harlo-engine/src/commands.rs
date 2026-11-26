@@ -1,7 +1,8 @@
 //! Commands: prompt templates a person runs by name, such as `/review`.
 //!
 //! They come from the built-ins, the config's `commands`, and Markdown
-//! files in `commands` folders: the config folder's, then the project's
+//! files in `commands` folders: installed plugins', the config folder's,
+//! then the project's
 //! `.harlo/commands` from its root down to the session's folder. A file's
 //! front matter sets its description, agent and model, its body the
 //! template; `group/name.md` is the command `group/name`. A later source
@@ -95,6 +96,8 @@ pub struct Search<'a> {
     pub config_dir: &'a Path,
     /// The config's `commands` object.
     pub configured: &'a Value,
+    /// The folders of the plugins in use, in the order they load.
+    pub plugins: &'a [PathBuf],
 }
 
 /// The commands, by name.
@@ -104,6 +107,12 @@ pub fn discover(search: &Search<'_>) -> Vec<Command> {
         .into_iter()
         .map(|c| (c.name.clone(), c))
         .collect();
+    // Plugins' first: the person's own of the same name replace them.
+    for plugin in search.plugins {
+        for command in in_folder(plugin) {
+            found.insert(command.name.clone(), command);
+        }
+    }
     for (name, entry) in search.configured.as_object().into_iter().flatten() {
         let Some(template) = entry["template"].as_str() else {
             continue;
@@ -347,9 +356,26 @@ mod tests {
             project_root: Some(&project),
             config_dir: &dir.path().join("config"),
             configured: &configured,
+            plugins: &[],
         });
         let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["init", "review", "team/ship"]);
+
+        // A plugin's commands are found; the person's own replace them.
+        let plugin = dir.path().join("plugin");
+        std::fs::create_dir_all(plugin.join("commands")).expect("mkdir");
+        std::fs::write(plugin.join("commands/review.md"), "Plugin review.\n").expect("write");
+        std::fs::write(plugin.join("commands/tidy.md"), "Tidy up.\n").expect("write");
+        let with_plugin = discover(&Search {
+            workspace: &project,
+            project_root: Some(&project),
+            config_dir: &dir.path().join("config"),
+            configured: &configured,
+            plugins: std::slice::from_ref(&plugin),
+        });
+        let names: Vec<&str> = with_plugin.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["init", "review", "team/ship", "tidy"]);
+        assert_eq!(with_plugin[1].template, "Mine: $ARGUMENTS");
         assert_eq!(
             commands[1].template, "Mine: $ARGUMENTS",
             "config replaces a built-in"

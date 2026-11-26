@@ -54,7 +54,7 @@ pub(crate) struct Held {
 impl Held {
     /// Notes one thing that waits: `line` for the person, `exact` for the
     /// fingerprint.
-    fn note(&mut self, line: String, exact: &[u8]) {
+    pub fn note(&mut self, line: String, exact: &[u8]) {
         self.hash.update(line.as_bytes());
         self.hash.update([0]);
         self.hash.update(exact);

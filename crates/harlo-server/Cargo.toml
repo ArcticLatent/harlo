@@ -31,6 +31,7 @@ jsonc-parser = { workspace = true, features = ["serde"] }
 rusqlite = { workspace = true, features = ["bundled"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+semver = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "sync", "process", "time", "signal"] }
 tokio-util = { workspace = true }

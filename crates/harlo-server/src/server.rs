@@ -182,6 +182,8 @@ pub struct Server {
     /// Held while sign-in tokens are refreshed: a refresh token works
     /// once, so two refreshes at a time would end the sign-in.
     pub(crate) refreshing: tokio::sync::Mutex<()>,
+    /// The plugins in use, as last worked out.
+    pub(crate) plugins: Mutex<crate::plugins::Cache>,
     /// MCP server connections.
     pub(crate) mcp: crate::mcp::Mcp,
     /// The models Claude Code last listed.
@@ -289,6 +291,7 @@ impl Server {
             catalog: Mutex::new(Arc::new(harlo_engine::catalog::Catalog::bundled())),
             attempts: Mutex::default(),
             refreshing: tokio::sync::Mutex::default(),
+            plugins: Mutex::default(),
             mcp: crate::mcp::Mcp::default(),
             claude_models: Mutex::default(),
             config_dir: harlo_engine::config_folder(config_home),
@@ -962,6 +965,7 @@ impl Server {
             if prompted {
                 self.review_goal(&session, word, &stop).await;
             }
+            self.plugins_turn_ended(&session, word, error.as_deref());
             self.finish(&id, word, error);
 
             let mut live = lock(&self.live);

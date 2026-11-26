@@ -46,6 +46,7 @@ pub use client::{Client, Events};
 #[doc(inline)]
 pub use daemon::{
     AvatarPick, Note, NoteScope, NoteSource, PhoneDevice, PhoneRelay, PhoneState, PhoneWanted,
+    Plugin, PluginSetting, PluginState, PublishedPlugin,
 };
 #[doc(inline)]
 pub use endpoint::{Endpoint, SharedService, parse_registration, read_registration};

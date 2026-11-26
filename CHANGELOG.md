@@ -26,6 +26,10 @@ Settings → Server imports its sessions.
 - Agents read and edit files, run commands and background jobs, search the
   web, use MCP servers (OAuth sign-ins included), skills and commands, run
   subagents, keep a todo list, and carry notes from one session to the next.
+- Plugins: a git repository adds skills, commands, agents, MCP servers and
+  tools written in JavaScript. Settings → Extensions → Plugins adds one by
+  its address or from the published list; what would act for you waits for
+  your yes. docs/plugins.md has how to write one.
 - Approvals with permission modes, saved approvals, and questions the agent
   asks; undo a turn, one file at a time; fork, move, archive, export and
   import sessions; side questions with /btw, goals with /goal, and shell

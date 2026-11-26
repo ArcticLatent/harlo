@@ -270,7 +270,7 @@ fn type_of(schema: &Value) -> String {
 }
 
 /// An object schema as a TypeScript object type.
-fn object_type(schema: &Value) -> String {
+pub(crate) fn object_type(schema: &Value) -> String {
     let required: HashSet<&str> = schema["required"]
         .as_array()
         .into_iter()

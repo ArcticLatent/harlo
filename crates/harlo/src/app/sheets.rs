@@ -328,11 +328,15 @@ pub enum Field {
     Computer,
     /// The corrected text of the note being edited.
     NoteText,
+    /// Where a plugin to add comes from: an address or a folder.
+    PluginSource,
+    /// What the shown plugin asks a person to fill in, by its place.
+    PluginSetting(u8),
 }
 
 impl Field {
     /// Every field, in the order the UI numbers them.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 46] = [
         Self::Identity(Identity::Name),
         Self::Identity(Identity::Email),
         Self::QuietFrom,
@@ -370,6 +374,15 @@ impl Field {
         Self::McpUrl,
         Self::Computer,
         Self::NoteText,
+        Self::PluginSource,
+        Self::PluginSetting(0),
+        Self::PluginSetting(1),
+        Self::PluginSetting(2),
+        Self::PluginSetting(3),
+        Self::PluginSetting(4),
+        Self::PluginSetting(5),
+        Self::PluginSetting(6),
+        Self::PluginSetting(7),
     ];
 }
 
@@ -477,7 +490,7 @@ impl SettingChoice {
             Self::VoiceModel => &["Base", "Small"],
             Self::VoiceLanguage => &harlo_core::voice::LANGUAGE_NAMES,
             Self::LocalEngine => &["Ollama", "llama.cpp"],
-            Self::ExtensionsTab => &["MCP servers", "Skills"],
+            Self::ExtensionsTab => &["MCP servers", "Skills", "Plugins"],
             Self::ScheduleDoes => &["A prompt", "A shell command", "Code"],
         }
     }
@@ -682,6 +695,8 @@ pub struct Sheets {
     pub extensions_tab: usize,
     /// Settings → Memory.
     pub memory: super::Memory,
+    /// Settings → Extensions → Plugins.
+    pub plugins: super::Plugins,
     /// Counts loads, so a late answer to an older one is dropped.
     serial: u64,
 }
@@ -837,7 +852,11 @@ impl App {
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
             Section::Extensions => {
                 self.sheets.mcp.view = super::McpView::List;
-                Task::batch([self.load_mcp(), self.load_setup()])
+                self.sheets.plugins.shown = None;
+                self.sheets.plugins.removing = false;
+                self.sheets.plugins.done = None;
+                self.sheets.plugins.error = None;
+                Task::batch([self.load_mcp(), self.load_setup(), self.load_plugins()])
             }
             Section::Tools => Task::batch([self.load_mcp(), self.load_setup()]),
             Section::Memory => {
@@ -957,6 +976,10 @@ impl App {
             Field::McpName | Field::McpCommand | Field::McpUrl => self.mcp_text(field, value),
             Field::Computer => self.add_computer(value),
             Field::NoteText => self.memory_event(super::MemoryEvent::Save(value.to_owned())),
+            Field::PluginSource => self.plugin_event(super::PluginEvent::Add(value.to_owned())),
+            Field::PluginSetting(at) => {
+                self.plugin_event(super::PluginEvent::Fill(usize::from(at), value.to_owned()))
+            }
             Field::ModelFilter => {
                 value.clone_into(&mut self.sheets.model_filter);
                 Task::none()
@@ -1071,7 +1094,9 @@ impl App {
             | Field::McpUrl
             | Field::ModelFilter
             | Field::Computer
-            | Field::NoteText => {
+            | Field::NoteText
+            | Field::PluginSource
+            | Field::PluginSetting(_) => {
                 return Task::none();
             }
         }
@@ -1154,9 +1179,10 @@ impl App {
                 Task::none()
             }
             SettingChoice::ExtensionsTab => {
-                self.sheets.extensions_tab = option.min(1);
-                // A server's page closes with its tab.
+                self.sheets.extensions_tab = option.min(2);
+                // A server's or a plugin's page closes with its tab.
                 self.sheets.mcp.view = super::McpView::List;
+                self.sheets.plugins.shown = None;
                 Task::none()
             }
             SettingChoice::ScheduleWhen => {

@@ -22,6 +22,9 @@ pub(crate) struct Folder {
     /// The config folders: the global one, then the project's `.harlo`
     /// folders from its root down.
     pub dirs: Vec<PathBuf>,
+    /// The folders of the plugins in use, whose skills and commands are
+    /// read.
+    pub plugins: Vec<PathBuf>,
     /// The agents, built-in and configured.
     pub agents: Vec<Agent>,
     /// What the project's own config asks for that the person hasn't
@@ -164,16 +167,34 @@ impl Server {
         for provider in &mut config.providers {
             provider.system_first = config.cached_instructions;
         }
-        // The agents: the merged config's, then each config folder's. A
-        // project's agents keep their instructions; the rules that let
-        // them act unasked wait with the rest of what it asks for.
-        let mut found: Vec<(String, Value)> = config
-            .agents
-            .as_object()
-            .into_iter()
-            .flatten()
-            .map(|(id, entry)| (id.clone(), entry.clone()))
+        // What the plugins in use bring: their MCP servers, unless the
+        // config names one the same, and their agents.
+        let plugins = self.plugins_in_use();
+        let mut servers = config.mcp.as_object().cloned().unwrap_or_default();
+        for plugin in plugins.iter() {
+            for (name, spec) in &plugin.mcp {
+                servers.entry(name.clone()).or_insert_with(|| spec.clone());
+            }
+        }
+        if !servers.is_empty() {
+            config.mcp = Value::Object(servers);
+        }
+        // The agents: the plugins', the merged config's, then each config
+        // folder's, later ones winning. A project's agents keep their
+        // instructions; the rules that let them act unasked wait with the
+        // rest of what it asks for.
+        let mut found: Vec<(String, Value)> = plugins
+            .iter()
+            .flat_map(|plugin| plugin.agents.iter().cloned())
             .collect();
+        found.extend(
+            config
+                .agents
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(id, entry)| (id.clone(), entry.clone())),
+        );
         found.extend(agents::in_folder(&self.config_dir));
         for dir in &project {
             for (id, mut entry) in agents::in_folder(dir) {
@@ -190,6 +211,7 @@ impl Server {
             config,
             documents,
             dirs,
+            plugins: plugins.iter().map(|plugin| plugin.root.clone()).collect(),
             agents,
             withheld,
         }

@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::codemode::{Answer, Call, Catalog, Direct, Namespace, Seen, ToolInfo};
+use crate::codemode::{Answer, Call, Catalog, Direct, Namespace, Seen, SessionTools, ToolInfo};
 use crate::turn::{CallOf, Gate, ScriptCall, Turn};
 
 /// The namespace scripts reach the session's tools through.
@@ -99,8 +99,12 @@ pub(crate) fn namespace(turn: &Turn) -> Option<Namespace> {
 pub(crate) struct WithProject<'a, G: Gate> {
     /// The turn's own catalog.
     inner: &'a dyn Catalog,
-    /// The namespace, as this turn's rules leave it.
+    /// The namespace as the script itself has it: what this turn's rules
+    /// leave, where scripts are given the session's tools at all.
     listed: Option<Namespace>,
+    /// The namespace as this turn's rules leave it, for code the catalog
+    /// runs for the script, which is given the tools another way.
+    own: Option<Namespace>,
     /// The turn. A script's calls come one at a time; the lock is what
     /// lets each of them change the turn's rules when a person answers
     /// "always".
@@ -137,9 +141,11 @@ impl<'a, G: Gate> WithProject<'a, G> {
         at: CallOf<'a>,
         stop: &'a CancellationToken,
     ) -> Self {
+        let own = namespace(turn);
         Self {
             inner,
-            listed: namespace(turn),
+            listed: own.clone().filter(|_| turn.script_tools),
+            own,
             turn: tokio::sync::Mutex::new(turn),
             gate,
             at,
@@ -156,13 +162,15 @@ impl<'a, G: Gate> WithProject<'a, G> {
         (changed, self.halted.load(Ordering::Relaxed))
     }
 
-    /// Runs tool `tool` with `args`, as the model's own call of it would
-    /// run.
-    async fn own_call(&self, tool: &str, args: Value) -> Result<Value, String> {
-        let offered = self
-            .listed
-            .as_ref()
-            .is_some_and(|listed| listed.tools.iter().any(|t| t.name == tool));
+    /// Runs tool `tool` of those in `offered` with `args`, as the model's
+    /// own call of it would run.
+    async fn own_call(
+        &self,
+        offered: Option<&Namespace>,
+        tool: &str,
+        args: Value,
+    ) -> Result<Value, String> {
+        let offered = offered.is_some_and(|listed| listed.tools.iter().any(|t| t.name == tool));
         if !offered {
             return Err(format!("There's no tool {tool} in tools.{NAMESPACE}."));
         }
@@ -199,6 +207,12 @@ impl<'a, G: Gate> WithProject<'a, G> {
     }
 }
 
+impl<G: Gate> SessionTools for WithProject<'_, G> {
+    fn call<'a>(&'a self, tool: &'a str, args: Value) -> Answer<'a> {
+        Box::pin(self.own_call(self.own.as_ref(), tool, args))
+    }
+}
+
 impl<G: Gate> Catalog for WithProject<'_, G> {
     fn namespaces(&self) -> Vec<Namespace> {
         let mut all: Vec<Namespace> = self.listed.iter().cloned().collect();
@@ -212,9 +226,9 @@ impl<G: Gate> Catalog for WithProject<'_, G> {
 
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a> {
         if namespace == NAMESPACE {
-            return Box::pin(self.own_call(tool, args));
+            return Box::pin(self.own_call(self.listed.as_ref(), tool, args));
         }
-        self.inner.call(namespace, tool, args)
+        self.inner.call_within(namespace, tool, args, self)
     }
 
     fn call_seen<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {

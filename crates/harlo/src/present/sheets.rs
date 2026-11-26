@@ -19,6 +19,7 @@ mod local_models;
 mod mcp;
 mod memory;
 mod phone;
+mod plugins;
 mod providers;
 mod schedules;
 mod voice;
@@ -216,10 +217,11 @@ impl Sheets {
                     state.set_sheet_title(section.title().into());
                     state.set_sheet_page(
                         format!(
-                            "{section:?} {:?} {:?} {:?} {}",
+                            "{section:?} {:?} {:?} {:?} {:?} {}",
                             app.sheets.providers.shown,
                             app.sheets.projects.shown,
                             app.sheets.mcp.view,
+                            app.sheets.plugins.shown,
                             app.sheets.extensions_tab
                         )
                         .into(),
@@ -357,7 +359,9 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
                 Load::Loaded(setup) => Some(setup.as_ref()),
                 Load::Idle | Load::Loading | Load::Failed(_) => None,
             };
-            mcp::page_rows(app, setup).unwrap_or_else(|| extension_rows(app, setup))
+            mcp::page_rows(app, setup)
+                .or_else(|| plugins::page_rows(app))
+                .unwrap_or_else(|| extension_rows(app, setup))
         }
         Section::Tools => match &app.sheets.setup {
             Load::Loaded(setup) => tool_rows(app, setup),
@@ -1945,12 +1949,13 @@ fn tool_rows(app: &App, setup: &SetUp) -> Vec<SheetRow> {
     rows
 }
 
-/// Extensions: a tab each for MCP servers and skills, and the chosen
-/// one's rows.
+/// Extensions: a tab each for MCP servers, skills and plugins, and the
+/// chosen one's rows.
 fn extension_rows(app: &App, setup: Option<&SetUp>) -> Vec<SheetRow> {
     let mut rows = vec![choice(app, SettingChoice::ExtensionsTab, "", "")];
     match (app.sheets.extensions_tab, setup) {
         (1, _) => skill_rows(app, &mut rows),
+        (2, _) => plugins::list_rows(app, &mut rows),
         (_, Some(setup)) => mcp::list_rows(app, setup, &mut rows),
         (_, None) => {}
     }

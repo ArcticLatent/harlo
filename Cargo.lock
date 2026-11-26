@@ -2702,6 +2702,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.1",

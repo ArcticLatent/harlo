@@ -757,6 +757,36 @@ pub const MCP_SCRIPTS: i32 = 81;
 /// Settings → Schedules: open the shown schedule's session.
 pub const OPEN_SCHEDULE_SESSION: i32 = 82;
 
+/// The Settings row that shows the plugin numbered by its item, in the
+/// server's list.
+pub const OPEN_PLUGIN: i32 = 93;
+
+/// The Settings button back from a plugin's page.
+pub const ALL_PLUGINS: i32 = 94;
+
+/// The Settings button that allows what the shown plugin asks for.
+pub const APPROVE_PLUGIN: i32 = 95;
+
+/// The Settings button that moves the shown plugin to its newest commit.
+pub const UPDATE_PLUGIN: i32 = 96;
+
+/// The Settings button that fetches the shown plugin where it's missing.
+pub const INSTALL_PLUGIN: i32 = 97;
+
+/// The Settings button that turns the shown plugin on (item 1) or off
+/// (item 0).
+pub const SWITCH_PLUGIN: i32 = 98;
+
+/// The Settings button that removes the shown plugin, asking once.
+pub const REMOVE_PLUGIN: i32 = 99;
+/// Clears what was filled in for the shown plugin's setting at the item's
+/// place.
+pub const CLEAR_PLUGIN_SETTING: i32 = 100;
+/// Lists the plugins people have published.
+pub const BROWSE_PLUGINS: i32 = 101;
+/// Adds the published plugin at the item's place in their list.
+pub const ADD_PUBLISHED_PLUGIN: i32 = 102;
+
 /// Settings → Memory: correct the note numbered by its item.
 pub const EDIT_NOTE: i32 = 83;
 
@@ -1003,8 +1033,29 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         ))),
         FORGET_NOTE => Some(Message::Memory(app::MemoryEvent::Forget)),
         CANCEL_NOTE => Some(Message::Memory(app::MemoryEvent::Cancel)),
+        OPEN_PLUGIN..=ADD_PUBLISHED_PLUGIN => plugin_action(number, item),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }
+}
+
+/// The step a plugin's Settings button numbered `number` takes for item
+/// `item`.
+fn plugin_action(number: i32, item: i32) -> Option<Message> {
+    use app::PluginEvent;
+    let event = match number {
+        OPEN_PLUGIN => PluginEvent::Show(usize::try_from(item).ok()?),
+        ALL_PLUGINS => PluginEvent::Back,
+        APPROVE_PLUGIN => PluginEvent::Approve,
+        UPDATE_PLUGIN => PluginEvent::Update,
+        INSTALL_PLUGIN => PluginEvent::Install,
+        SWITCH_PLUGIN => PluginEvent::Switch(item == 1),
+        REMOVE_PLUGIN => PluginEvent::Remove,
+        CLEAR_PLUGIN_SETTING => PluginEvent::Clear(usize::try_from(item).ok()?),
+        BROWSE_PLUGINS => PluginEvent::Browse,
+        ADD_PUBLISHED_PLUGIN => PluginEvent::AddPublished(usize::try_from(item).ok()?),
+        _ => return None,
+    };
+    Some(Message::Plugins(event))
 }
 
 /// What a Settings → Schedules button does.

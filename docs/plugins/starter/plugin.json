@@ -1,0 +1,24 @@
+{
+  "name": "starter",
+  "description": "A plugin to start from: a tool, a command and a skill.",
+  "version": "0.1.0",
+  "minHarlo": "2.0.0",
+  "tools": [
+    {
+      "name": "count_words",
+      "description": "Counts the lines, words and characters of a file in the project.",
+      "parameters": {
+        "type": "object",
+        "properties": { "path": { "type": "string" } },
+        "required": ["path"]
+      }
+    }
+  ],
+  "commands": [
+    { "name": "standup", "description": "Draft a standup note from the session so far." }
+  ],
+  "settings": [
+    { "key": "signature", "label": "Signature" }
+  ],
+  "permissions": { "project": ["read"] }
+}

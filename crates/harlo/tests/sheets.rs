@@ -363,7 +363,7 @@ fn settings_show_the_servers_set_up_and_about() {
         Some("Failed: no such command"),
         "an MCP server's failure"
     );
-    assert!(!ui.shows("Plugins"), "no plugins tab");
+    assert!(ui.shows("Plugins"), "the plugins tab");
     // The last section, at the end of the list.
     ui.wheel("Providers", -10);
     ui.press("About");

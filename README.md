@@ -42,7 +42,7 @@ Many agent apps are a web page in an Electron window. Harlo is a desktop app:
 |---|---|
 | **Your models** | Anthropic, OpenAI (an API key, or your ChatGPT plan), OpenRouter, OpenCode Go, Vercel's AI Gateway, Cohere and any OpenAI-compatible server. Settings → Providers puts the popular ones up front, checks keys as you add them, and signs in to OpenRouter and ChatGPT in the browser. |
 | **Local models** | Settings → Local models installs Ollama or llama.cpp, runs their servers, and gets models that fit your computer. |
-| **Agents that do the work** | They read and edit files, run commands and background jobs, search the web, use MCP servers (OAuth sign-ins included), skills and commands, run subagents, keep a todo list, and carry notes from one session to the next. |
+| **Agents that do the work** | They read and edit files, run commands and background jobs, search the web, use MCP servers (OAuth sign-ins included), skills, commands and plugins, run subagents, keep a todo list, and carry notes from one session to the next. |
 | **A native chat** | Your prompts and each agent's turn, real lists and tables, code coloured by language, pictures with a viewer, and jumps between earlier prompts. Long conversations are summarized as they grow. |
 | **You stay in charge** | Approvals with permission modes, saved approvals, and questions the agent asks you. Undo a turn, one file at a time. Fork, move, archive, export and import sessions; side questions with `/btw`, goals with `/goal`, shell commands with `!`. |
 | **Changes and Git** | The Changes panel shows only the lines that changed, takes comments on diff lines and commits (✦ writes the message). Settings → Git signs in to GitHub, GitLab and Forgejo. |
@@ -100,6 +100,10 @@ The first time the server starts, it looks for an earlier OpenCode setup. If the
 - **Instructions.** A session reads `~/.config/harlo/AGENTS.md` (or `~/.claude/CLAUDE.md`), then each `AGENTS.md` from its folder up to the project's root; in a folder without an `AGENTS.md`, its `CLAUDE.md`. `HARLO_DISABLE_PROJECT_CONFIG=1` skips the project's files; `HARLO_DISABLE_CLAUDE_MD=1` skips every `CLAUDE.md`.
 - **Commands.** Markdown files in `~/.config/harlo/commands/` and a project's `.harlo/commands/`. `/name` runs one; its front matter sets the description, agent and model.
 - **Agents.** Markdown files in the `agents/` folders beside them: the front matter holds the agent's settings, the body its instructions.
+
+### Plugins
+
+A plugin is a git repository that brings skills, commands, agents, MCP servers and tools of its own. Settings → Extensions → Plugins adds one by its address, or from the list of those people have published. Harlo fetches a plugin only when you add or update it, and what would act for you (programs it starts, its code, what its code may reach) waits for your yes. [docs/plugins.md](docs/plugins.md) has how to write one, with a starter to copy.
 
 ### Skills
 

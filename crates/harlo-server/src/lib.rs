@@ -25,6 +25,7 @@ mod mcp_auth;
 mod memory;
 mod oauth;
 mod phone;
+mod plugins;
 mod projects;
 mod pty;
 mod search;
@@ -130,6 +131,8 @@ pub fn open(places: &Places, password: Option<String>) -> Result<Arc<Server>, St
         PathBuf::from(name)
     };
     let sealed: Vec<PathBuf> = [
+        // (An agent that could list a plugin could bring in anything.)
+        Some(harlo_engine::config_folder(&places.config_home).join(plugins::LIST)),
         Some(service::registration_path()),
         Some(places.database.clone()),
         Some(beside("-wal")),

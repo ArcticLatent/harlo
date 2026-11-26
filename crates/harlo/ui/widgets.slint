@@ -407,6 +407,8 @@ export component Field inherits Rectangle {
 
         Rectangle {
             horizontal-stretch: 1;
+            // Long text scrolls inside the field; it never widens it.
+            min-width: 0px;
 
             Text {
                 x: 0;
