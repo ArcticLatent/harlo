@@ -763,10 +763,13 @@ async fn a_phone_asks_a_side_question_and_runs_a_command_of_its_own() {
         .call(json!({ "op": "send", "key": key, "text": "!echo from-the-phone > made.txt; cat made.txt" }))
         .await;
     assert_eq!(ran["ok"], true, "{ran}");
-    p.until("the command's output", |phone, _| {
-        phone.text().contains("from-the-phone").then_some(())
-    })
-    .await;
+    let row = p
+        .until("the command, ended", |phone, _| {
+            let row = phone.rows.iter().find(|r| r["tool"] == "shell")?;
+            (row["state"] == "done").then(|| row.clone())
+        })
+        .await;
+    assert_eq!(row["text"], "from-the-phone\n", "{row}");
     assert_eq!(
         std::fs::read_to_string(sandbox.project().join("made.txt")).expect("made.txt"),
         "from-the-phone\n"
@@ -798,8 +801,14 @@ async fn a_phone_opens_a_subagents_own_session_from_its_card() {
         .call(json!({ "op": "send", "key": key, "text": script }))
         .await;
     assert_eq!(sent["ok"], true, "{sent}");
+    // (What was typed holds the answers' words too: only a reply counts.)
+    let replied = |phone: &TestPhone, words: &str| {
+        phone.rows.iter().any(|r| {
+            r["kind"] == "markdown" && r["text"].as_str().is_some_and(|t| t.contains(words))
+        })
+    };
     p.until("the parent's answer", |phone, _| {
-        phone.text().contains("Parent done.").then_some(())
+        replied(phone, "Parent done.").then_some(())
     })
     .await;
 
@@ -818,7 +827,7 @@ async fn a_phone_opens_a_subagents_own_session_from_its_card() {
     let opened = p.call(json!({ "op": "open", "key": child })).await;
     assert_eq!(opened["key"], child.as_str(), "{opened}");
     p.until("the subagent's answer", |phone, _| {
-        phone.text().contains("Found a.txt.").then_some(())
+        replied(phone, "Found a.txt.").then_some(())
     })
     .await;
 }
