@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use futures_util::StreamExt as _;
@@ -118,7 +119,15 @@ pub fn definitions(search: bool) -> Vec<Value> {
 /// How many redirects within a site a fetch follows.
 const MAX_REDIRECTS: usize = 10;
 
-/// The HTTP client the tools share.
+/// The HTTP client the tools share, one for the process.
+///
+/// A page read after another of the same site uses the connection the
+/// first one opened: a client of its own for each fetch connected, with
+/// its TLS handshake, for every page. Shared for speed only; nothing reads
+/// state from it.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(client);
+
+/// Builds the HTTP client the tools share.
 ///
 /// It follows a redirect only within the site that was asked for. A fetch
 /// is permitted site by site, so a page that sends it elsewhere, to a
@@ -271,7 +280,7 @@ pub fn saved_pages() -> PathBuf {
 pub async fn fetch(url: &str, spill: &Path) -> Result<Output, String> {
     let url = parse(url)?;
     refuse_link_local(&url).await?;
-    let response = client()
+    let response = CLIENT
         .get(url.clone())
         .header(
             "Accept",
@@ -821,7 +830,7 @@ fn text_json(result: &Value) -> Value {
 
 /// Asks `search`'s service for `query`.
 async fn results(search: &Search, query: &str) -> Result<Vec<Found>, SearchFailure> {
-    let http = client();
+    let http = &*CLIENT;
     let base = search.base.as_deref();
     let key = search.key.as_deref();
     let bearer = |request: reqwest::RequestBuilder| match key {
@@ -884,7 +893,7 @@ async fn results(search: &Search, query: &str) -> Result<Vec<Found>, SearchFailu
             let url = at("https://agent.tinyfish.ai/mcp", base);
             let request = match key {
                 Some(k) => {
-                    let session = tinyfish_session(&http, &url, k).await?;
+                    let session = tinyfish_session(http, &url, k).await?;
                     http.post(&url)
                         .header("X-API-Key", k)
                         .header("Mcp-Session-Id", session)
@@ -1086,6 +1095,45 @@ mod tests {
             "{why}"
         );
         assert!(!why.contains("served text"), "{why}");
+    }
+
+    #[tokio::test]
+    async fn pages_of_one_site_share_a_connection() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        // A site that keeps a connection open, and counts those it's given.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port");
+        let port = listener.local_addr().expect("address").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&connections);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counted.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut request = vec![0; 2048];
+                    while matches!(stream.read(&mut request).await, Ok(read) if read > 0) {
+                        let answer = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\
+                                      Content-Length: 4\r\n\r\npage";
+                        if stream.write_all(answer.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+
+        let spill = tempfile::tempdir().expect("scratch");
+        for path in ["/one", "/two", "/three"] {
+            let page = fetch(&format!("http://127.0.0.1:{port}{path}"), spill.path())
+                .await
+                .expect("fetched");
+            assert!(page.text.contains("page"), "{}", page.text);
+        }
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
