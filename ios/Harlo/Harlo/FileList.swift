@@ -35,6 +35,6 @@ struct FileList: View {
                 if f != files.last { Divider().overlay(Color(p.border)) }
             }
         }
-        .card(p, radius: 12)
+        .card(p, radius: Corner.card)
     }
 }

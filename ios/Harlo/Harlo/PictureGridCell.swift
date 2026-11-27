@@ -34,8 +34,8 @@ struct PictureGridCell: View {
                             ProgressView().tint(.white)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white, lineWidth: open ? 2 : 0) }
+                    .clipShape(RoundedRectangle(cornerRadius: Corner.small, style: .continuous))
+                    .overlay { RoundedRectangle(cornerRadius: Corner.small, style: .continuous).strokeBorder(.white, lineWidth: open ? 2 : 0) }
                 Text(name)
                     .font(.caption)
                     .foregroundStyle(open ? Color.white : Color(white: 0.85))

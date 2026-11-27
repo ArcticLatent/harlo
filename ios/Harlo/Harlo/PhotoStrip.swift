@@ -19,8 +19,8 @@ struct PhotoStrip: View {
                                 .resizable()
                                 .scaledToFill()
                                 .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color(p.border), lineWidth: 1) }
+                                .clipShape(RoundedRectangle(cornerRadius: Corner.small))
+                                .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.border), lineWidth: 1) }
                                 .opacity(sending ? 0.45 : 1)
                                 .overlay { if sending { ProgressView().controlSize(.small) } }
                         }

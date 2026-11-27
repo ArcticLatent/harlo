@@ -8,7 +8,7 @@ struct RowView: View {
     let row: Row
 
     var body: some View {
-        // (Your pictures are in your bubble, a tool's in its card, a reply's
+        // (Your pictures are in your message, a tool's in its card, a reply's
         // in their place; the rest, files it names, under it.)
         let rest = row.kind == "user" || row.kind == "tool" || !model.showsPictures ? [] : under
         if !rest.isEmpty {
@@ -37,7 +37,7 @@ struct RowView: View {
     @ViewBuilder var content: some View {
         switch row.kind {
         case "user":
-            UserBubble(row: row)
+            UserMessage(row: row)
         case "markdown":
             RichTextView(blocks: RichCache.blocks(row.html))
         // A long code block's later pieces: its first shows it.

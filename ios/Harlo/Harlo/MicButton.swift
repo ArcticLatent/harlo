@@ -21,8 +21,8 @@ struct MicButton: View {
                 .scaledFont(16, .semibold)
                 .symbolEffect(.variableColor.iterative, isActive: dictation.state == .listening)
                 .frame(width: size, height: size)
-                .background { Circle().fill(Color(dictation.listening ? p.error : p.subtle)) }
-                .overlay { Circle().strokeBorder(Color(dictation.listening ? p.error : p.border), lineWidth: 1) }
+                .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(dictation.listening ? p.error : p.subtle)) }
+                .overlay { RoundedRectangle(cornerRadius: Corner.card).strokeBorder(Color(dictation.listening ? p.error : p.border), lineWidth: 1) }
                 .foregroundStyle(dictation.listening ? Color.white : Color(p.muted))
         }
         .buttonStyle(.plain)

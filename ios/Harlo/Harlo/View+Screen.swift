@@ -12,12 +12,12 @@ extension View {
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
             .frame(minHeight: 44)
-            .background { RoundedRectangle(cornerRadius: 10).fill(Color(p.background)) }
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color(p.border), lineWidth: 1) }
+            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.background)) }
+            .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.border), lineWidth: 1) }
     }
 
     /// A card: the theme's raised surface with a hairline.
-    func card(_ p: Palette, radius: CGFloat = 12, fill: RGBA? = nil) -> some View {
+    func card(_ p: Palette, radius: CGFloat = Corner.card, fill: RGBA? = nil) -> some View {
         background { RoundedRectangle(cornerRadius: radius).fill(Color(fill ?? p.raised)) }
             .overlay { RoundedRectangle(cornerRadius: radius).strokeBorder(Color(p.hairline), lineWidth: 1) }
     }

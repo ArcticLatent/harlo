@@ -98,6 +98,6 @@ struct CodeBlock: View {
                 .overlay(alignment: .top) { Rectangle().fill(Color(p.border)).frame(height: 1) }
             }
         }
-        .card(p, radius: 10, fill: p.codeBackground)
+        .card(p, radius: Corner.small, fill: p.codeBackground)
     }
 }

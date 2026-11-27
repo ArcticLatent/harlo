@@ -95,7 +95,7 @@ struct ApprovalCard: View {
                         .textSelection(.enabled)
                 }
                 .padding(12)
-                .background { RoundedRectangle(cornerRadius: 10).fill(Color(p.codeBackground)) }
+                .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.codeBackground)) }
             }
             if request.approval || request.method == "confirm" {
                 ApprovalButtons(request: request, key: session.key, explaining: $explaining)
@@ -104,6 +104,6 @@ struct ApprovalCard: View {
             }
         }
         .padding(16)
-        .card(p, radius: 18)
+        .card(p, radius: Corner.large)
     }
 }

@@ -32,7 +32,7 @@ struct ApprovalDetails: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                     .padding(10)
-                    .background { RoundedRectangle(cornerRadius: 10).fill(Color(p.codeBackground)) }
+                    .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.codeBackground)) }
             }
             if !request.why.isEmpty && !folded {
                 Text(request.why)

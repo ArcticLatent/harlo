@@ -37,7 +37,7 @@ struct StatusPill: View {
             .foregroundStyle(Color(l.color.legible(on: p.raised.mix(l.color, 0.13), toward: p.foreground)))
             .padding(.horizontal, 10)
             .frame(minHeight: 28)
-            .background { Capsule().fill(Color(l.color).opacity(0.13)) }
+            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(l.color).opacity(0.13)) }
             .fixedSize()
         }
     }

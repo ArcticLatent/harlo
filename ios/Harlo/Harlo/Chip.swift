@@ -16,9 +16,9 @@ struct Chip: View {
         }
         .padding(.horizontal, 10)
         .frame(minHeight: 30)
-        .background { RoundedRectangle(cornerRadius: 9).fill(Color(on ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
-        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Color(on ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
+        .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(on ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
+        .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(on ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
         .foregroundStyle(Color(on ? p.primary : p.muted))
-        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .contentShape(RoundedRectangle(cornerRadius: Corner.small))
     }
 }

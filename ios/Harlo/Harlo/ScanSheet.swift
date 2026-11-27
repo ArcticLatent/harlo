@@ -17,7 +17,7 @@ struct ScanSheet: View {
                     QRScanner(onFound: onFound)
                         .ignoresSafeArea()
                         .overlay {
-                            RoundedRectangle(cornerRadius: 24)
+                            RoundedRectangle(cornerRadius: Corner.large)
                                 .strokeBorder(.white.opacity(0.85), lineWidth: 3)
                                 .frame(width: 250, height: 250)
                         }

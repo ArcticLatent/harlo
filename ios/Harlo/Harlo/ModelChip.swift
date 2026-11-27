@@ -23,9 +23,9 @@ struct ModelChip: View {
             .padding(.leading, 6)
             .padding(.trailing, 10)
             .frame(minHeight: 34)
-            .background { Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))) }
-            .overlay { Capsule().strokeBorder(Color(p.hairline), lineWidth: 1) }
-            .contentShape(Capsule())
+            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.raised.mix(p.foreground, 0.04))) }
+            .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.hairline), lineWidth: 1) }
+            .contentShape(RoundedRectangle(cornerRadius: Corner.small))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Model: \(session.model.isEmpty ? "default" : session.model)")

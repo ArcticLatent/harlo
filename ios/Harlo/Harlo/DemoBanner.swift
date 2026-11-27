@@ -25,6 +25,6 @@ struct DemoBanner: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .card(p, radius: 16, fill: p.accentSoft.over(p.raised))
+        .card(p, radius: Corner.large, fill: p.accentSoft.over(p.raised))
     }
 }

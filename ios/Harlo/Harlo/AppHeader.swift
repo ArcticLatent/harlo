@@ -34,7 +34,7 @@ struct AppHeader: View {
                     Image(systemName: "gauge.with.dots.needle.67percent")
                         .font(.system(size: 17, weight: .regular))
                         .frame(width: 40, height: 40)
-                        .background { Circle().fill(Color(limits.wrappedValue ? p.accentSoft.over(p.raised) : p.raised)) }
+                        .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(limits.wrappedValue ? p.accentSoft.over(p.raised) : p.raised)) }
                         .overlay(alignment: .topTrailing) {
                             if near {
                                 Circle().fill(Color(p.warning)).frame(width: 9, height: 9).offset(x: -6, y: 6)
@@ -51,7 +51,7 @@ struct AppHeader: View {
                     Image(systemName: "bell")
                         .font(.system(size: 18, weight: .regular))
                         .frame(width: 40, height: 40)
-                        .background { Circle().fill(Color(p.raised)) }
+                        .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(p.raised)) }
                         .overlay(alignment: .topTrailing) {
                             if !model.waiting.isEmpty {
                                 Circle().fill(Color(p.error)).frame(width: 9, height: 9).offset(x: -6, y: 6)

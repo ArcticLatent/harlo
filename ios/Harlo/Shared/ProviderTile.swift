@@ -16,7 +16,7 @@ struct ProviderTile: View {
     var body: some View {
         let has = known
         let tile = palette.makerTile(has ? maker : "")
-        let shape = RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
         shape
             .fill(ProviderTile.color(tile.fill))
             .frame(width: size, height: size)

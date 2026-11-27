@@ -2,18 +2,29 @@ import HarloKit
 import SwiftUI
 import UIKit
 
-/// Your message: a bubble on the right in the accent's colour (when you
-/// sent it under it), and your penguin.
-struct UserBubble: View {
+/// Your message, laid out as the agent's reply is: your penguin, "You" and
+/// when on the first line, the message full width under it, on a quiet
+/// card so a long conversation still shows where each turn starts.
+struct UserMessage: View {
     @Environment(HarloModel.self) private var model
     @Environment(\.palette) private var p
     let row: Row
 
     var body: some View {
-        let (fill, ink) = p.sentBubble
-        HStack(alignment: .bottom, spacing: 8) {
-            Spacer(minLength: 36)
-            VStack(alignment: .trailing, spacing: 5) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                UserAvatar(size: Transcript.tile)
+                    // ("You" beside it says it.)
+                    .accessibilityHidden(true)
+                Text("You")
+                    .scaledFont(16.5, .semibold)
+                if row.time > 0 {
+                    Text(Style.clock(row.time))
+                        .scaledFont(13.5)
+                        .foregroundStyle(Color(p.muted))
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
                 // What came with it: photos (as pictures, from a harlo that
                 // sends them; else by name) and files, and tags ("1 image").
                 let pictures = model.showsPictures ? row.images : []
@@ -27,7 +38,9 @@ struct UserBubble: View {
                             attachment(f)
                         }
                         if !row.subtitle.isEmpty {
-                            Text(row.subtitle).scaledFont(12.5, .medium).opacity(0.92)
+                            Text(row.subtitle)
+                                .scaledFont(12.5, .medium)
+                                .foregroundStyle(Color(p.muted))
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -39,19 +52,13 @@ struct UserBubble: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
-                if row.time > 0 {
-                    Text(Style.clock(row.time))
-                        .scaledFont(12.5, .semibold)
-                }
             }
-            .foregroundStyle(Color(ink))
-            .padding(.horizontal, 15)
-            .padding(.vertical, 11)
-            .background { RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(fill)) }
-            .layoutPriority(1)
-            UserAvatar(size: 30)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card(p)
         }
-        .padding(.top, 8)
+        .padding(.top, 10)
     }
 
     /// An attachment: a photo (as the phone names them, or an image file)
@@ -70,6 +77,6 @@ struct UserBubble: View {
         }
         .padding(.horizontal, 9)
         .frame(minHeight: 26)
-        .background { Capsule().fill(.primary.opacity(0.15)) }
+        .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.subtle)) }
     }
 }

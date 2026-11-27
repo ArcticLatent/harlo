@@ -122,8 +122,8 @@ struct SessionCard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
-        .card(p, radius: 18)
-        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .card(p, radius: Corner.large)
+        .contentShape(RoundedRectangle(cornerRadius: Corner.large))
         .accessibilityElement(children: .combine)
     }
 }

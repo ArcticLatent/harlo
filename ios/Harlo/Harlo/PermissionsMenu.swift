@@ -24,8 +24,8 @@ struct PermissionsMenu: View {
                 Image(systemName: yolo ? "bolt.shield" : "shield")
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 34, height: 34)
-                    .background { Circle().fill(Color(yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
-                    .overlay { Circle().strokeBorder(Color(yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
+                    .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(yolo ? p.accentSoft.over(p.raised) : p.raised.mix(p.foreground, 0.04))) }
+                    .overlay { RoundedRectangle(cornerRadius: Corner.card).strokeBorder(Color(yolo ? p.primary.mix(p.raised, 0.4) : p.hairline), lineWidth: 1) }
                     .foregroundStyle(Color(yolo ? p.primary : p.muted))
             }
             .accessibilityLabel("Permissions: \(Modes.label(mode))")

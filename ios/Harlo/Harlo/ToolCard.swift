@@ -119,8 +119,8 @@ struct ToolCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .card(p, radius: 14)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .card(p, radius: Corner.card)
+        .clipShape(RoundedRectangle(cornerRadius: Corner.card))
     }
 
     var failed: Bool {

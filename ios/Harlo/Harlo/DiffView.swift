@@ -82,7 +82,7 @@ struct DiffView: View {
                             .scaledFont(15, .semibold)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 36)
-                            .background { Capsule().fill(Color(p.primary)) }
+                            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.primary)) }
                             .foregroundStyle(Color(p.onPrimary))
                     }
                     .buttonStyle(.plain)

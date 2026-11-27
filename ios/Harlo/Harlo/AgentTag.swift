@@ -12,8 +12,8 @@ struct AgentTag: View {
             .scaledFont(12, .medium)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background { Capsule().fill(Color(p.subtle)) }
-            .overlay { Capsule().strokeBorder(Color(p.border), lineWidth: 1) }
+            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.subtle)) }
+            .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.border), lineWidth: 1) }
             .foregroundStyle(Color(p.muted))
     }
 }

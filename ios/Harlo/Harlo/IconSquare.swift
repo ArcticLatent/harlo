@@ -9,7 +9,7 @@ struct IconSquare: View {
     var size: CGFloat = 36
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
+        RoundedRectangle(cornerRadius: Corner.small, style: .continuous)
             .fill(Color(p.foreground).opacity(0.06))
             .frame(width: size, height: size)
             .overlay { Image(systemName: symbol).font(.system(size: size * 0.42)).foregroundStyle(Color(p.muted)) }

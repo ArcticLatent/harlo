@@ -30,6 +30,6 @@ struct SlashList: View {
                 if c.id != commands.last?.id { Divider().overlay(Color(p.border)) }
             }
         }
-        .card(p, radius: 12)
+        .card(p, radius: Corner.card)
     }
 }

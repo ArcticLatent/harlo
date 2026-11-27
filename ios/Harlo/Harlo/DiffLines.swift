@@ -38,6 +38,6 @@ struct DiffLines: View {
             .padding(.vertical, 6)
         }
         .background(bare ? Color(p.codeBackground) : Color.clear)
-        .modifier(CardUnless(bare: bare, radius: 8, fill: p.codeBackground))
+        .modifier(CardUnless(bare: bare, radius: Corner.small, fill: p.codeBackground))
     }
 }

@@ -43,8 +43,8 @@ struct PictureTile: View {
                 }
             }
             .frame(width: side, height: side)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(p.hairline), lineWidth: 1) }
+            .clipShape(RoundedRectangle(cornerRadius: Corner.small, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: Corner.small, style: .continuous).strokeBorder(Color(p.hairline), lineWidth: 1) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -30,8 +30,8 @@ struct PhotoButton: View {
             Image(systemName: "plus")
                 .scaledFont(17, .semibold)
                 .frame(width: size, height: size)
-                .background { Circle().fill(Color(p.subtle)) }
-                .overlay { Circle().strokeBorder(Color(p.border), lineWidth: 1) }
+                .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(p.subtle)) }
+                .overlay { RoundedRectangle(cornerRadius: Corner.card).strokeBorder(Color(p.border), lineWidth: 1) }
                 .foregroundStyle(Color(p.muted))
         }
         .accessibilityLabel("Add a photo")

@@ -102,7 +102,7 @@ struct DashboardView: View {
             } else if model.state != .connected {
                 ConnectionBanner()
                     .padding(14)
-                    .card(p, radius: 16)
+                    .card(p, radius: Corner.large)
                     .plainRow()
             }
             // Plan limits (the header's gauge shows them): before the sessions.
@@ -127,7 +127,7 @@ struct DashboardView: View {
                         Image(systemName: "line.3.horizontal.decrease")
                             .font(.system(size: 15, weight: .medium))
                             .frame(width: 38, height: 38)
-                            .card(p, radius: 12)
+                            .card(p, radius: Corner.card)
                     }
                     .accessibilityLabel("Group sessions")
                 }
@@ -141,7 +141,7 @@ struct DashboardView: View {
                         .scaledFont(15, .medium)
                         .padding(.horizontal, 14)
                         .frame(minHeight: 38)
-                        .card(p, radius: 12)
+                        .card(p, radius: Corner.card)
                 }
                 .buttonStyle(.plain)
             }
@@ -159,7 +159,7 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 42)
-                .card(p, radius: 12)
+                .card(p, radius: Corner.card)
                 .plainRow(bottom: 4)
             }
             ForEach(groups) { g in

@@ -49,7 +49,7 @@ struct RequestCard: View {
         } else if key == nil {
             card
                 .padding(14)
-                .card(p, radius: 18)
+                .card(p, radius: Corner.large)
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
         } else {

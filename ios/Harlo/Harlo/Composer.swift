@@ -87,7 +87,7 @@ struct Composer: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .card(p, radius: 22)
+            .card(p, radius: Corner.large)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -123,7 +123,7 @@ struct Composer: View {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 13, weight: .bold))
                     .frame(width: 36, height: 36)
-                    .background { Circle().fill(Color(p.error)) }
+                    .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(p.error)) }
                     .foregroundStyle(Color.white)
             }
             .accessibilityLabel("Stop")
@@ -134,7 +134,7 @@ struct Composer: View {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 36, height: 36)
-                    .background { Circle().fill(Color(canSend ? p.primary : p.subtle)) }
+                    .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(canSend ? p.primary : p.subtle)) }
                     .foregroundStyle(Color(canSend ? p.onPrimary : p.muted))
             }
             .disabled(!canSend)

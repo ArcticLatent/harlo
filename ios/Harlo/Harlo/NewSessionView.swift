@@ -157,7 +157,7 @@ struct NewSessionView: View {
                             }
                         }
                         .frame(width: 36, height: 36)
-                        .background { Circle().fill(Color(canStart || starting ? p.primary : p.subtle)) }
+                        .background { RoundedRectangle(cornerRadius: Corner.card).fill(Color(canStart || starting ? p.primary : p.subtle)) }
                         .foregroundStyle(Color(canStart ? p.onPrimary : p.muted))
                     }
                     .buttonStyle(.plain)
@@ -167,10 +167,10 @@ struct NewSessionView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .card(p, radius: 22, fill: p.background)
+            .card(p, radius: Corner.large, fill: p.background)
         }
         .padding(10)
-        .card(p, radius: 26)
+        .card(p, radius: Corner.large)
         .padding(.horizontal, 10)
         .padding(.bottom, 8)
         .onChange(of: place) { _, now in

@@ -137,9 +137,9 @@ struct ApprovalButtons: View {
             .frame(maxWidth: .infinity)
             .frame(minHeight: quiet ? 44 : 48)
             .foregroundStyle(Color(ink))
-            .background { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(filled ? p.primary : p.raised)) }
-            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(filled ? p.primary : p.hairline), lineWidth: 1) }
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .background { RoundedRectangle(cornerRadius: Corner.card, style: .continuous).fill(Color(filled ? p.primary : p.raised)) }
+            .overlay { RoundedRectangle(cornerRadius: Corner.card, style: .continuous).strokeBorder(Color(filled ? p.primary : p.hairline), lineWidth: 1) }
+            .contentShape(RoundedRectangle(cornerRadius: Corner.card))
         }
         .buttonStyle(.plain)
     }

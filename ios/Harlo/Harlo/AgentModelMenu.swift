@@ -53,10 +53,10 @@ struct AgentModelMenu: View {
             .padding(.leading, 6)
             .padding(.trailing, 10)
             .frame(minHeight: 34)
-            .background { Capsule().fill(Color(p.raised.mix(p.foreground, 0.04))) }
-            .overlay { Capsule().strokeBorder(Color(p.hairline), lineWidth: 1) }
+            .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.raised.mix(p.foreground, 0.04))) }
+            .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.hairline), lineWidth: 1) }
             .foregroundStyle(Color(p.foreground))
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: Corner.small))
         }
         .accessibilityLabel("\(agentName), \(modelName)")
     }

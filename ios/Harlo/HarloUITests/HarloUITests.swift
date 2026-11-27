@@ -197,6 +197,15 @@ final class HarloUITests: XCTestCase {
         launch("session")
         openMain()
         see("Found it")
+        // The header starts right after Back: its tile, then the title, with
+        // no empty room before them however short the title is.
+        let title = marked("sessionTitle")
+        let back = app.navigationBars.buttons.element(boundBy: 0)
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "the session's title")
+        XCTAssertLessThan(title.frame.minX - back.frame.maxX, 72, "the title follows Back (\(title.frame) after \(back.frame))")
+        // Your message reads as the agent's does: who on one line, what under it.
+        let you = app.staticTexts["You"].firstMatch
+        XCTAssertTrue(you.exists, "your message says who sent it")
         // How full the context is: a slim bar over the box.
         let ctx = app.buttons["contextBar"]
         XCTAssertTrue(ctx.waitForExistence(timeout: 5), "the context bar")

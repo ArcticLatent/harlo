@@ -23,6 +23,6 @@ struct PlanLimitsCard: View {
             }
         }
         .padding(14)
-        .card(p, radius: 16)
+        .card(p, radius: Corner.large)
     }
 }

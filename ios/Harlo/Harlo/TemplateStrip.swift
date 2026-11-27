@@ -18,8 +18,8 @@ struct TemplateStrip: View {
                         }
                         .padding(.horizontal, 12)
                         .frame(minHeight: 32)
-                        .background { Capsule().fill(Color(p.raised)) }
-                        .overlay { Capsule().strokeBorder(Color(p.hairline), lineWidth: 1) }
+                        .background { RoundedRectangle(cornerRadius: Corner.small).fill(Color(p.raised)) }
+                        .overlay { RoundedRectangle(cornerRadius: Corner.small).strokeBorder(Color(p.hairline), lineWidth: 1) }
                         .foregroundStyle(Color(p.foreground))
                     }
                     .buttonStyle(.plain)

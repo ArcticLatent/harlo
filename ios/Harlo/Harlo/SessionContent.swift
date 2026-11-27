@@ -105,7 +105,7 @@ struct SessionContent: View {
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 13)
-                            .card(p, radius: 14)
+                            .card(p, radius: Corner.card)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -117,7 +117,7 @@ struct SessionContent: View {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(.system(size: 16, weight: .semibold))
                                     .frame(width: 48, height: 48)
-                                    .card(p, radius: 14)
+                                    .card(p, radius: Corner.card)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -204,6 +204,7 @@ struct SessionContent: View {
                         Text(session.title.isEmpty ? "Session" : session.title)
                             .scaledFont(16, .semibold)
                             .lineLimit(1)
+                            .accessibilityIdentifier("sessionTitle")
                             // (Larger than the bar has room for: press and
                             // hold to read it big.)
                             .accessibilityShowsLargeContentViewer()
@@ -242,7 +243,11 @@ struct SessionContent: View {
                     .foregroundStyle(Color(p.muted))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // The bar gives the title the width it asks for and centres
+                // it, so a short one sat in the middle with empty room before
+                // it. Asking for more than there is gets all the room after
+                // Back, and the title starts there.
+                .frame(minWidth: 0, idealWidth: Self.titleRoom, maxWidth: .infinity, alignment: .leading)
                 // The phone's text size, up to what fits the bar's height.
                 .environment(\.dynamicTypeSize, min(typeSize, .xLarge))
             }
@@ -413,6 +418,10 @@ extension SessionContent {
     static func lastUser(_ rows: [Row]) -> String {
         rows.last { $0.isSent }?.key ?? ""
     }
+
+    /// The width the header's title asks the bar for: more than any bar
+    /// has, so it gets all there is.
+    static let titleRoom: CGFloat = 2000
 
     /// When an item started (unix ms; 0: unknown).
     static func time(of item: TranscriptItem) -> Int64 {

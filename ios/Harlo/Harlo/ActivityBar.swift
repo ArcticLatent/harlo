@@ -79,7 +79,7 @@ struct ActivityBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .card(p, radius: 10)
+            .card(p, radius: Corner.small)
             .padding(.horizontal, 12)
             .padding(.top, 8)
         }
