@@ -102,10 +102,10 @@ On Arch, `cd packaging/aur/harlo-git && makepkg -si` builds the latest commit. A
 <details>
 <summary><b>Using Harlo: a quick tour</b></summary>
 
-- **Sessions.** The sidebar lists your sessions by project. **+ Project** adds a folder; Ctrl+N starts a session. Each session opens in a tab (Ctrl+Tab and Ctrl+Shift+Tab move between them).
+- **Sessions.** The sidebar lists your sessions by project. **+ Project** adds a folder; Ctrl+N starts a session. Each session opens in a tab (Ctrl+Tab and Ctrl+Shift+Tab move between them). Ctrl+K finds a session, a page of Settings or something to do by a few letters of its name.
 - **The composer.** Enter sends, Shift+Enter adds a line, `/` lists commands and skills, `@` mentions files and MCP resources, and Tab picks the next agent. While the agent works, Enter queues a message and Ctrl+Enter steers it. Ctrl+V pastes a picture; Ctrl+Shift+D dictates. Under it: the permissions shield, the agent, the model and its effort.
 - **Approvals.** Alt+A allows the action once, Alt+D denies it; a denial can say what to do instead.
-- **Panels.** Changes, Files, Context, Todos, Notes and the terminal open from the rail on the right. Ctrl+, opens Settings, where Shortcuts lists every key.
+- **Panels.** Changes, Files, Context, Todos, Notes and the terminal open from the rail on the right. Ctrl+, opens Settings, where Shortcuts lists every key. The ring on the left rail shows how much of the last used provider's limits is gone, where the provider tells: a Claude plan's 5-hour session and week, an OpenRouter key's limit and budget, a DeepSeek balance.
 - **The server.** Harlo starts its server in the background on this computer. `harlo-server service start` starts it without the window; `harlo --server <url>` follows one elsewhere, with its password in `HARLO_SERVER_PASSWORD`. Settings → Server adds servers on your other computers over SSH and imports sessions from OpenCode; the menu at the top of the sidebar switches between servers.
 
 </details>
