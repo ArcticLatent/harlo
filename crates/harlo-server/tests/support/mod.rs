@@ -190,10 +190,22 @@ impl Sandbox {
     }
 
     pub async fn restart(&mut self) {
+        self.restart_after(|_| {}).await;
+    }
+
+    /// Stops the server, lets `change` work on the sandbox's folder while
+    /// nothing runs there, and starts the server again.
+    pub async fn restart_after(&mut self, change: impl FnOnce(&Path)) {
         let _ = self.server.kill();
         let _ = self.server.wait();
+        change(self.dir.path());
         self.server = spawn_server(self.dir.path(), self.port, &self.password, &self.env);
         self.wait_until_up().await;
+    }
+
+    /// Where the sandbox's server keeps its store.
+    pub fn database(&self) -> PathBuf {
+        self.dir.path().join("data/harlo/server.db")
     }
 }
 

@@ -8,6 +8,11 @@
 //! the work stood (see [`crate::checkpoint`]). A goal the server stopped
 //! in the middle of is paused on the next start, and resuming it tells the
 //! agent the checkpoint and what the session did after it.
+//!
+//! Only the goal's own work is told: what the session did before the goal
+//! was set never is. A goal from before checkpoints were kept says nothing
+//! of where it began; that is then read from the first prompt stored for
+//! it, and without one the agent is told the objective alone.
 
 // Rust guideline compliant 2026-10-09
 
@@ -141,19 +146,55 @@ fn reviewed(found: &Verdict) -> Reviewed {
     }
 }
 
+/// The ID of the earliest of `messages` that the server wrote for the
+/// goal with ID `goal`: the prompt its work began with.
+fn first_prompt<'a>(messages: &'a [Message], goal: &str) -> Option<&'a str> {
+    messages.iter().find_map(|message| match message {
+        Message::Synthetic {
+            id,
+            metadata: Some(data),
+            ..
+        } if data["goalID"] == goal => Some(id.as_str()),
+        _ => None,
+    })
+}
+
 impl Server {
-    /// What session `id` did after `goal`'s checkpoint, or since the goal
-    /// was set when it has none; and the ID of its newest message.
-    fn since_checkpoint(&self, id: &str, goal: &Value) -> (Digest, Option<String>) {
-        let past = goal["checkpoint"]["through"]
+    /// The ID of the message after which session `id`'s messages are
+    /// `goal`'s work: the newest its last checkpoint covers, else where
+    /// the goal says it began.
+    ///
+    /// A goal set before goals kept either has neither. Its work then
+    /// begins after the earliest stored prompt the server wrote for it.
+    /// None when no such prompt is stored: nothing then tells the goal's
+    /// work from what the session did before.
+    fn goal_boundary(&self, id: &str, goal: &Value) -> Option<String> {
+        let kept = goal["checkpoint"]["through"]
             .as_str()
             .or_else(|| goal["from"].as_str());
-        let messages = self.store.messages_after(id, past).unwrap_or_default();
+        if let Some(kept) = kept {
+            return Some(kept.to_owned());
+        }
+        let messages = self.store.messages(id).ok()?;
+        first_prompt(&messages, goal["id"].as_str()?).map(str::to_owned)
+    }
+
+    /// What session `id` did after `goal`'s checkpoint, or since the goal
+    /// was set when it has none; and the ID of its newest message.
+    ///
+    /// When nothing marks where the goal's work began (see
+    /// [`Self::goal_boundary`]), none of the session counts as its work.
+    fn since_checkpoint(&self, id: &str, goal: &Value) -> (Digest, Option<String>) {
+        let Some(past) = self.goal_boundary(id, goal) else {
+            let newest = self.store.last_message(id).ok().flatten();
+            return (Digest::default(), newest.map(|m| m.id().to_owned()));
+        };
+        let messages = self
+            .store
+            .messages_after(id, Some(&past))
+            .unwrap_or_default();
         let newest = messages.last().map(|m| m.id().to_owned());
-        (
-            checkpoint::digest(&messages),
-            newest.or_else(|| past.map(str::to_owned)),
-        )
+        (checkpoint::digest(&messages), newest.or(Some(past)))
     }
 
     /// Keeps where `goal`'s work stands in session `id`, now that its
@@ -381,5 +422,52 @@ impl Server {
             _ => goal["status"] = json!("paused"),
         }
         let _ = self.set_goal(session, Some(goal));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prompt(id: &str, metadata: Option<Value>) -> Message {
+        Message::Synthetic {
+            id: id.to_owned(),
+            time: Created { created: 0 },
+            text: "Keep going.".to_owned(),
+            description: None,
+            metadata,
+        }
+    }
+
+    #[test]
+    fn a_goals_work_begins_at_the_first_prompt_stored_for_it() {
+        let messages = [
+            Message::User {
+                id: "msg_1".to_owned(),
+                time: Created { created: 0 },
+                text: "Something else first.".to_owned(),
+                skills: Vec::new(),
+                files: Vec::new(),
+            },
+            prompt("msg_2", Some(json!({ "source": "subagent" }))),
+            prompt(
+                "msg_3",
+                Some(json!({ "source": "goal", "goalID": "goal_a" })),
+            ),
+            prompt(
+                "msg_4",
+                Some(json!({ "source": "goal", "goalID": "goal_b" })),
+            ),
+            prompt(
+                "msg_5",
+                Some(json!({ "source": "goal", "goalID": "goal_b", "round": 1 })),
+            ),
+            prompt("msg_6", None),
+        ];
+        assert_eq!(first_prompt(&messages, "goal_b"), Some("msg_4"));
+        assert_eq!(first_prompt(&messages, "goal_a"), Some("msg_3"));
+        // Another goal's prompts, or none, mark nothing.
+        assert_eq!(first_prompt(&messages, "goal_c"), None);
+        assert_eq!(first_prompt(&messages[..2], "goal_a"), None);
     }
 }

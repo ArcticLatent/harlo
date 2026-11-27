@@ -287,3 +287,193 @@ async fn a_goal_stopped_by_a_restart_resumes_from_its_checkpoint_in_its_own_sess
         assert!(!told.contains(others), "{others}\n{told}");
     }
 }
+
+/// Rewrites session `id`'s stored goal with `change`, in the store of a
+/// sandbox whose server is stopped.
+fn rewrite_goal(database: &std::path::Path, id: &str, change: impl FnOnce(&mut Value)) {
+    let store = harlo_server::Store::open(database).expect("the store");
+    let key = format!("goal/{id}");
+    let stored = store.setting(&key).expect("read").expect("a goal");
+    let mut goal: Value = serde_json::from_str(&stored).expect("json");
+    change(&mut goal);
+    store.put_setting(&key, &goal.to_string()).expect("write");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one story: earlier work, an old goal with a prompt stored, one with none"
+)]
+async fn a_goal_from_before_checkpoints_never_counts_what_the_session_did_before_it() {
+    let mut sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let project = sandbox.project();
+    let a = client
+        .create_session(project.to_str().expect("utf-8"))
+        .await
+        .expect("A");
+
+    // The session edits a file and runs a command before it has any goal.
+    client
+        .prompt(
+            &a.id,
+            &harlo_client::Prompt::new(
+                r#"tool write {"path":"unrelated.txt","content":"x\n"} ;; tool shell {"command":"echo unrelated-command"} ;; say Unrelated work is done."#,
+                Delivery::Queue,
+            ),
+        )
+        .await
+        .expect("prompt");
+    let mut answered = false;
+    for _ in 0..LOOKS {
+        for asked in client.permissions(&a.id).await.expect("permissions") {
+            client
+                .reply_permission(&a.id, &asked.id, PermissionReply::Once, None)
+                .await
+                .expect("allow");
+        }
+        if messages(&sandbox, &a.id)
+            .await
+            .iter()
+            .any(|m| m["type"] == "idle")
+        {
+            answered = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(answered, "the unrelated work never ended");
+    assert!(project.join("unrelated.txt").exists());
+
+    // A goal: one round reviewed and sent back, the next cut short.
+    script(
+        &sandbox,
+        &json!({
+            "<reviewer>": r#"{"verdict":"continue","reason":"b.txt is missing.","next_step":"Write b.txt."}"#,
+            "<goal>": r#"tool write {"path":"a2.txt","content":"one\n"} ;; tool shell {"command":"cat a2.txt"} ;; say a2.txt is written."#,
+            "<round>": r#"tool write {"path":"b.txt","content":"two\n"} ;; pace 60 | long 40"#,
+        }),
+    );
+    client
+        .run_command(&a.id, "goal", "Ship both files", Delivery::Queue)
+        .await
+        .expect("the goal");
+    goal_when(&sandbox, &client, &a.id, "never reviewed", |g| {
+        g["rounds"] == 1
+    })
+    .await;
+    let mut midway = false;
+    for _ in 0..LOOKS {
+        if project.join("b.txt").exists()
+            && messages(&sandbox, &a.id)
+                .await
+                .last()
+                .is_some_and(|m| m.to_string().contains("Section 0"))
+        {
+            midway = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(midway, "the second round never got going");
+
+    // The server stops, and the goal is as an earlier Harlo kept it: it
+    // says neither where it began nor what a reviewer saw.
+    let database = sandbox.database();
+    sandbox
+        .restart_after(|_| {
+            rewrite_goal(&database, &a.id, |goal| {
+                let fields = goal.as_object_mut().expect("an object");
+                assert!(fields.remove("from").is_some(), "it said where it began");
+                assert!(fields.remove("checkpoint").is_some(), "it had a checkpoint");
+            });
+        })
+        .await;
+    let old = goal(&sandbox, &a.id).await;
+    assert_eq!(old["status"], "paused", "{old}");
+    assert!(
+        old.get("from").is_none() && old.get("checkpoint").is_none(),
+        "{old}"
+    );
+
+    // Resumed, its work is read from its first stored prompt on: both
+    // rounds, and nothing of what the session did before.
+    script(&sandbox, &json!({ "<resume>": "say Picking it up." }));
+    let client = sandbox.client();
+    client
+        .run_command(&a.id, "goal", "resume", Delivery::Queue)
+        .await
+        .expect("resume");
+    let reached = goal_when(&sandbox, &client, &a.id, "never reached", |g| {
+        g["status"] == "complete"
+    })
+    .await;
+    let told = resume_prompt(&sandbox, "Ship both files");
+    for expected in [
+        "No checkpoint was kept yet.",
+        "- changed a2.txt\n- ran `cat a2.txt` (exit 0)\n- changed b.txt\n",
+        "- it stopped short: The server stopped before this step ended.",
+    ] {
+        assert!(told.contains(expected), "{expected}\n{told}");
+    }
+    assert!(
+        !told.contains("unrelated") && !told.contains("<checkpoint>"),
+        "{told}"
+    );
+    assert_eq!(
+        reached["checkpoint"]["completed"],
+        json!([
+            "changed a2.txt",
+            "ran `cat a2.txt` (exit 0)",
+            "changed b.txt"
+        ]),
+        "{reached}"
+    );
+    assert!(!reached.to_string().contains("unrelated"), "{reached}");
+
+    // An old goal with no prompt of its own stored: nothing says where
+    // its work began, so the agent is told the objective and no more.
+    sandbox
+        .restart_after(|_| {
+            rewrite_goal(&database, &a.id, |goal| {
+                *goal = json!({
+                    "id": "goal_0000older", "objective": "Finish the old task",
+                    "status": "paused", "reason": "Paused by the person.",
+                    "rounds": 3, "maxRounds": 50,
+                });
+            });
+        })
+        .await;
+    script(
+        &sandbox,
+        &json!({ "<resume>": r#"tool write {"path":"c.txt","content":"three\n"} ;; say c.txt is written."# }),
+    );
+    let client = sandbox.client();
+    client
+        .run_command(&a.id, "goal", "resume", Delivery::Queue)
+        .await
+        .expect("resume the old goal");
+    let reached = goal_when(
+        &sandbox,
+        &client,
+        &a.id,
+        "the old goal was never reached",
+        |g| g["status"] == "complete",
+    )
+    .await;
+    let told = resume_prompt(&sandbox, "Finish the old task");
+    assert!(
+        told.contains("<objective>\nFinish the old task\n</objective>"),
+        "{told}"
+    );
+    for absent in ["<since>", "<checkpoint>", "unrelated", "a2.txt", "b.txt"] {
+        assert!(!told.contains(absent), "{absent}\n{told}");
+    }
+    // Its first checkpoint holds the round it was resumed for, alone.
+    assert_eq!(reached["checkpoint"]["round"], 1, "{reached}");
+    assert_eq!(
+        reached["checkpoint"]["completed"],
+        json!(["changed c.txt"]),
+        "{reached}"
+    );
+}
