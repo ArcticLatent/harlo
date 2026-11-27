@@ -28,6 +28,12 @@ const PATIENCE: Duration = Duration::from_mins(2);
 /// wait two minutes for a command to outrun it.
 const PATIENCE_VAR: &str = "HARLO_SHELL_PATIENCE_MS";
 
+/// How long an ask to move a command waits for the command to be listed.
+///
+/// A call is announced as running a moment before its command is: the
+/// rules decide it and its sandbox is set up in between.
+const LISTING: Duration = Duration::from_secs(1);
+
 /// How long a command that outran its time may carry on in the background
 /// before it is stopped. An agent that sends a command to the background
 /// itself means it to stay, as a server does. One moved there for being
@@ -286,16 +292,33 @@ impl Server {
     /// the background: its turn stops waiting for it, and it carries on
     /// as a job.
     ///
+    /// While the session's run is under way, an ask that comes before the
+    /// command is listed waits for it up to [`LISTING`]: a client learns
+    /// of the call a moment before the command starts.
+    ///
     /// # Errors
     ///
     /// When no agent of the session is waiting for such a command.
-    pub(crate) fn move_to_background(&self, session: &str, call: &str) -> Result<(), Refusal> {
+    pub(crate) async fn move_to_background(
+        &self,
+        session: &str,
+        call: &str,
+    ) -> Result<(), Refusal> {
         let key = (session.to_owned(), call.to_owned());
-        let asked = lock(&self.live).waited.get(&key).cloned().ok_or_else(|| {
-            Refusal::NotFound("That command isn't running, or has already ended.".to_owned())
-        })?;
-        asked.notify_one();
-        Ok(())
+        let deadline = tokio::time::Instant::now() + LISTING;
+        loop {
+            if let Some(asked) = lock(&self.live).waited.get(&key).cloned() {
+                asked.notify_one();
+                return Ok(());
+            }
+            let running = self.busy().iter().any(|id| id == session);
+            if !running || tokio::time::Instant::now() >= deadline {
+                return Err(Refusal::NotFound(
+                    "That command isn't running, or has already ended.".to_owned(),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Stops background job `id`: a command, or a subagent's run.
@@ -443,7 +466,7 @@ mod tests {
 
     use harlo_engine::jobs::Jobs as _;
 
-    use super::SessionJobs;
+    use super::{LISTING, SessionJobs};
     use crate::{PhoneHost, Server, Store};
 
     /// A server with nothing in it, its files under `scratch`.
@@ -474,13 +497,49 @@ mod tests {
         let asked = jobs.asked_to_move("msg_1", "call_1");
         server
             .move_to_background("ses_1", "call_1")
+            .await
             .expect("listed from its call");
         tokio::time::timeout(Duration::from_secs(5), asked)
             .await
             .expect("an early ask is kept");
 
         // The wait is over, so there is nothing left to move.
-        let late = server.move_to_background("ses_1", "call_1");
+        let late = server.move_to_background("ses_1", "call_1").await;
         assert!(late.is_err(), "{late:?}");
+    }
+
+    #[tokio::test]
+    async fn an_ask_just_before_the_command_is_listed_waits_for_it() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let server = server(scratch.path());
+        let jobs = SessionJobs {
+            server: Arc::clone(&server),
+            session: "ses_1".to_owned(),
+        };
+        server.begin_run("ses_1");
+
+        // The call is known before the rules have let its command start.
+        let moving = {
+            let server = Arc::clone(&server);
+            tokio::spawn(async move { server.move_to_background("ses_1", "call_1").await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let asked = jobs.asked_to_move("msg_1", "call_1");
+        moving
+            .await
+            .expect("the ask ended")
+            .expect("it waited for the command");
+        tokio::time::timeout(Duration::from_secs(5), asked)
+            .await
+            .expect("the command was told");
+
+        // A call that never becomes a command is refused once the wait
+        // is over, and at once where no run is under way.
+        let began = std::time::Instant::now();
+        let never = server.move_to_background("ses_1", "call_2").await;
+        assert!(never.is_err() && began.elapsed() >= LISTING, "{never:?}");
+        let began = std::time::Instant::now();
+        let idle = server.move_to_background("ses_2", "call_1").await;
+        assert!(idle.is_err() && began.elapsed() < LISTING, "{idle:?}");
     }
 }

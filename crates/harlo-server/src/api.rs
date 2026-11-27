@@ -1326,7 +1326,7 @@ async fn move_to_background(
     State(server): Shared,
     Path((id, call)): Path<(String, String)>,
 ) -> Answer {
-    server.move_to_background(&id, &call)?;
+    server.move_to_background(&id, &call).await?;
     done()
 }
 

@@ -771,6 +771,18 @@ impl Server {
             .unwrap_or_default()
     }
 
+    /// Marks session `id` as running, for a test of what holds during a
+    /// run.
+    #[cfg(test)]
+    pub(crate) fn begin_run(&self, id: &str) {
+        let run = Run {
+            stop: CancellationToken::new(),
+            asks: Vec::new(),
+            forms: Vec::new(),
+        };
+        lock(&self.live).runs.insert(id.to_owned(), run);
+    }
+
     /// Whether session `id` is running.
     pub(crate) fn busy(&self) -> Vec<String> {
         lock(&self.live).runs.keys().cloned().collect()
