@@ -10,7 +10,7 @@ use harlo_core::approvals::{self, Shield};
 use harlo_core::composer::{self as compose, Attached, Choice, Draft, MenuItem, Outgoing, Trigger};
 use harlo_core::layout::{Layout, Preferences, Store, Tabs};
 use harlo_core::server::{
-    self, Attachment, Catalog, Client, Delivery, FileMatch, Location, Update,
+    self, Attachment, Catalog, Client, Delivery, FileMatch, Location, McpResource, Update,
 };
 use harlo_core::sessions::Project;
 use harlo_core::theme::{self, Mode, Scheme, Tokens};
@@ -397,6 +397,8 @@ pub enum Message {
     Found(u64, Result<Vec<FileMatch>, String>),
     /// What a folder offers, loaded.
     Catalog(String, Result<Box<Catalog>, String>),
+    /// The resources a folder's MCP servers offer, loaded again.
+    Resources(String, Vec<McpResource>),
     /// Choose the agent, by ID.
     PickAgent(String),
     /// Switch to the next agent a session can run, or the one before.
@@ -672,6 +674,12 @@ pub struct App {
     /// What each folder offers, once loaded.
     catalogs: HashMap<String, Catalog>,
     loading_catalogs: HashSet<String>,
+    /// Folders whose MCP resources changed while they weren't the current
+    /// folder: asked for again when they next are.
+    stale_resources: HashSet<String>,
+    /// Resources that arrived before their folder's catalog did; they are
+    /// newer than the ones that catalog was loaded with.
+    early_resources: HashMap<String, Vec<McpResource>>,
     /// The agent for the next new session, when chosen.
     new_agent: Option<String>,
     /// The model for the next new session, when chosen.
@@ -817,6 +825,8 @@ impl App {
             searches: 0,
             catalogs: HashMap::new(),
             loading_catalogs: HashSet::new(),
+            stale_resources: HashSet::new(),
+            early_resources: HashMap::new(),
             new_agent: None,
             new_model: None,
             models: Vec::new(),
@@ -1059,6 +1069,7 @@ impl App {
             | Message::CancelQueued(_)
             | Message::Acted(_)
             | Message::Catalog(..)
+            | Message::Resources(..)
             | Message::PickAgent(_)
             | Message::CycleAgent { .. }
             | Message::PickModel(_)
@@ -1264,12 +1275,16 @@ impl App {
                 self.loading_catalogs.remove(&folder);
                 // A folder that fails to load offers nothing until the catalog
                 // changes or the server reconnects, rather than retrying at once.
-                self.catalogs
-                    .insert(folder.clone(), result.map(|c| *c).unwrap_or_default());
+                let mut catalog = result.map(|c| *c).unwrap_or_default();
+                if let Some(resources) = self.early_resources.remove(&folder) {
+                    catalog.resources = resources;
+                }
+                self.catalogs.insert(folder.clone(), catalog);
                 if self.models_for.as_deref() == Some(folder.as_str()) {
                     self.rebuild_models();
                 }
             }
+            Message::Resources(folder, resources) => return self.resources(folder, resources),
             Message::PickAgent(agent) => {
                 if self.active.is_none() {
                     self.new_agent = Some(agent);
@@ -1388,6 +1403,14 @@ impl App {
                     // Reloaded for the current folder once this update ends.
                     self.catalogs.clear();
                 }
+                let resources = if matches!(event.kind, EventKind::ResourcesChanged) {
+                    self.stale_resources.extend(self.catalogs.keys().cloned());
+                    self.stale_resources
+                        .extend(self.loading_catalogs.iter().cloned());
+                    self.load_resources()
+                } else {
+                    Task::none()
+                };
                 let mut reload = Task::none();
                 if let Some(id) = event.kind.session_id() {
                     let busy = self.workspace.is_busy(id);
@@ -1402,7 +1425,7 @@ impl App {
                         }
                     }
                 }
-                return Task::batch([self.fetch(fetches), reload, notice, files]);
+                return Task::batch([self.fetch(fetches), reload, notice, files, resources]);
             }
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };
@@ -2132,13 +2155,14 @@ impl App {
     /// Loads what the current folder offers if it isn't loaded, and keeps the model picker on it.
     fn follow_folder(&mut self) -> Task<Message> {
         let folder = self.folder();
-        let mut task = Task::none();
-        if let Some(client) = self.client.clone()
+        let task = if let Some(client) = self.client.clone()
             && !self.catalogs.contains_key(&folder)
             && self.loading_catalogs.insert(folder.clone())
         {
+            // A catalog loaded from now on has the resources as they are.
+            self.stale_resources.remove(&folder);
             let directory = folder.clone();
-            task = Task::perform(
+            Task::perform(
                 async move {
                     let result = server::catalog(&client, &directory)
                         .await
@@ -2147,8 +2171,10 @@ impl App {
                     (directory, result)
                 },
                 |(directory, result)| Message::Catalog(directory, result),
-            );
-        }
+            )
+        } else {
+            self.load_resources()
+        };
         if self.models_for.as_deref() != Some(folder.as_str()) {
             self.models_for = Some(folder);
             self.rebuild_models();
@@ -2156,10 +2182,47 @@ impl App {
         task
     }
 
+    /// Asks again for the current folder's MCP resources if they changed.
+    ///
+    /// Only the resources are replaced, so the menus that show the rest of
+    /// the folder's catalog don't empty while they load.
+    fn load_resources(&mut self) -> Task<Message> {
+        let folder = self.folder();
+        let Some(client) = self.client.clone() else {
+            return Task::none();
+        };
+        if !self.stale_resources.remove(&folder) {
+            return Task::none();
+        }
+        Task::perform(
+            async move {
+                // An MCP server that is down offers nothing, as when the
+                // catalog is loaded.
+                let resources = client.mcp_resources(&folder).await.unwrap_or_default();
+                (folder, resources)
+            },
+            |(folder, resources)| Message::Resources(folder, resources),
+        )
+    }
+
+    /// Takes in the resources `folder`'s MCP servers offer now.
+    fn resources(&mut self, folder: String, resources: Vec<McpResource>) -> Task<Message> {
+        match self.catalogs.get_mut(&folder) {
+            Some(catalog) => catalog.resources = resources,
+            None if self.loading_catalogs.contains(&folder) => {
+                self.early_resources.insert(folder, resources);
+            }
+            None => {}
+        }
+        self.refresh_menu()
+    }
+
     /// Forgets every folder's catalog, so the current one loads again.
     fn forget_catalogs(&mut self) {
         self.catalogs.clear();
         self.loading_catalogs.clear();
+        self.stale_resources.clear();
+        self.early_resources.clear();
         self.models_for = None;
     }
 

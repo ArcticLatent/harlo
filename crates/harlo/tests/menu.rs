@@ -10,7 +10,8 @@ mod support;
 
 use harlo::app::Message;
 use harlo::text::Edit;
-use harlo_core::server::{Catalog, Command};
+use harlo_core::server::{Catalog, Command, McpResource, Update};
+use harlo_core::workspace::{Event, EventKind};
 use support::{Ui, demo, ui};
 
 /// "pi update" in the demo data.
@@ -78,4 +79,35 @@ fn escape_closes_the_menu_until_the_word_changes() {
     ui.send(Message::Compose(Edit::at("", 0)));
     ui.send(Message::Compose(Edit::at("/", 1)));
     assert!(ui.shows("/review"), "a new word opens it again");
+}
+
+/// MCP servers are often still starting when a folder's catalog is loaded,
+/// so their resources come in afterwards: the `@` menu offers them then,
+/// and the rest of the catalog stays as it was.
+#[test]
+fn resources_that_arrive_after_the_catalog_join_the_at_menu() {
+    let ui = chatting();
+    ui.send(Message::Compose(Edit::at("@Fir", 4)));
+    assert!(!ui.shows("@First note"), "none is offered yet");
+
+    ui.send(Message::Server(Update::Event(Event {
+        id: "evt".into(),
+        seq: None,
+        time: 1.0,
+        kind: EventKind::ResourcesChanged,
+    })));
+    ui.send(Message::Resources(
+        folder(),
+        vec![McpResource {
+            server: "notes".into(),
+            name: "First note".into(),
+            uri: "notes://one".into(),
+            description: None,
+        }],
+    ));
+    assert!(ui.shows("@First note"), "the open menu takes it in");
+    assert!(ui.shows("notes"), "with the server it comes from");
+
+    ui.send(Message::Compose(Edit::at("/re", 3)));
+    assert!(ui.shows("/review"), "the commands are still there");
 }

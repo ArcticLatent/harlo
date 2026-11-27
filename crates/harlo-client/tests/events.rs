@@ -27,3 +27,14 @@ fn a_branch_change_names_its_folder_and_branch() {
         EventKind::BranchChanged { branch: None, .. }
     ));
 }
+
+#[test]
+fn an_mcp_servers_change_says_the_resources_on_offer_changed() {
+    for name in ["mcp.status.changed", "mcp.resources.changed"] {
+        let event = Event::parse(&format!(
+            r#"{{"id":"evt_1","created":1,"type":"{name}","data":{{"server":"notes"}}}}"#
+        ))
+        .expect("an event");
+        assert_eq!(event.kind, EventKind::ResourcesChanged, "{name}");
+    }
+}

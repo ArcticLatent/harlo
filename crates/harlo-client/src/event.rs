@@ -278,6 +278,9 @@ pub enum Kind {
     },
     /// The models, agents, commands or skills on offer changed.
     CatalogChanged,
+    /// An MCP server connected, stopped or changed what it offers, so the
+    /// resources on offer may have changed.
+    ResourcesChanged,
     /// A file in a folder was added, changed or removed.
     ///
     /// The server reports files it watches: ones an agent touched, and ones
@@ -375,6 +378,7 @@ impl Kind {
             | Self::WorktreesChanged { .. }
             | Self::BranchChanged { .. }
             | Self::CatalogChanged
+            | Self::ResourcesChanged
             | Self::FileChanged { .. }
             | Self::Other { .. } => None,
         }
@@ -612,6 +616,7 @@ fn decode(kind: &str, data: Value) -> Result<Kind, serde_json::Error> {
         },
         "model.updated" | "provider.updated" | "agent.updated" | "command.updated"
         | "skill.updated" => Kind::CatalogChanged,
+        "mcp.status.changed" | "mcp.resources.changed" => Kind::ResourcesChanged,
         "session.text.delta" => {
             let d: g::SessionTextDeltaData = from(data)?;
             Kind::TextDelta {
