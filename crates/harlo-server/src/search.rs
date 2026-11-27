@@ -13,6 +13,11 @@
 //! At random, a session keeps the service it was given until that one is
 //! limited (HTTP 429); then the search goes to another, and the limited
 //! one is left alone as long as it asked, a minute unless it said.
+//!
+//! A service named in the config or chosen by the person is the one
+//! searched with. While it is limited the search goes to another at
+//! random, and the result says which answered; once the wait it asked for
+//! is over, searches go to it again.
 
 // Rust guideline compliant 2026-10-09
 
@@ -132,9 +137,7 @@ impl Searcher for SessionSearch {
                     }
                     harlo_engine::claude::search(&crate::claude::program(), query).await
                 }
-                Choice::Service(id) => harlo_engine::web::search(&self.server.search(&id), query)
-                    .await
-                    .map_err(|f| f.text),
+                Choice::Service(id) => self.server.search_named(&self.session, &id, query).await,
                 Choice::Random => self.server.search_at_random(&self.session, query).await,
             }
         })
@@ -204,16 +207,57 @@ impl Server {
         }
     }
 
+    /// Searches `query` with service `id`; while that one is limited, with
+    /// another at random, saying so in the result.
+    async fn search_named(&self, session: &str, id: &str, query: &str) -> Result<Output, String> {
+        let limited = lock(&self.live)
+            .searches
+            .cooling
+            .get(id)
+            .is_some_and(|until| *until > Instant::now());
+        if !limited {
+            match harlo_engine::web::search(&self.search(id), query).await {
+                Ok(found) => return Ok(found),
+                Err(failure) => {
+                    let Some(wait) = failure.limited else {
+                        return Err(failure.text);
+                    };
+                    lock(&self.live)
+                        .searches
+                        .cooling
+                        .insert(id.to_owned(), Instant::now() + wait);
+                }
+            }
+        }
+        let mut found = self.search_at_random(session, query).await?;
+        let other = lock(&self.live).searches.given.get(session).cloned();
+        let name = |id: &str| {
+            SERVICES
+                .iter()
+                .find(|(service, _, _)| *service == id)
+                .map_or(id, |(_, name, _)| *name)
+                .to_owned()
+        };
+        found.text = format!(
+            "({} is limited for now; searched with {}.)\n\n{}",
+            name(id),
+            other
+                .as_deref()
+                .map_or_else(|| "another service".to_owned(), name),
+            found.text
+        );
+        Ok(found)
+    }
+
     /// Searches `query` at random for `session`, moving on from limited
     /// services.
     async fn search_at_random(&self, session: &str, query: &str) -> Result<Output, String> {
         let mut tried = HashSet::new();
-        let mut last = None;
         loop {
             let Some(id) = lock(&self.live).searches.next(session, &tried) else {
-                return Err(last.unwrap_or_else(|| {
-                    "Every search service is limited for now; try again in a minute.".to_owned()
-                }));
+                return Err(
+                    "Every search service is limited for now; try again in a minute.".to_owned(),
+                );
             };
             tried.insert(id.clone());
             match harlo_engine::web::search(&self.search(&id), query).await {
@@ -226,7 +270,6 @@ impl Server {
                         .searches
                         .cooling
                         .insert(id, Instant::now() + wait);
-                    last = Some(failure.text);
                 }
             }
         }

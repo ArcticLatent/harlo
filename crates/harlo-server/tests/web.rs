@@ -318,6 +318,127 @@ async fn at_random_a_limited_service_hands_the_search_on() {
     assert!(client.forms(&session.id).await.expect("forms").is_empty());
 }
 
+/// A service the config names is the one searched with; limited, it hands
+/// the search on, the result says so, and it is left alone for as long as
+/// it asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_named_service_that_is_limited_hands_the_search_on() {
+    let (at, seen) = stand_in(&["exa"]).await;
+    let sandbox = Sandbox::start_with_env(&[("HARLO_WEBSEARCH_BASE", &at)]).await;
+    let client = sandbox.client();
+    let project = sandbox.project();
+    std::fs::write(
+        project.join("harlo.json"),
+        r#"{ "websearch": { "provider": "exa" } }"#,
+    )
+    .expect("config");
+    let folder = project.to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+
+    send(&sandbox, &session.id, SEARCH).await;
+    run_until(&sandbox, &session.id, "say waited", "Version 9 via ").await;
+    assert!(
+        client.forms(&session.id).await.expect("forms").is_empty(),
+        "a named service asks nothing"
+    );
+    let tries = seen.lock().expect("seen").clone();
+    assert_eq!(tries.len(), 2, "the named one, then one other: {tries:?}");
+    assert_eq!(tries[0].0, "exa");
+    let other = tries[1].0.clone();
+    assert_ne!(other, "exa");
+    let told = results(&sandbox);
+    assert!(
+        told.contains("(Exa is limited for now; searched with "),
+        "{told}"
+    );
+
+    // While it is limited the named service is left alone, and the session
+    // keeps the one that answered.
+    send(&sandbox, &session.id, SEARCH).await;
+    let after = seen_after(&seen, tries.len()).await;
+    assert_eq!(after[tries.len()..], [(other, false)]);
+}
+
+/// Waits until session `id` has no run under way.
+async fn idle(client: &harlo_client::Client, id: &str) {
+    for _ in 0..600 {
+        let active = client.active().await.expect("the active sessions");
+        if !active.iter().any(|a| a == id) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the session never went idle");
+}
+
+/// With every service limited the search fails saying so, and none is
+/// asked again while it is left alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_service_limited_says_so() {
+    let (at, seen) = stand_in(&["exa", "firecrawl", "parallel", "tavily", "tinyfish"]).await;
+    let sandbox = Sandbox::start_with_env(&[("HARLO_WEBSEARCH_BASE", &at)]).await;
+    let client = sandbox.client();
+    let project = sandbox.project();
+    std::fs::write(
+        project.join("harlo.json"),
+        r#"{ "websearch": { "provider": "exa" } }"#,
+    )
+    .expect("config");
+    let folder = project.to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+
+    send(&sandbox, &session.id, SEARCH).await;
+    run_until(
+        &sandbox,
+        &session.id,
+        "say waited",
+        "Every search service is limited for now; try again in a minute.",
+    )
+    .await;
+    let tries = seen.lock().expect("seen").clone();
+    assert_eq!(tries[0].0, "exa", "the named one first: {tries:?}");
+    assert_eq!(tries.len(), 5, "each asked once: {tries:?}");
+    run_until(&sandbox, &session.id, SEARCH, "try again in a minute.").await;
+    send(&sandbox, &session.id, "say after").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    idle(&client, &session.id).await;
+    assert_eq!(seen.lock().expect("seen").len(), 5, "none is asked again");
+}
+
+/// A service chosen in the first search's form hands on like one the
+/// config names, and its key goes to it alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chosen_service_with_a_key_hands_on_without_the_key() {
+    let (at, seen) = stand_in(&["tavily"]).await;
+    let sandbox = Sandbox::start_with_env(&[("HARLO_WEBSEARCH_BASE", &at)]).await;
+    let client = sandbox.client();
+    let folder = sandbox.project().to_str().expect("utf-8").to_owned();
+    let session = client.create_session(&folder).await.expect("session");
+    client
+        .connect_key("tavily", "tv-key", &[])
+        .await
+        .expect("signed in");
+
+    send(&sandbox, &session.id, SEARCH).await;
+    let first = form(&sandbox, &session.id).await;
+    reply(&sandbox, &session.id, &first, "choose").await;
+    let second = form(&sandbox, &session.id).await;
+    reply(&sandbox, &session.id, &second, "tavily").await;
+    run_until(&sandbox, &session.id, "say waited", "Version 9 via ").await;
+    let tries = seen.lock().expect("seen").clone();
+    assert_eq!(tries[0], ("tavily".to_owned(), true), "asked with its key");
+    assert_eq!(tries.len(), 2, "{tries:?}");
+    assert!(
+        tries[1].0 != "tavily" && !tries[1].1,
+        "another answered, without that key: {tries:?}"
+    );
+    assert!(
+        results(&sandbox).contains("(Tavily is limited for now; searched with "),
+        "{}",
+        results(&sandbox)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn web_search_turned_off_leaves_the_tool_out() {
     let (at, seen) = stand_in(&[]).await;
