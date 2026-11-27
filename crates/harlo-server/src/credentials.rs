@@ -548,4 +548,60 @@ impl Server {
         out.extend(self.claude_provider());
         out
     }
+
+    /// The global configuration with the providers the person signed in to.
+    ///
+    /// The configuration file names only the providers written in it; one
+    /// signed in to in Settings is kept as a credential instead.
+    pub(crate) fn with_sign_ins(&self) -> harlo_engine::Config {
+        let (mut global, _) = self.global();
+        let signed_in = self.signed_in(&global.providers);
+        global.providers.extend(signed_in);
+        global
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use crate::{PhoneHost, Server, Store};
+
+    /// What is written with no session, such as a commit message, can use
+    /// a provider the person signed in to and never wrote in the config.
+    #[test]
+    fn a_signed_in_providers_model_resolves_with_no_folder() {
+        let scratch = tempfile::tempdir().expect("a scratch folder");
+        let config = harlo_engine::Config::load(scratch.path()).expect("no configuration");
+        let server = Arc::new(Server::new(
+            Store::in_memory().expect("a store"),
+            config,
+            scratch.path(),
+            None,
+            PhoneHost::new(None, scratch.path().join("phone.json")),
+            scratch.path().join("snapshot"),
+            Vec::new(),
+        ));
+        assert!(server.with_sign_ins().provider("302ai").is_none());
+
+        let value = json!({ "type": "key", "key": "sk-scratch" });
+        server
+            .store
+            .put_credential("302ai", "302.AI", &value)
+            .expect("kept");
+        let config = server.with_sign_ins();
+        let provider = config.provider("302ai").expect("signed in");
+        let model = harlo_engine::ModelRef {
+            provider: "302ai".to_owned(),
+            model: provider.models.first().expect("a model").id.clone(),
+            variant: None,
+        };
+        assert!(config.resolve(&model).is_some());
+        // The file alone doesn't know it, which is what refused the model.
+        assert!(server.global().0.resolve(&model).is_none());
+        // With no model named there is one to write with.
+        assert!(config.default_model().is_some());
+    }
 }

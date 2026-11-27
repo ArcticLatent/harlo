@@ -1082,7 +1082,7 @@ impl Server {
     /// The server's own folders are hidden: its configuration, which
     /// holds provider keys and the permission rules, and where it keeps
     /// its sessions, its password and the phones it trusts.
-    fn sandbox(
+    pub(crate) fn sandbox(
         &self,
         skills: &[harlo_engine::skills::Skill],
     ) -> Option<harlo_engine::sandbox::Sandbox> {
@@ -1319,7 +1319,7 @@ impl Server {
         model: Option<harlo_engine::ModelRef>,
     ) -> Result<String, Refusal> {
         self.fresh_sign_ins().await;
-        let (global, _) = self.global();
+        let global = self.with_sign_ins();
         let model = model
             .or_else(|| global.default_model())
             .ok_or_else(|| Refusal::Bad("No model is set up.".to_owned()))?;
