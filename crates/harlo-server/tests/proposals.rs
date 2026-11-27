@@ -345,6 +345,15 @@ async fn a_dismissed_proposal_stays_away_and_notes_off_means_no_look() {
     turn(&client, &a.id, "And again, with nextest.").await;
     let asked = looked(&sandbox, 2).await;
     assert!(asked.contains("And again, with nextest."), "{asked}");
+    // The model is told what the person turned down, so it needn't say
+    // it again in other words.
+    assert!(
+        asked.contains(
+            "<suggested>\nSuggested from earlier stretches; propose none of these again.\n\
+             - (turned down by the person) Tests run with nextest.\n</suggested>"
+        ),
+        "{asked}"
+    );
     assert!(listed(&sandbox, "proposals", &project).await.is_empty());
 
     // Something else is still proposed.
@@ -362,6 +371,17 @@ async fn a_dismissed_proposal_stays_away_and_notes_off_means_no_look() {
     assert_eq!(proposed.len(), 1, "{proposed:?}");
     assert_eq!(proposed[0]["text"], "Format with rustfmt's defaults.");
 
+    // One that waits for the person is told to the next look too.
+    turn(&client, &a.id, "And again, with nextest.").await;
+    let asked = looked(&sandbox, 4).await;
+    assert!(
+        asked.contains(
+            "- (waiting for the person) Format with rustfmt's defaults.\n\
+             - (turned down by the person) Tests run with nextest.\n"
+        ),
+        "{asked}"
+    );
+
     // With notes off no stretch is read.
     call(
         &sandbox,
@@ -372,7 +392,7 @@ async fn a_dismissed_proposal_stays_away_and_notes_off_means_no_look() {
     .await;
     turn(&client, &a.id, "One more thing, with notes off.").await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(looks(&sandbox).len(), 3);
+    assert_eq!(looks(&sandbox).len(), 4);
 }
 
 /// Turns notes on or off.

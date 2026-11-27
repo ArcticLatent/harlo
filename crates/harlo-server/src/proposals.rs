@@ -13,7 +13,9 @@
 //! with it, and moves on only when the model's answer was a list, empty
 //! or not. A message that already led to proposals leads to no more, and
 //! neither does a text already proposed or kept, so a dismissed proposal
-//! doesn't come back.
+//! doesn't come back. The model is also told what was suggested before
+//! and is waiting or was turned down, so it doesn't say it again in
+//! other words.
 //!
 //! Only what was said while notes were on is read. Turning notes off, or
 //! off and on again, also drops what a look already under way finds. A
@@ -528,7 +530,26 @@ impl Server {
             .store
             .notes(Some(&session.project_id))
             .map_err(|e| e.to_string())?;
-        let prompt = propose_prompt(&notes, &before, &read.text());
+        // What was suggested before and isn't a note: said again in other
+        // words, it would get past the comparison of texts below.
+        let suggested = self
+            .store
+            .proposals(Some(&session.project_id))
+            .map_err(|e| e.to_string())?;
+        let of = |state: State| -> Vec<&str> {
+            suggested
+                .iter()
+                .filter(|p| p.state == state)
+                .map(|p| p.text.as_str())
+                .collect()
+        };
+        let prompt = propose_prompt(
+            &notes,
+            &of(State::Pending),
+            &of(State::Dismissed),
+            &before,
+            &read.text(),
+        );
 
         self.fresh_sign_ins().await;
         let folder = self.folder(&session.location.directory);
