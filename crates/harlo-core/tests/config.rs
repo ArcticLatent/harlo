@@ -1,6 +1,6 @@
-//! Setting the model new sessions use, whether undo keeps snapshots and
-//! whether automations are allowed, in the server's global config file, each
-//! test in its own scratch folder.
+//! Setting the model new sessions use, whether undo keeps snapshots,
+//! whether automations are allowed and which experimental features are on,
+//! in the server's global config file, each test in its own scratch folder.
 
 // Rust guideline compliant 2026-10-09
 
@@ -158,6 +158,57 @@ fn automations_are_on_until_turned_off_at_the_top() {
             .expect("JSON");
     assert_eq!(json["experimental"], serde_json::json!({ "todo": true }));
     assert!(json.get("automations").is_none());
+}
+
+#[test]
+fn experimental_features_follow_the_servers_defaults_until_set() {
+    use harlo_core::config::Experiment;
+
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let folder = scratch.path();
+    // Only outlines are on when nothing says otherwise.
+    assert_eq!(
+        config::experiments(folder).expect("no file yet"),
+        [Experiment::Outline]
+    );
+    let before = "{\n  // mine\n  \"model\": \"a/one\"\n}\n";
+    fs::write(folder.join("harlo.json"), before).expect("a file");
+
+    config::set_experiment(folder, Experiment::Todo, true).expect("on");
+    config::set_experiment(folder, Experiment::Outline, false).expect("off");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(text.contains("// mine"), "{text}");
+    let json: serde_json::Value = serde_json::from_str(&text.replace("// mine", "")).expect("JSON");
+    assert_eq!(
+        json["experimental"],
+        serde_json::json!({ "todo": true, "outline": false })
+    );
+    assert_eq!(
+        config::experiments(folder).expect("read"),
+        [Experiment::Todo]
+    );
+
+    // A default takes its setting away, and the empty object with the last.
+    config::set_experiment(folder, Experiment::Todo, false).expect("off");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(!text.contains("todo"), "{text}");
+    assert!(text.contains("\"outline\": false"), "{text}");
+    config::set_experiment(folder, Experiment::Outline, true).expect("on");
+    let text = fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(!text.contains("experimental"), "{text}");
+    assert!(text.contains("\"model\": \"a/one\""), "{text}");
+
+    // What the file names in the server's own spelling is read as it is.
+    let named = "{ \"experimental\": { \"scriptTools\": true, \"cachedInstructions\": true } }";
+    fs::write(folder.join("harlo.json"), named).expect("a file");
+    assert_eq!(
+        config::experiments(folder).expect("read"),
+        [
+            Experiment::Outline,
+            Experiment::ScriptTools,
+            Experiment::CachedInstructions
+        ]
+    );
 }
 
 #[test]

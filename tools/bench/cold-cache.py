@@ -100,6 +100,11 @@ JOBS = [
     "Write their names and their lengths to LONGEST.md. Change no other file.",
 ]
 
+# `--task list`: the three changes asked for at once, in one prompt. Several tasks in one message is
+# where an agent that keeps a todo list writes one.
+LIST = ["Make these three changes, one after the other.\n\n"
+        + "\n\n".join(f"{number}. {text}" for number, text in enumerate(PROMPTS[1:], 1))]
+
 # What the scripted model does for each prompt with --fake.
 FAKE = [
     'tool read {"path":"argparse.py"} ;; tool read {"path":"difflib.py"} ;; '
@@ -109,6 +114,8 @@ FAKE = [
     "say Changed.",
 ]
 
+
+FAKE_LIST = ['tool read {"path":"textwrap.py"} ;; say Changed.']
 
 FAKE_JOBS = ['tool read {"path":"textwrap.py"} ;; say Changed.', "say Changed.", "say Changed.",
              'tool read {"path":"argparse.py","outline":true} ;; say Found.']
@@ -299,7 +306,7 @@ def measure(history, prices):
 
 
 # What `--compare` can turn on besides clearing, and the `experimental` key each one sets.
-SWITCHES = {"instructions": "cachedInstructions", "files": "scriptTools", "outline": "outline"}
+SWITCHES = {"instructions": "cachedInstructions", "files": "scriptTools", "outline": "outline", "todo": "todo"}
 
 
 def run(server, arm, args):
@@ -321,6 +328,9 @@ def run(server, arm, args):
     config["compaction"] = {"prune": prune}
     if args.compare in SWITCHES:
         config["experimental"] = {SWITCHES[args.compare]: arm == "on"}
+    if args.compare == "todo":
+        # The list is the agent's own: writing it asks nobody. Allowed in both arms; only the on arm has the tool.
+        config["permissions"].append({"action": "todowrite", "resource": "*", "effect": "allow"})
     if args.compare == "files":
         # Scripts in both arms, as a session has them; the on arm adds the files to them.
         config["permissions"].append({"action": "execute", "resource": "*", "effect": "allow"})
@@ -341,7 +351,8 @@ def run(server, arm, args):
                 session = server.call("POST", "/api/session", {"location": {"directory": str(project)}})["data"]["id"]
             history += turn(server, session, text, args.limit)
     else:
-        for number, text in enumerate(FAKE if args.fake else PROMPTS):
+        prompts = (FAKE_LIST if args.fake else LIST) if args.task == "list" else (FAKE if args.fake else PROMPTS)
+        for number, text in enumerate(prompts):
             if number and args.wait:
                 time.sleep(args.wait)
             history = turn(server, session, text, args.limit)
@@ -418,10 +429,12 @@ def main():
     parser.add_argument("--compare", choices=["clearing", *SWITCHES], default="clearing",
                         help="what the on arm turns on: clearing old tool output (the default), sending the "
                              "system prompt as the conversation's opening message (instructions), letting "
-                             "scripts read and search files (files), or outlines of source files (outline)")
-    parser.add_argument("--task", choices=["session", "jobs"], default="session",
+                             "scripts read and search files (files), outlines of source files (outline), "
+                             "or the agent's todo list (todo)")
+    parser.add_argument("--task", choices=["session", "jobs", "list"], default="session",
                         help="one session of four prompts that starts by reading two long files (the default), "
-                             "or four jobs, each in a session of its own with nothing read beforehand")
+                             "four jobs, each in a session of its own with nothing read beforehand, "
+                             "or the three changes asked for at once in one prompt (list)")
     parser.add_argument("--shell", action="store_true",
                         help="let the agent run commands, in the sandbox, with the real home folder hidden")
     parser.add_argument("--wait", type=int, default=0, help="seconds of rest before each prompt")

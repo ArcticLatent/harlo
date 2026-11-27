@@ -296,6 +296,101 @@ pub async fn set_automations_later(folder: PathBuf, on: bool) -> Result<(), Erro
     later(folder, move |folder| set_automations(folder, on)).await
 }
 
+/// A feature of the server that its config turns on or off under
+/// `experimental`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Experiment {
+    /// Agents keep a todo list the person can watch (`todo`).
+    Todo,
+    /// Reading a source file can list what it declares instead of its
+    /// text (`outline`).
+    Outline,
+    /// Scripts an agent writes may call the session's own tools
+    /// (`scriptTools`).
+    ScriptTools,
+    /// The system prompt opens the conversation, where a provider's cache
+    /// keeps it (`cachedInstructions`).
+    CachedInstructions,
+}
+
+impl Experiment {
+    /// Every experimental feature, in the order Settings lists them.
+    pub const ALL: [Self; 4] = [
+        Self::Todo,
+        Self::Outline,
+        Self::ScriptTools,
+        Self::CachedInstructions,
+    ];
+
+    /// Its key under `experimental` in the config file.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Todo => "todo",
+            Self::Outline => "outline",
+            Self::ScriptTools => "scriptTools",
+            Self::CachedInstructions => "cachedInstructions",
+        }
+    }
+
+    /// Whether the server has it on when the config doesn't say.
+    #[must_use]
+    pub const fn default_on(self) -> bool {
+        matches!(self, Self::Outline)
+    }
+}
+
+/// The experimental features that are on, by the global file in `folder`
+/// and the server's defaults for those it doesn't name.
+///
+/// # Errors
+///
+/// Fails when the file exists but can't be read or isn't valid JSONC.
+pub fn experiments(folder: &Path) -> Result<Vec<Experiment>, Error> {
+    let named = parse(&file(folder))?
+        .and_then(|root| root.object_value())
+        .and_then(|object| object.object_value(EXPERIMENTAL));
+    let on = |experiment: &Experiment| {
+        named
+            .as_ref()
+            .and_then(|object| object.get(experiment.key()))
+            .and_then(|prop| prop.value())
+            .and_then(|value| value.as_boolean_lit())
+            .map_or(experiment.default_on(), |value| value.value())
+    };
+    Ok(Experiment::ALL.into_iter().filter(on).collect())
+}
+
+/// Turns `experiment` on or off in the global file in `folder`.
+///
+/// The server's own default removes the setting, and `experimental` with
+/// it once nothing else is set there.
+///
+/// # Errors
+///
+/// Fails as [`set_model`] does, or when `experimental` isn't an object.
+pub fn set_experiment(folder: &Path, experiment: Experiment, on: bool) -> Result<(), Error> {
+    set_at(
+        folder,
+        &[EXPERIMENTAL, experiment.key()],
+        (on != experiment.default_on()).then_some(CstInputValue::from(on)),
+    )
+}
+
+/// Sets `experiment` as [`set_experiment`] does, on a blocking thread.
+///
+/// # Errors
+///
+/// Returns the errors of [`set_experiment`], or an error when the thread
+/// is cancelled.
+pub async fn set_experiment_later(
+    folder: PathBuf,
+    experiment: Experiment,
+    on: bool,
+) -> Result<(), Error> {
+    later(folder, move |folder| set_experiment(folder, experiment, on)).await
+}
+
 /// How the server runs an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpRun {

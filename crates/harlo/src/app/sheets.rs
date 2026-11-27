@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use harlo_core::config::Experiment;
 use harlo_core::git::{self, Identity};
 use harlo_core::notifications::{self as notify, Kind};
 use harlo_core::{autostart, config};
@@ -127,6 +128,8 @@ pub enum Section {
     Tools,
     /// Notes the agent keeps between sessions.
     Memory,
+    /// The server's features that are still being tried.
+    Experimental,
     /// Prompts the server sends on a schedule.
     Schedules,
     /// The server Harlo follows.
@@ -139,7 +142,7 @@ pub enum Section {
 
 impl Section {
     /// Every section, in the order Settings lists them.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::General,
         Self::Appearance,
         Self::Notifications,
@@ -154,6 +157,7 @@ impl Section {
         Self::Extensions,
         Self::Tools,
         Self::Memory,
+        Self::Experimental,
         Self::Schedules,
         Self::Server,
         Self::Phone,
@@ -178,6 +182,7 @@ impl Section {
             Self::Extensions => "Extensions",
             Self::Tools => "Tools for agents",
             Self::Memory => "Memory",
+            Self::Experimental => "Experimental",
             Self::Schedules => "Schedules",
             Self::Server => "Server",
             Self::Phone => "Phone",
@@ -202,7 +207,8 @@ impl Section {
             | Self::Agents
             | Self::Extensions
             | Self::Tools
-            | Self::Memory => Some("Agents and models"),
+            | Self::Memory
+            | Self::Experimental => Some("Agents and models"),
             Self::Schedules => Some("Automation"),
             Self::Server | Self::Phone => Some("Connections"),
         }
@@ -251,11 +257,14 @@ pub enum Setting {
     /// Whether agents' commands run in the server's sandbox: its config,
     /// not a preference.
     Sandbox,
+    /// Whether an experimental feature of the server is on: its config, not
+    /// a preference.
+    Experiment(Experiment),
 }
 
 impl Setting {
     /// Every setting, in the order the UI numbers them.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 24] = [
         Self::ReopenTabs,
         Self::Glass,
         Self::StartAtLogin,
@@ -276,6 +285,10 @@ impl Setting {
         Self::Notes,
         Self::CheckUpdates,
         Self::Sandbox,
+        Self::Experiment(Experiment::Todo),
+        Self::Experiment(Experiment::Outline),
+        Self::Experiment(Experiment::ScriptTools),
+        Self::Experiment(Experiment::CachedInstructions),
     ];
 }
 
@@ -597,6 +610,8 @@ pub enum Event {
     DefaultModelSet(Result<(), String>),
     /// Something in Settings → Git.
     GitSettings(super::GitEvent),
+    /// Something in Settings → Experimental.
+    Experimental(super::ExperimentEvent),
     /// Something about a git hosting sign-in.
     Hosting(super::HostingEvent),
     /// Something in Settings → Schedules.
@@ -695,6 +710,8 @@ pub struct Sheets {
     pub extensions_tab: usize,
     /// Settings → Memory.
     pub memory: super::Memory,
+    /// Settings → Experimental.
+    pub experiments: super::Experiments,
     /// Settings → Extensions → Plugins.
     pub plugins: super::Plugins,
     /// Counts loads, so a late answer to an older one is dropped.
@@ -772,6 +789,7 @@ impl App {
             Event::Query(query) => self.sheets.query = query,
             Event::Switch(setting) => return self.flip(setting),
             Event::GitSettings(event) => return self.git_event(event),
+            Event::Experimental(event) => return self.experiment_event(event),
             Event::Hosting(event) => return self.hosting_event(event),
             Event::Schedule(event) => return self.schedule_event(event),
             Event::Provider(event) => return self.provider_event(event),
@@ -847,6 +865,7 @@ impl App {
                 self.load_setup()
             }
             Section::Agents => self.load_approvals(),
+            Section::Experimental => self.load_experiments(),
             Section::Server => self.load_ssh_hosts(),
             Section::LocalModels => self.look(),
             Section::Phone => self.phone_event(super::PhoneEvent::Changed),
@@ -935,6 +954,9 @@ impl App {
             Setting::Notes => return self.memory_event(super::MemoryEvent::Toggle),
             Setting::Sandbox => {
                 return self.approval_event(super::ApprovalEvent::ToggleSandbox);
+            }
+            Setting::Experiment(experiment) => {
+                return self.experiment_event(super::ExperimentEvent::Toggle(experiment));
             }
             Setting::KeepInTray => {
                 self.preferences.keep_in_tray = !self.preferences.keep_in_tray;
@@ -1044,6 +1066,7 @@ impl App {
             | Setting::PhoneRelay
             | Setting::Notes
             | Setting::Sandbox
+            | Setting::Experiment(_)
             | Setting::CheckUpdates => {
                 return;
             }

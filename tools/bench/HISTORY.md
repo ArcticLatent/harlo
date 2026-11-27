@@ -165,3 +165,90 @@ Tool calls:
 - off: edit 5, glob 4, grep 2, outline 2, read 5, shell 4, write 1
 - on: edit 4, glob 4, grep 3, outline 2, read 3, shell 3, write 1
 
+## 2026-11-26 17:53 · cold-cache · openai/gpt-6.2-sol
+
+Revision fe0f63a2 with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: todo; task: list (textwrap, argparse, difflib). The todo list (experimental.todo) off against on, where one prompt asks for three changes.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | +++ |    12 |     3 |       0 |     23,451 |   0% |     874 |   0.056 |   0.056 |
+|  on | +++ |    19 |     3 |       0 |     51,700 |  10% |   1,362 |   0.106 |   0.106 |
+| off | +++ |    14 |     3 |       0 |     35,697 |   0% |   1,052 |   0.082 |   0.082 |
+|  on | +++ |    16 |     3 |       0 |     36,778 |   6% |   1,131 |   0.080 |   0.080 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 12 / 3 / 23,451 / 0% / 0.056
+- on: 19 / 3 / 51,700 / 10% / 0.106
+- off: 14 / 3 / 35,697 / 0% / 0.082
+- on: 16 / 3 / 36,778 / 6% / 0.080
+
+Tool calls:
+
+- off: edit 4, glob 1, grep 3, read 3
+- on: edit 4, glob 2, grep 6, read 3, todowrite 5
+- off: edit 4, glob 2, grep 4, read 3
+- on: edit 4, glob 1, grep 3, read 3, todowrite 4
+
+## 2026-11-26 17:59 · cold-cache · openai/gpt-6.2-sol
+
+Revision fe0f63a2 with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: todo; task: list (textwrap, argparse, difflib). The todo list off against on, one prompt asking for three changes; four more pairs.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | +++ |    12 |     3 |       0 |     21,894 |   0% |     916 |   0.053 |   0.053 |
+|  on | +++ |    19 |     6 |       0 |     46,537 |   0% |   1,184 |   0.105 |   0.105 |
+| off | +++ |    16 |     4 |       0 |     37,207 |   6% |   1,132 |   0.081 |   0.081 |
+|  on | +++ |    19 |     5 |       0 |     50,474 |   3% |   1,328 |   0.111 |   0.111 |
+| off | +++ |    15 |     5 |       0 |     33,318 |   0% |   1,024 |   0.077 |   0.077 |
+|  on | +++ |    16 |     3 |       0 |     36,669 |   7% |   1,120 |   0.079 |   0.079 |
+| off | +++ |    12 |     3 |       0 |     23,944 |   0% |     975 |   0.058 |   0.058 |
+|  on | +++ |    16 |     5 |       0 |     43,166 |   2% |   1,220 |   0.097 |   0.097 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 12 / 3 / 21,894 / 0% / 0.053
+- on: 19 / 6 / 46,537 / 0% / 0.105
+- off: 16 / 4 / 37,207 / 6% / 0.081
+- on: 19 / 5 / 50,474 / 3% / 0.111
+- off: 15 / 5 / 33,318 / 0% / 0.077
+- on: 16 / 3 / 36,669 / 7% / 0.079
+- off: 12 / 3 / 23,944 / 0% / 0.058
+- on: 16 / 5 / 43,166 / 2% / 0.097
+
+Tool calls:
+
+- off: edit 4, glob 1, grep 3, read 3
+- on: edit 4, glob 1, grep 3, read 6, todowrite 4
+- off: edit 4, glob 2, grep 5, read 4
+- on: edit 4, glob 2, grep 3, outline 1, read 4, todowrite 5
+- off: edit 4, glob 2, grep 5, outline 1, read 4
+- on: edit 4, glob 1, grep 3, read 3, todowrite 4
+- off: edit 4, glob 2, grep 2, read 3
+- on: edit 4, glob 2, grep 2, outline 1, read 4, todowrite 4
+
+## 2026-11-26 18:03 · cold-cache · openai/gpt-6.2-sol
+
+Revision fe0f63a2 with uncommitted changes; paid by a ChatGPT plan (the dollars are what a key would pay); rest before each prompt: none (every prompt counts as rested); prices (2, 2.5, 0.1, 10); the on arm turns on: todo; task: jobs (textwrap, argparse, difflib, longest). The todo list off against on, on four single jobs, where no list is called for.
+
+| arm | work done | steps | reads | cleared | prompt tokens | from cache | output | $ billed | $ if cold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| off | ++++ |    21 |     7 |       0 |     28,836 |   0% |   1,210 |   0.070 |   0.071 |
+|  on | ++++ |    29 |     8 |       0 |     57,626 |   3% |   1,883 |   0.130 |   0.131 |
+| off | ++++ |    20 |     6 |       0 |     31,517 |   0% |   1,235 |   0.075 |   0.076 |
+|  on | ++++ |    22 |     5 |       0 |     33,304 |   0% |   1,327 |   0.080 |   0.081 |
+
+Per prompt (steps / reads / prompt tokens / from cache / $ if cold):
+
+- off: 6 / 3 / 7,467 / 0% / 0.020; 5 / 1 / 4,997 / 0% / 0.013; 6 / 2 / 7,636 / 0% / 0.019; 4 / 1 / 8,736 / 0% / 0.019
+- on: 11 / 5 / 20,466 / 10% / 0.046; 5 / 1 / 5,780 / 0% / 0.014; 5 / 1 / 7,964 / 0% / 0.019; 8 / 1 / 23,416 / 0% / 0.051
+- off: 6 / 3 / 8,218 / 0% / 0.022; 5 / 1 / 6,874 / 0% / 0.016; 5 / 1 / 7,671 / 0% / 0.019; 4 / 1 / 8,754 / 0% / 0.019
+- on: 7 / 1 / 8,824 / 0% / 0.024; 5 / 1 / 5,730 / 0% / 0.014; 6 / 2 / 9,406 / 0% / 0.022; 4 / 1 / 9,344 / 0% / 0.021
+
+Tool calls:
+
+- off: edit 4, glob 5, grep 2, outline 2, read 5, write 1
+- on: edit 4, glob 6, grep 2, outline 2, read 6, todowrite 8, write 1
+- off: edit 4, glob 5, grep 2, outline 2, read 4, write 1
+- on: edit 4, glob 5, grep 3, outline 1, read 4, write 1
+

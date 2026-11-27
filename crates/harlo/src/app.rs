@@ -34,6 +34,7 @@ mod claude;
 mod commit_message;
 mod computers;
 mod context;
+mod experimental;
 mod files;
 mod git_settings;
 mod goals;
@@ -73,6 +74,7 @@ pub use computers::ComputerEvent;
 pub use context::{
     ContextView, Event as ContextEvent, Facts as ContextFacts, Loaded as ContextLoaded,
 };
+pub use experimental::{ExperimentEvent, Experiments};
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
 pub use git_settings::{GitEvent, GitSettings};
 pub use goals::{GoalAction, GoalEvent};

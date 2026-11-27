@@ -303,7 +303,7 @@
   <dt>Context</dt>
   <dd>How full the model’s context is, the tokens the session used (input, output, reasoning, cache) and what they cost, and which instruction files (<code>AGENTS.md</code>) apply to the session.</dd>
   <dt>Todos</dt>
-  <dd>The agent’s working list for a task with several steps. It is off unless the config file turns it on: <code>"experimental": { "todo": true }</code>.</dd>
+  <dd>The agent’s working list for a task with several steps: each step, and whether it is waiting, under way or done. The current step also shows above the message box. It is off until you turn on <span class="ui">Todo list</span> in <a href="#experimental">Settings → Experimental</a>.</dd>
   <dt>Notes</dt>
   <dd>Your own notes for the project: ideas, decisions, things to remember. A line that starts with <code>- [ ]</code> is a todo; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> ticks the one under the cursor. <span class="ui">Insert into message</span> puts the note into the message box.</dd>
   <dt>Terminal</dt>
@@ -509,12 +509,26 @@ what it is for, how it is used, and what to read next.</code></pre>
   <tr><td>Extensions</td><td>MCP servers, skills and plugins.</td></tr>
   <tr><td>Tools</td><td>The web search service and its key.</td></tr>
   <tr><td>Memory</td><td>The notes the agent keeps between sessions.</td></tr>
+  <tr><td>Experimental</td><td>Features still being tried, each with a switch.</td></tr>
   <tr><td>Schedules</td><td>Prompts and commands on a timer.</td></tr>
   <tr><td>Server</td><td>The server Harlo follows, and your other computers.</td></tr>
   <tr><td>Phone</td><td>Phone access, the relay, pairing, and paired phones.</td></tr>
   <tr><td>About</td><td>The version, the source, release notes, and licences.</td></tr>
 </table>
 </div>
+
+<h3 id="experimental">Experimental features</h3>
+<p><span class="ui">Settings → Experimental</span> has a switch for each feature that is still being tried. A change applies to every session on the server, and to the phone.</p>
+<div class="scroll">
+<table>
+  <tr><th>Switch</th><th>At first</th><th>What it does</th></tr>
+  <tr><td>Todo list</td><td>Off</td><td>Agents keep a list of a task’s steps, which you watch in the Todos panel and above the message box. Each update of the list is an extra step: on a task of three changes it used about half more tokens.</td></tr>
+  <tr><td>File outlines</td><td>On</td><td>Agents list what a source file declares, its functions and types with their lines, and read only the part they need.</td></tr>
+  <tr><td>Session tools in scripts</td><td>Off</td><td>The scripts agents write can also read, search, edit and run commands, each under its own rules. On small jobs this cost more tokens.</td></tr>
+  <tr><td>Cached instructions</td><td>Off</td><td>For OpenAI’s GPT-6.2 and later: sends the instructions at the start of the conversation, where the provider’s cache keeps them.</td></tr>
+</table>
+</div>
+<p>When Harlo follows a server on another computer, these are set in that computer’s <a href="#config">config file</a>.</p>
 
 <h3 id="updates">Updates</h3>
 <p>Harlo looks for a new version when it opens and every six hours, and offers it in a notice. It updates with your system’s package manager, which may ask for your password, or replaces the AppImage, then offers to restart. <span class="ui">Settings → General → Updates</span> has <span class="ui">Check now</span> and turns the checking off. A Harlo you built from source doesn’t update itself.</p>
@@ -574,7 +588,7 @@ what it is for, how it is used, and what to read next.</code></pre>
   <tr><td><code>snapshots</code></td><td><code>false</code> stops recording the files for undo.</td></tr>
   <tr><td><code>automations</code></td><td><code>false</code> turns schedules off.</td></tr>
   <tr><td><code>compaction</code></td><td><code>limit</code>: the context size, in tokens, at which a session is summarized.</td></tr>
-  <tr><td><code>experimental</code></td><td><code>todo: true</code> gives agents a todo list. <code>outline: false</code> stops them listing what a file declares before reading it.</td></tr>
+  <tr><td><code>experimental</code></td><td>The switches of <a href="#experimental">Settings → Experimental</a>: <code>todo</code>, <code>outline</code>, <code>scriptTools</code> and <code>cachedInstructions</code>, each <code>true</code> or <code>false</code>.</td></tr>
 </table>
 </div>
 

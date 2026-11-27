@@ -15,6 +15,7 @@ use super::marks::{Marks, project_color};
 use super::{glyph, sync};
 
 mod agents;
+mod experimental;
 mod local_models;
 mod mcp;
 mod memory;
@@ -327,6 +328,7 @@ fn section_icon(section: Section) -> Icon {
         Section::Extensions => Icon::Blocks,
         Section::Tools => Icon::Wrench,
         Section::Memory => Icon::Brain,
+        Section::Experimental => Icon::FlaskConical,
         Section::Schedules => Icon::CalendarClock,
         Section::Server => Icon::Server,
         Section::Phone => Icon::Smartphone,
@@ -372,6 +374,7 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
         Section::Server => server_rows(app),
         Section::Phone => phone::phone_rows(app),
         Section::Memory => memory::memory_rows(app),
+        Section::Experimental => experimental::experimental_rows(app),
         Section::About => about_rows(app),
     }
 }

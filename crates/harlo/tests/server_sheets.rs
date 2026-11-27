@@ -134,6 +134,108 @@ fn another_servers_default_model_is_only_shown() {
 }
 
 #[test]
+fn settings_experimental_turns_the_servers_features_on_and_off_in_harlos_config() {
+    use harlo_core::config::{self, Experiment};
+
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let folder = sandbox.root().join("config/harlo");
+    let mut app = demo::new_app();
+    // The sandbox's own config, never the real one.
+    app.config_folder = Some(folder.clone());
+    let _ = app.update(Message::Tick(demo::now()));
+    let _ = app.update(Message::Server(Update::Connected(Arc::new(Connected {
+        client: sandbox.client(),
+        server: "Harlo".into(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        snapshot: demo::snapshot(),
+    }))));
+    app.new_folder = Some(sandbox.project_str());
+    let ui = ui(app);
+    let switch = |ui: &Ui, name: &str| {
+        ui.find(name)
+            .into_iter()
+            .find(|e| e.accessible_role() == Some(AccessibleRole::Checkbox))
+            .expect("the switch")
+    };
+
+    ui.press("Settings");
+    ui.press("Experimental");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.shows("Todo list")),
+        "the features, once the config is read"
+    );
+    // The server's defaults: only outlines.
+    assert_eq!(
+        ui.app().sheets.experiments.on,
+        Load::Loaded(vec![Experiment::Outline])
+    );
+    for name in [
+        "File outlines",
+        "Session tools in scripts",
+        "Cached instructions",
+    ] {
+        assert!(ui.shows(name), "{name} has its switch");
+    }
+    assert!(!ui.app().todo_tool(), "no todo tool yet");
+
+    switch(&ui, "Todo list").invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.experiments.on,
+            Load::Loaded(on) if on.contains(&Experiment::Todo)
+        )),
+        "the todo list turned on"
+    );
+    let text = std::fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(text.contains("\"todo\": true"), "{text}");
+    assert!(text.contains("\"fake\""), "the rest of the config stays");
+    // The server reads the change, and agents here get the tool.
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.app().todo_tool()),
+        "the server offers the todo tool"
+    );
+
+    // One that is on by default is turned off by name.
+    switch(&ui, "File outlines").invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.experiments.on,
+            Load::Loaded(on) if !on.contains(&Experiment::Outline)
+        )),
+        "outlines turned off"
+    );
+    assert_eq!(
+        config::experiments(&folder).expect("read"),
+        [Experiment::Todo]
+    );
+
+    // Back to the defaults, the settings go.
+    switch(&ui, "Todo list").invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.experiments.on,
+            Load::Loaded(on) if !on.contains(&Experiment::Todo)
+        )),
+        "the todo list turned off"
+    );
+    switch(&ui, "File outlines").invoke_accessible_default_action();
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.experiments.on,
+            Load::Loaded(on) if on.contains(&Experiment::Outline)
+        )),
+        "outlines back on"
+    );
+    let text = std::fs::read_to_string(folder.join("harlo.json")).expect("read");
+    assert!(!text.contains("experimental"), "{text}");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| !ui.app().todo_tool()),
+        "the todo tool is gone again"
+    );
+}
+
+#[test]
 fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_harlos_config() {
     let mut tasks = Tasks::new();
     let sandbox = tasks.block_on(Sandbox::start());
