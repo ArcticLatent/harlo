@@ -9,6 +9,15 @@
 //! tools reach agents through Code Mode (`tools.<server>.<tool>`) unless
 //! its entry says `codemode: false`; then each is offered on its own as
 //! `<server>_<tool>`.
+//!
+//! A server that offers resources gets one more tool, `read_resource`,
+//! which reads one by its uri or lists them; a resource mentioned in a
+//! prompt is read the same way and sent with it.
+//!
+//! A connection that failed is tried again when a turn starts in a folder
+//! that names the server, half a minute after it failed and twice as long
+//! after each further failure, up to ten minutes. Nothing is tried while
+//! no turn starts, and a server that needs a sign-in waits for it.
 
 // Rust guideline compliant 2026-10-09
 
@@ -16,11 +25,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt as _, StreamExt as _};
 use harlo_engine::codemode::{Direct, Namespace, ToolInfo};
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, ReadResourceRequestParams};
 use rmcp::service::{
     NotificationContext, Peer, RoleClient, RunningService, RxJsonRpcMessage, TxJsonRpcMessage,
 };
@@ -35,6 +44,33 @@ use crate::server::{Refusal, Server, lock};
 
 /// How long a server has to start, unless its entry says.
 const STARTUP: Duration = Duration::from_secs(30);
+
+/// How long a server that failed is left before a turn tries it again: a
+/// computer that woke before its network, or a server started a moment
+/// late, shouldn't need the person to reconnect it by hand. Doubled with
+/// each try in a row that fails, up to [`RETRY_MOST`], so one that is gone
+/// for good costs next to nothing.
+const RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// The longest a failed server is left between tries.
+const RETRY_MOST: Duration = Duration::from_mins(10);
+
+/// Names another [`RETRY_AFTER`], in milliseconds, for tests: theirs
+/// can't wait half a minute.
+const RETRY_VAR: &str = "HARLO_MCP_RETRY_MS";
+
+/// How long a turn waits for a server it is trying again. One that
+/// answers is there in a moment; one that doesn't mustn't hold up every
+/// turn for its whole startup time.
+const RETRY_WAIT: Duration = Duration::from_secs(2);
+
+/// The tool Harlo adds to a server that offers resources, unless the
+/// server has a tool of that name itself.
+const READ_RESOURCE: &str = "read_resource";
+
+/// How many of a server's resources the description of [`READ_RESOURCE`]
+/// names; it goes with every request, and the tool lists them all.
+const NAMED: usize = 8;
 
 /// How long a tool call may take, unless its entry says.
 const EXECUTION: Duration = Duration::from_mins(5);
@@ -67,6 +103,10 @@ struct State {
     resources: Vec<Value>,
     templates: Vec<Value>,
     peer: Option<Peer<RoleClient>>,
+    /// When it failed, while it stands failed.
+    failed_at: Option<Instant>,
+    /// How many tries in a row have failed before this one.
+    attempt: u32,
 }
 
 /// One server connection.
@@ -79,6 +119,8 @@ pub(crate) struct Link {
     hosted: bool,
     startup: Duration,
     execution: Duration,
+    /// When it was started.
+    started: Instant,
     state: Mutex<State>,
     /// Ends the connection.
     cancel: CancellationToken,
@@ -106,6 +148,7 @@ impl Link {
             hosted,
             startup: millis("startup", STARTUP),
             execution: millis("execution", EXECUTION),
+            started: Instant::now(),
             state: Mutex::new(State {
                 status: Some(Status::Pending),
                 ..State::default()
@@ -119,7 +162,9 @@ impl Link {
     }
 
     fn set_status(&self, status: Status) {
-        lock(&self.state).status = Some(status);
+        let mut state = lock(&self.state);
+        state.failed_at = matches!(status, Status::Failed(_)).then(Instant::now);
+        state.status = Some(status);
     }
 
     /// Notes it's connected through `peer`.
@@ -127,6 +172,27 @@ impl Link {
         let mut state = lock(&self.state);
         state.peer = Some(peer);
         state.status = Some(Status::Connected);
+        state.failed_at = None;
+        state.attempt = 0;
+    }
+
+    /// The count of this try when it failed long enough ago to be tried
+    /// again; none while it stands any other way.
+    fn due(&self) -> Option<u32> {
+        let state = lock(&self.state);
+        let failed_at = state.failed_at?;
+        (failed_at.elapsed() >= retry_after(state.attempt)).then_some(state.attempt)
+    }
+
+    /// Until when a turn waits for it while it is starting: its startup
+    /// time on a first start, a moment when it is being tried again.
+    fn awaited(&self) -> Instant {
+        let patience = if lock(&self.state).attempt > 0 {
+            self.startup.min(RETRY_WAIT)
+        } else {
+            self.startup
+        };
+        self.started + patience
     }
 
     /// How it stands, as clients read it.
@@ -179,6 +245,9 @@ impl Link {
             .peer
             .clone()
             .ok_or_else(|| format!("The MCP server {} isn't connected.", self.name))?;
+        if tool == READ_RESOURCE && resource_tool(&lock(&self.state)).is_some() {
+            return self.read_resource(&peer, &args).await;
+        }
         let mut params = json!({ "name": tool, "arguments": args });
         if self.hosted
             && let Some(session) = session
@@ -193,6 +262,90 @@ impl Link {
             .map_err(|e| format!("{}.{tool} failed: {e}", self.name))?;
         Ok(serde_json::to_value(result).unwrap_or_default())
     }
+
+    /// Reads the resource `args` names by `uri`, or lists what the server
+    /// offers when it names none; returns it in a tool result's form.
+    async fn read_resource(&self, peer: &Peer<RoleClient>, args: &Value) -> Result<Value, String> {
+        let Some(uri) = args["uri"].as_str().filter(|uri| !uri.is_empty()) else {
+            let state = lock(&self.state);
+            let offered = json!({ "resources": state.resources, "templates": state.templates });
+            return Ok(json!({ "content": [{ "type": "text", "text": offered.to_string() }] }));
+        };
+        let content: Vec<Value> = self
+            .contents(peer, uri)
+            .await?
+            .iter()
+            .map(|part| {
+                let mime = part["mimeType"].as_str().unwrap_or_default();
+                match (part["text"].as_str(), part["blob"].as_str()) {
+                    (Some(text), _) => json!({ "type": "text", "text": text }),
+                    (None, Some(blob)) if mime.starts_with("image/") => {
+                        json!({ "type": "image", "data": blob, "mimeType": mime })
+                    }
+                    _ => json!({ "type": "text", "text": format!("({mime}: not text)") }),
+                }
+            })
+            .collect();
+        Ok(json!({ "content": content }))
+    }
+
+    /// What the server gives for the resource at `uri`: its parts, each
+    /// with `text` or a base64 `blob`, as the server sent them.
+    async fn contents(&self, peer: &Peer<RoleClient>, uri: &str) -> Result<Vec<Value>, String> {
+        let params: ReadResourceRequestParams = serde_json::from_value(json!({ "uri": uri }))
+            .map_err(|e| format!("That isn't a resource's uri: {e}"))?;
+        let read = tokio::time::timeout(self.execution, peer.read_resource(params))
+            .await
+            .map_err(|_late| format!("Reading {uri} from {} took too long.", self.name))?
+            .map_err(|e| format!("{} couldn't read {uri}: {e}", self.name))?;
+        let read = serde_json::to_value(read).unwrap_or_default();
+        Ok(read["contents"].as_array().cloned().unwrap_or_default())
+    }
+}
+
+/// How long a server whose last `attempt` tries in a row failed is left
+/// before the next.
+fn retry_after(attempt: u32) -> Duration {
+    let first = std::env::var(RETRY_VAR)
+        .ok()
+        .and_then(|millis| millis.parse().ok())
+        .map_or(RETRY_AFTER, Duration::from_millis);
+    first
+        .saturating_mul(2_u32.saturating_pow(attempt))
+        .min(RETRY_MOST)
+}
+
+/// What [`READ_RESOURCE`] says of itself on a server that stands as
+/// `state`; none when the server offers nothing to read, or has a tool of
+/// that name itself.
+fn resource_tool(state: &State) -> Option<String> {
+    let offered = state.resources.len() + state.templates.len();
+    if offered == 0 || state.tools.iter().any(|t| t["name"] == READ_RESOURCE) {
+        return None;
+    }
+    let resources = state.resources.iter().map(|r| {
+        let uri = r["uri"].as_str().unwrap_or_default();
+        match r["name"]
+            .as_str()
+            .filter(|name| !name.is_empty() && *name != uri)
+        {
+            Some(name) => format!("{uri} ({name})"),
+            None => uri.to_owned(),
+        }
+    });
+    let templates = state
+        .templates
+        .iter()
+        .map(|t| t["uriTemplate"].as_str().unwrap_or_default().to_owned());
+    let named: Vec<String> = resources.chain(templates).take(NAMED).collect();
+    let more = match offered - named.len() {
+        0 => String::new(),
+        more => format!(", and {more} more"),
+    };
+    Some(format!(
+        "Reads a resource this server offers, by its uri; with no uri, lists them all. Offered: {}{more}.",
+        named.join(", ")
+    ))
 }
 
 /// `list` as JSON values.
@@ -317,15 +470,24 @@ pub(crate) fn namespaces(links: &[Arc<Link>]) -> Vec<Namespace> {
         .map(|l| Namespace {
             name: l.name.clone(),
             description: format!("The tools of the MCP server {}.", l.name),
-            tools: lock(&l.state)
-                .tools
-                .iter()
-                .map(|t| ToolInfo {
-                    name: t["name"].as_str().unwrap_or_default().to_owned(),
-                    description: t["description"].as_str().unwrap_or_default().to_owned(),
-                    signature: format!("({}): unknown", object_type(&t["inputSchema"])),
-                })
-                .collect(),
+            tools: {
+                let state = lock(&l.state);
+                let reader = resource_tool(&state).map(|description| ToolInfo {
+                    name: READ_RESOURCE.to_owned(),
+                    description,
+                    signature: "({uri?: string}): unknown".to_owned(),
+                });
+                state
+                    .tools
+                    .iter()
+                    .map(|t| ToolInfo {
+                        name: t["name"].as_str().unwrap_or_default().to_owned(),
+                        description: t["description"].as_str().unwrap_or_default().to_owned(),
+                        signature: format!("({}): unknown", object_type(&t["inputSchema"])),
+                    })
+                    .chain(reader)
+                    .collect()
+            },
         })
         .collect()
 }
@@ -336,7 +498,15 @@ pub(crate) fn direct(links: &[Arc<Link>]) -> Vec<Direct> {
         .iter()
         .filter(|l| !l.codemode && l.status() == Status::Connected)
         .flat_map(|l| {
-            lock(&l.state)
+            let state = lock(&l.state);
+            let reader = resource_tool(&state).map(|description| Direct {
+                name: direct_name(&l.name, READ_RESOURCE),
+                description,
+                parameters: json!({ "type": "object", "properties": { "uri": { "type": "string" } } }),
+                namespace: l.name.clone(),
+                tool: READ_RESOURCE.to_owned(),
+            });
+            state
                 .tools
                 .iter()
                 .map(|t| {
@@ -349,6 +519,7 @@ pub(crate) fn direct(links: &[Arc<Link>]) -> Vec<Direct> {
                         tool,
                     }
                 })
+                .chain(reader)
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -410,6 +581,26 @@ impl ClientHandler for Watch {
     }
 }
 
+/// What a connection that failed said, as the person reads it.
+///
+/// The MCP library words a failure with the Rust types it passed through
+/// and the step it was at, such as `Send message error Transport [<type>]
+/// error: <what>, when send initialize request`; only what went wrong is
+/// kept, and an address nothing answered at is named plainly.
+fn plain(said: &str) -> String {
+    let what = said.split_once("] error: ").map_or(said, |(_, what)| what);
+    let what = what
+        .split_once(", when send ")
+        .map_or(what, |(what, _)| what);
+    let unreached = what
+        .split_once("error sending request for url (")
+        .and_then(|(_, rest)| rest.split_once(')'));
+    match unreached {
+        Some((url, _)) => format!("Couldn't reach {url}."),
+        None => what.trim().to_owned(),
+    }
+}
+
 /// Starts server entry `spec`, in `directory` unless it names a `cwd`.
 async fn start(
     watch: Watch,
@@ -417,7 +608,7 @@ async fn start(
     directory: &str,
     cancel: CancellationToken,
 ) -> Result<RunningService<RoleClient, Watch>, Status> {
-    let failed = |e: &dyn fmt::Display| Status::Failed(e.to_string());
+    let failed = |e: &dyn fmt::Display| Status::Failed(plain(&e.to_string()));
     match spec["type"].as_str() {
         Some("local") => {
             let parts: Vec<&str> = spec["command"]
@@ -464,7 +655,7 @@ async fn start(
                 if crate::mcp_auth::wants_sign_in(&said) {
                     Status::NeedsAuth(said)
                 } else {
-                    Status::Failed(said)
+                    Status::Failed(plain(&said))
                 }
             };
             if let Some(manager) = signed_in(&watch, spec, url).await? {
@@ -651,6 +842,29 @@ impl Server {
         link
     }
 
+    /// Starts server `name` of `directory` afresh when its connection
+    /// failed long enough ago; gives the new link.
+    fn mcp_again(self: &Arc<Self>, directory: &str, name: &str, spec: &Value) -> Option<Arc<Link>> {
+        let link = {
+            let mut links = lock(&self.mcp.links);
+            let held = links.get_mut(&Key::new(directory, name, spec))?;
+            let attempt = held.link.due()?;
+            held.link.cancel.cancel();
+            let link = Arc::new(Link::new(name, spec, false));
+            lock(&link.state).attempt = attempt + 1;
+            held.link = Arc::clone(&link);
+            link
+        };
+        tracing::info!(name: "mcp.retried", server = %name, "trying a failed MCP server again");
+        self.emit("mcp.status.changed", json!({ "server": name }), None, None);
+        let (server, spec, directory) = (Arc::clone(self), spec.clone(), directory.to_owned());
+        let started = Arc::clone(&link);
+        tokio::spawn(async move {
+            server.run_link(started, &spec, &directory).await;
+        });
+        Some(link)
+    }
+
     /// Connects `link` and follows it until it ends.
     async fn run_link(self: Arc<Self>, link: Arc<Link>, spec: &Value, directory: &str) {
         let watch = Watch {
@@ -659,7 +873,10 @@ impl Server {
         };
         let started = tokio::time::timeout(
             link.startup,
-            start(watch, spec, directory, link.cancel.clone()),
+            // (The library cancels the token it is given once the
+            // connection ends: a child of the link's, so that the link's
+            // own still says whether Harlo ended it.)
+            start(watch, spec, directory, link.cancel.child_token()),
         )
         .await
         .unwrap_or_else(|_late| Err(Status::Failed("It took too long to start.".to_owned())));
@@ -737,11 +954,14 @@ impl Server {
             .mcp_entries(directory)
             .iter()
             .filter(|(name, spec)| !disabled(spec) && !off.contains(*name))
-            .map(|(name, spec)| self.mcp_link(directory, name, spec))
+            .map(|(name, spec)| {
+                let link = self.mcp_link(directory, name, spec);
+                self.mcp_again(directory, name, spec).unwrap_or(link)
+            })
             .collect();
         for link in &links {
-            let until = tokio::time::Instant::now() + link.startup;
-            while link.status() == Status::Pending && tokio::time::Instant::now() < until {
+            let until = link.awaited();
+            while link.status() == Status::Pending && Instant::now() < until {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
@@ -827,12 +1047,13 @@ impl Server {
         self.emit("mcp.status.changed", json!({ "server": name }), None, None);
     }
 
-    /// The resources and templates `directory`'s connected servers offer.
-    pub(crate) fn mcp_resources(self: &Arc<Self>, directory: &str) -> Value {
+    /// The links to `directory`'s servers as they stand now, those turned
+    /// off left out; starts those not yet started.
+    fn mcp_links(self: &Arc<Self>, directory: &str) -> Vec<Arc<Link>> {
         let _ = self.mcp_servers(directory);
         let off = lock(&self.mcp.off).clone();
         let entries = self.mcp_entries(directory);
-        let links: Vec<Arc<Link>> = lock(&self.mcp.links)
+        lock(&self.mcp.links)
             .iter()
             .filter(|(k, held)| {
                 entries
@@ -842,7 +1063,66 @@ impl Server {
                     && !off.contains(&k.name)
             })
             .map(|(_, held)| Arc::clone(&held.link))
-            .collect();
+            .collect()
+    }
+
+    /// The resource at `uri` as a file to send with a prompt, named
+    /// `name`: read from the connected server of `directory` that offers
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// When no connected server of the folder offers it, or the server
+    /// can't read it.
+    pub(crate) async fn mcp_file(
+        self: &Arc<Self>,
+        directory: &str,
+        uri: &str,
+        name: Option<String>,
+    ) -> Result<harlo_engine::attachment::File, Refusal> {
+        let offering = self.mcp_links(directory).into_iter().find_map(|link| {
+            let peer = {
+                let state = lock(&link.state);
+                let offers = state.resources.iter().any(|r| r["uri"] == uri);
+                state.peer.clone().filter(|_| offers)
+            }?;
+            Some((link, peer))
+        });
+        let Some((link, peer)) = offering else {
+            return Err(Refusal::Bad(format!(
+                "No connected MCP server offers {uri}."
+            )));
+        };
+        let contents = link.contents(&peer, uri).await.map_err(Refusal::Bad)?;
+        let part = contents.first().cloned().unwrap_or_default();
+        let source = json!({ "type": "uri", "uri": uri });
+        match (part["text"].as_str(), part["blob"].as_str()) {
+            (Some(text), _) => Ok(harlo_engine::attachment::File::new(
+                text.as_bytes(),
+                part["mimeType"].as_str().unwrap_or("text/plain"),
+                source,
+                name,
+            )),
+            (None, Some(blob)) => Ok(harlo_engine::attachment::File {
+                data: blob.to_owned(),
+                mime: part["mimeType"]
+                    .as_str()
+                    .unwrap_or("application/octet-stream")
+                    .to_owned(),
+                source,
+                name,
+                mention: None,
+            }),
+            _ => Err(Refusal::Bad(format!(
+                "{} gave nothing for {uri}.",
+                link.name
+            ))),
+        }
+    }
+
+    /// The resources and templates `directory`'s connected servers offer.
+    pub(crate) fn mcp_resources(self: &Arc<Self>, directory: &str) -> Value {
+        let links = self.mcp_links(directory);
         let mut resources = Vec::new();
         let mut templates = Vec::new();
         for link in &links {
@@ -891,11 +1171,14 @@ impl Server {
         };
         let started = tokio::time::timeout(
             link.startup,
-            watch.serve_with_ct((Box::pin(sink), Box::pin(stream)), link.cancel.clone()),
+            watch.serve_with_ct(
+                (Box::pin(sink), Box::pin(stream)),
+                link.cancel.child_token(),
+            ),
         )
         .await
         .map_err(|_late| Status::Failed("It took too long to start.".to_owned()))
-        .and_then(|r| r.map_err(|e| Status::Failed(e.to_string())));
+        .and_then(|r| r.map_err(|e| Status::Failed(plain(&e.to_string()))));
         self.follow(Arc::clone(&link), started).await;
         let mut hosted = lock(&self.mcp.hosted);
         if hosted.get(&name).is_some_and(|l| Arc::ptr_eq(l, &link)) {
@@ -912,6 +1195,75 @@ fn not_found(name: &str) -> Refusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_connection_is_worded_without_type_names() {
+        let said = "Send message error Transport \
+                    [rmcp::transport::worker::WorkerTransport<rmcp::transport::\
+                    streamable_http_client::StreamableHttpClientWorker<reqwest::async_impl::\
+                    client::Client>>] error: Client error: error sending request for url \
+                    (http://127.0.0.1:9/mcp), when send initialize request";
+        assert_eq!(plain(said), "Couldn't reach http://127.0.0.1:9/mcp.");
+        let said = "Send message error Transport [a::B<c::D>] error: Unexpected content type: \
+                    text/html, when send initialize request";
+        assert_eq!(plain(said), "Unexpected content type: text/html");
+        // Anything worded another way is kept as it is.
+        assert_eq!(
+            plain("connection closed: initialize response"),
+            "connection closed: initialize response"
+        );
+    }
+
+    #[test]
+    fn a_failed_server_is_left_twice_as_long_after_each_failure() {
+        assert_eq!(retry_after(0), RETRY_AFTER);
+        assert_eq!(retry_after(1), RETRY_AFTER * 2);
+        assert_eq!(retry_after(3), RETRY_AFTER * 8);
+        assert_eq!(retry_after(9), RETRY_MOST);
+        assert_eq!(retry_after(u32::MAX), RETRY_MOST);
+    }
+
+    #[test]
+    fn a_failed_link_is_due_once_its_wait_is_over() {
+        let ago = |seconds: u64| Instant::now().checked_sub(Duration::from_secs(seconds));
+        let link = Link::new("probe", &json!({}), false);
+        assert_eq!(link.due(), None, "it is starting");
+        link.set_status(Status::Failed("no".to_owned()));
+        assert_eq!(link.due(), None, "it only just failed");
+        lock(&link.state).failed_at = ago(45);
+        assert_eq!(link.due(), Some(0));
+        // After a try that failed too, it is left twice as long.
+        lock(&link.state).attempt = 1;
+        assert_eq!(link.due(), None);
+        lock(&link.state).failed_at = ago(61);
+        assert_eq!(link.due(), Some(1));
+        // One that waits for a sign-in, or stopped being failed, isn't tried.
+        link.set_status(Status::NeedsAuth("sign in".to_owned()));
+        assert_eq!(link.due(), None);
+        // A first start is waited for as long as it may take, a retry briefly.
+        assert_eq!(link.awaited(), link.started + RETRY_WAIT);
+        lock(&link.state).attempt = 0;
+        assert_eq!(link.awaited(), link.started + STARTUP);
+    }
+
+    #[test]
+    fn the_resource_tool_names_what_is_offered() {
+        let mut state = State::default();
+        assert_eq!(resource_tool(&state), None, "nothing to read");
+        state.resources = (1..=10)
+            .map(|n| json!({ "uri": format!("n://{n}"), "name": format!("Note {n}") }))
+            .collect();
+        state.templates = vec![json!({ "uriTemplate": "n://by/{id}" })];
+        let said = resource_tool(&state).expect("a tool");
+        assert!(
+            said.contains("Offered: n://1 (Note 1), n://2 (Note 2)"),
+            "{said}"
+        );
+        assert!(said.ends_with("n://8 (Note 8), and 3 more."), "{said}");
+        // The server's own tool of that name is the one that answers.
+        state.tools = vec![json!({ "name": READ_RESOURCE })];
+        assert_eq!(resource_tool(&state), None);
+    }
 
     #[test]
     fn schemas_read_as_signatures() {

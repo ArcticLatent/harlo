@@ -788,8 +788,9 @@ struct Prompt {
     files: Vec<FileRef>,
 }
 
-/// A file sent with a prompt: a `file://` path on this machine, or the
-/// bytes in a `data:` URI.
+/// A file sent with a prompt: a `file://` path on this machine, the bytes
+/// in a `data:` URI, or the uri of a resource one of the folder's MCP
+/// servers offers.
 #[derive(Deserialize)]
 struct FileRef {
     uri: String,
@@ -801,8 +802,13 @@ struct FileRef {
 const FILE_LIMIT: u64 = 20 * 1024 * 1024;
 
 impl FileRef {
-    /// The file, read.
-    fn read(self) -> Result<harlo_engine::attachment::File, Refusal> {
+    /// The file, read; a resource is read from the server of `directory`
+    /// that offers it.
+    async fn read(
+        self,
+        server: &Arc<Server>,
+        directory: &str,
+    ) -> Result<harlo_engine::attachment::File, Refusal> {
         use base64::Engine as _;
         let mut file = if let Some(path) = self.uri.strip_prefix("file://") {
             let size = std::fs::metadata(path)
@@ -846,10 +852,14 @@ impl FileRef {
                 self.name.clone(),
             )
         } else {
-            return Err(Refusal::Bad(format!(
-                "Files are sent as file:// or data: URIs, not {}.",
-                self.uri
-            )));
+            let file = server
+                .mcp_file(directory, &self.uri, self.name.clone())
+                .await?;
+            // (Held in base64: four characters for three bytes.)
+            if file.data.len() as u64 / 4 * 3 > FILE_LIMIT {
+                return Err(Refusal::Bad(format!("{} is too large to send.", self.uri)));
+            }
+            file
         };
         file.mention = self.mention;
         Ok(file)
@@ -918,11 +928,10 @@ async fn prompt(
     let directory = server.session(&id)?.location.directory;
     let ids: Vec<String> = body.skills.into_iter().map(|s| s.id).collect();
     let skills = server.attach(&directory, &ids).await?;
-    let files = body
-        .files
-        .into_iter()
-        .map(FileRef::read)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut files = Vec::with_capacity(body.files.len());
+    for file in body.files {
+        files.push(file.read(&server, &directory).await?);
+    }
     ok(server.prompt(&id, body.id, &body.text, &delivery, skills, files)?)
 }
 
