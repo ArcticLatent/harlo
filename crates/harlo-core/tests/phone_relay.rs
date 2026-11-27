@@ -474,9 +474,18 @@ async fn a_closed_app_is_told_when_a_plan_limit_is_used_up() {
         (&Identity::generate(), "BBBB02", false),
     ] {
         let mut p = pair_through(&phone.offer(), key).await;
-        let registered = p
-            .call(json!({ "op": "push", "token": token, "limits": limits }))
-            .await;
+        // (A phone is answered before Harlo has reached its server, and
+        // until then nothing can be registered.)
+        let mut registered = Value::Null;
+        for _ in 0..200 {
+            registered = p
+                .call(json!({ "op": "push", "token": token, "limits": limits }))
+                .await;
+            if registered["ok"] == true {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         assert_eq!(registered["ok"], true, "{registered}");
     }
     wait_for("the phones gone", || async {
