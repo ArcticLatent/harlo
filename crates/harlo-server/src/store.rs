@@ -453,6 +453,19 @@ impl Store {
             .optional()
     }
 
+    /// The settings whose key starts with `prefix`, as key and value.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn settings_under(&self, prefix: &str) -> Result<Vec<(String, String)>, Error> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT key, value FROM setting WHERE substr(key, 1, length(?1)) = ?1")?;
+        stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    }
+
     /// Sets setting `key` to `value`.
     ///
     /// # Errors
@@ -575,6 +588,8 @@ impl Store {
         all.execute("DELETE FROM message WHERE session = ?1", [id])?;
         all.execute("DELETE FROM event WHERE aggregate = ?1", [id])?;
         all.execute("DELETE FROM session WHERE id = ?1", [id])?;
+        // Its goal and the goal's checkpoint go with it.
+        all.execute("DELETE FROM setting WHERE key = 'goal/' || ?1", [id])?;
         all.commit()?;
         Ok(())
     }
@@ -730,6 +745,23 @@ impl Store {
         stmt.query_map([session], |r| r.get::<_, String>(0))?
             .map(|b| serde_json::from_str(&b?).map_err(json_error))
             .collect()
+    }
+
+    /// A session's messages after the one with ID `past`, oldest first;
+    /// all of them without one. IDs sort in a session's order.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn messages_after(&self, session: &str, past: Option<&str>) -> Result<Vec<Message>, Error> {
+        let conn = self.reader();
+        let mut stmt =
+            conn.prepare("SELECT body FROM message WHERE session = ?1 AND id > ?2 ORDER BY id")?;
+        stmt.query_map([session, past.unwrap_or_default()], |r| {
+            r.get::<_, String>(0)
+        })?
+        .map(|b| serde_json::from_str(&b?).map_err(json_error))
+        .collect()
     }
 
     /// Up to `limit` of a session's messages, and whether more lie beyond.

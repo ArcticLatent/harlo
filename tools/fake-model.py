@@ -40,7 +40,9 @@ type.
 
 A goal's reviewer (/goal) gets the verdict kept in scripts.json under
 "<reviewer>", or one that finds the goal met. The agent's first prompt
-for a goal runs the script kept under "<goal>", when there is one.
+for a goal runs the script kept under "<goal>", when there is one; a
+round the reviewer sends it back for runs "<round>", and a goal taken up
+again runs "<resume>".
 
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
@@ -76,6 +78,8 @@ HARLO_REVIEWER = "Review the session's goal now, as its reviewer rather than its
 
 # How the agent's first prompt for a goal starts.
 GOAL_START = "This session now has a goal."
+GOAL_ROUND = "The reviewer says the goal isn't met yet"
+GOAL_RESUME = "Pick the goal up again where it stopped."
 
 # The verdict a goal's reviewer gives unless scripts.json keeps another.
 MET = '{"verdict":"done","reason":"The work is done and shown."}'
@@ -173,8 +177,9 @@ def plan(messages):
     if script.startswith(ASIDE_PREAMBLE):
         script = script.partition("\n\n")[2].strip()
     known_scripts = stored_scripts()
-    if script.startswith(GOAL_START) and "<goal>" in known_scripts:
-        script = "<goal>"
+    for start, key in ((GOAL_START, "<goal>"), (GOAL_ROUND, "<round>"), (GOAL_RESUME, "<resume>")):
+        if script.startswith(start) and key in known_scripts:
+            script = key
     if script in known_scripts:
         script = known_scripts[script]
         if isinstance(script, list):

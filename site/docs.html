@@ -188,7 +188,7 @@
   <dt><code>/btw</code> <i>question</i></dt>
   <dd>A side question. The model answers from what the session already knows, uses no tools, and the question stays out of the conversation. Answers are in the <span class="ui">Side questions</span> panel until Harlo closes.</dd>
   <dt><code>/goal</code> <i>objective</i></dt>
-  <dd>Gives the session a goal to keep working toward. After each run a reviewer reads the conversation and decides whether the goal is met; if not, the agent goes another round, up to 50. The goal shows above the message box with <span class="ui">Pause</span>, <span class="ui">Resume</span> and <span class="ui">Dismiss</span>.</dd>
+  <dd>Gives the session a goal to keep working toward. After each run a reviewer reads the conversation and decides whether the goal is met; if not, the agent goes another round, up to 50. The goal shows above the message box with <span class="ui">Pause</span>, <span class="ui">Resume</span> and <span class="ui">Dismiss</span>. Each time the reviewer has looked, the goal keeps where the work stood: what was done, the last command and its result, what is still missing and the next step. If the server stops in the middle of a round, the goal is paused, and <span class="ui">Resume</span> gives the agent that checkpoint together with what the session did after it.</dd>
   <dt><code>/compact</code></dt>
   <dd>Summarizes the conversation now, to free up room in the model’s context.</dd>
   <dt><code>/init</code></dt>

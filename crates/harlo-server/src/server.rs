@@ -285,6 +285,7 @@ impl Server {
         let (events, _) = broadcast::channel(BACKLOG);
         let agents = harlo_engine::agents::builtins(&snapshots.with_file_name("plans"));
         end_unfinished(&store);
+        crate::goals::pause_unfinished(&store);
         Self {
             store,
             global: Mutex::new(global),

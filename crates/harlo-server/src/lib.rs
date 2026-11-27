@@ -11,6 +11,7 @@ mod agents;
 mod api;
 mod approvals;
 mod automations;
+mod checkpoint;
 mod claude;
 mod code;
 mod commands;

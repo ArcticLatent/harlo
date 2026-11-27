@@ -3,6 +3,11 @@
 //! whether the goal is met, needs another round, or waits for the person.
 //!
 //! A goal is kept per session, and its changes go out as `goal.changed`.
+//!
+//! Each time the reviewer has looked, the goal keeps a checkpoint of where
+//! the work stood (see [`crate::checkpoint`]). A goal the server stopped
+//! in the middle of is paused on the next start, and resuming it tells the
+//! agent the checkpoint and what the session did after it.
 
 // Rust guideline compliant 2026-10-09
 
@@ -12,14 +17,18 @@ use harlo_engine::{Created, Message, ascending_id, now};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use crate::checkpoint::{self, Digest, Reviewed};
 use crate::server::{Refusal, Server};
-use crate::store::Session;
+use crate::store::{Session, Store};
 
 /// The most rounds a goal gets before it waits for the person.
 const MAX_ROUNDS: u64 = 50;
 
 /// What `/goal` says about itself in the command list.
 pub(crate) const DESCRIPTION: &str = "work until an objective is met [pause|resume|clear]";
+
+/// Why a goal the server stopped in the middle of is paused.
+const STOPPED: &str = "The server stopped while the agent worked on it.";
 
 /// How the reviewer's request begins.
 const REVIEWER: &str = "Review the session's goal now, as its reviewer rather than its assistant.";
@@ -85,7 +94,90 @@ fn verdict(text: &str) -> Option<Verdict> {
     })
 }
 
+/// Pauses each goal that was being worked on when the server stopped:
+/// its run is gone, and the person resumes it from its checkpoint.
+pub(crate) fn pause_unfinished(store: &Store) {
+    let Ok(goals) = store.settings_under("goal/") else {
+        return;
+    };
+    for (key, stored) in goals {
+        let Ok(mut goal) = serde_json::from_str::<Value>(&stored) else {
+            continue;
+        };
+        if goal["status"] != "active" {
+            continue;
+        }
+        goal["status"] = json!("paused");
+        goal["reason"] = json!(STOPPED);
+        goal["updatedAt"] = json!(now());
+        if let Err(e) = store.put_setting(&key, &goal.to_string()) {
+            tracing::error!(name: "goal.store.failed", error = %e, "couldn't pause a goal");
+        }
+    }
+}
+
+/// A goal as clients get it with its changes: without its checkpoint,
+/// which only the agent that resumes it reads.
+fn told(goal: &Value) -> Value {
+    let mut goal = goal.clone();
+    if let Some(fields) = goal.as_object_mut() {
+        fields.remove("checkpoint");
+    }
+    goal
+}
+
+/// What the reviewer's `found` verdict gives a checkpoint.
+fn reviewed(found: &Verdict) -> Reviewed {
+    match found.word.as_str() {
+        "done" => Reviewed {
+            verified: found.reason.clone(),
+            ..Reviewed::default()
+        },
+        _ => Reviewed {
+            missing: found.reason.clone(),
+            next: found.next.clone(),
+            ..Reviewed::default()
+        },
+    }
+}
+
 impl Server {
+    /// What session `id` did after `goal`'s checkpoint, or since the goal
+    /// was set when it has none; and the ID of its newest message.
+    fn since_checkpoint(&self, id: &str, goal: &Value) -> (Digest, Option<String>) {
+        let past = goal["checkpoint"]["through"]
+            .as_str()
+            .or_else(|| goal["from"].as_str());
+        let messages = self.store.messages_after(id, past).unwrap_or_default();
+        let newest = messages.last().map(|m| m.id().to_owned());
+        (
+            checkpoint::digest(&messages),
+            newest.or_else(|| past.map(str::to_owned)),
+        )
+    }
+
+    /// Keeps where `goal`'s work stands in session `id`, now that its
+    /// reviewer has looked and `found` this.
+    ///
+    /// It is written from what the run and the reviewer already said; no
+    /// model is asked.
+    fn keep_checkpoint(&self, id: &str, goal: &mut Value, found: &Verdict) {
+        let (run, through) = self.since_checkpoint(id, goal);
+        let before = goal.get("checkpoint").filter(|c| c.is_object()).cloned();
+        let looks = before
+            .as_ref()
+            .and_then(|b| b["round"].as_u64())
+            .unwrap_or_default()
+            + 1;
+        goal["checkpoint"] = checkpoint::checkpoint(
+            looks,
+            through.as_deref(),
+            &reviewed(found),
+            &run,
+            before.as_ref(),
+        );
+    }
+
     /// Session `id`'s goal, if it has one.
     pub(crate) fn goal(&self, id: &str) -> Option<Value> {
         let stored = self.store.setting(&format!("goal/{id}")).ok()??;
@@ -107,7 +199,7 @@ impl Server {
             .put_setting(&format!("goal/{}", session.id), &text)?;
         self.emit(
             "goal.changed",
-            json!({ "sessionID": session.id, "goal": goal }),
+            json!({ "sessionID": session.id, "goal": goal.as_ref().map(told) }),
             Some(&session.location.directory),
             None,
         );
@@ -189,17 +281,22 @@ impl Server {
                 }
                 let objective = goal["objective"].as_str().unwrap_or_default().to_owned();
                 let metadata = json!({ "source": "goal", "goalID": goal["id"], "round": rounds });
+                // What the session did after the reviewer last looked, such
+                // as a round the server stopped in, is told with the
+                // checkpoint.
+                let (since, _) = self.since_checkpoint(id, &goal);
+                let kept = goal.get("checkpoint").filter(|c| c.is_object());
+                let text = checkpoint::resume_text(&objective, kept, &since);
                 self.set_goal(&session, Some(goal))?;
-                let text = format!(
-                    "Pick the goal up again where it stopped.\n\n<objective>\n{objective}\n</objective>"
-                );
                 self.goal_message(&session, &text, None, &metadata, delivery);
                 Ok(())
             }
             objective => {
+                // `from` sorts before the goal's first message: what the
+                // session did earlier isn't the goal's work.
                 let goal = json!({
                     "id": ascending_id("goal"), "objective": objective, "status": "active",
-                    "rounds": 0, "maxRounds": MAX_ROUNDS,
+                    "rounds": 0, "maxRounds": MAX_ROUNDS, "from": ascending_id("msg"),
                 });
                 let metadata = json!({ "source": "goal", "goalID": goal["id"] });
                 self.set_goal(&session, Some(goal))?;
@@ -254,6 +351,7 @@ impl Server {
             return;
         };
         goal["reason"] = json!(found.reason);
+        self.keep_checkpoint(&session.id, &mut goal, &found);
         match found.word.as_str() {
             "done" => goal["status"] = json!("complete"),
             "continue" => {
