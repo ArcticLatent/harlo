@@ -105,7 +105,7 @@ harlo.on("turn.ended", async (event, context) => { … });               // retu
 | `harlo.project.read(…)` and the others | The session's own tool, for those in `permissions.project`. The session's rules decide each call, and a person is asked where they say to, with the change shown. Only a tool an agent's script called has them; a command and an event don't. |
 | `harlo.plugin`, `harlo.session` | The plugin's name and version; the session's ID and folder. Also in `context`. |
 
-**How agents reach a tool.** From a script, as `tools.<plugin>.<tool>({…})`, where `<plugin>` is the plugin's name with anything but letters and digits turned into `_`. Scripts run through the `execute` tool, which a session's rules allow, ask about or deny like any other.
+**How agents reach a tool.** From a script, as `tools.<plugin>.<tool>({…})`, where `<plugin>` is the plugin's name with anything but letters and digits turned into `_`. Scripts run through the `execute` tool, which a session's rules allow, ask about or deny like any other. Each call of a plugin's tool is decided by the rules too, under the name `<plugin>_<tool>`: a rule that denies `starter_count_words` or asks about it holds inside a script. The same goes for an MCP server's tools, as `<server>_<tool>`.
 
 **Errors.** What the code throws is the call's error: the plugin's name, the message, and the last ten lines it logged.
 

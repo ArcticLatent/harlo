@@ -4,8 +4,9 @@
 //!
 //! They're off until the config turns them on (`"automations": true`). A
 //! command or script runs unattended, so making one needs the session's
-//! rules to allow it without asking. A ticker checks once a second for
-//! those that are due.
+//! rules to allow it without asking. A command runs in the sandbox that
+//! session's own commands run in, unless its rules let that command leave
+//! it without asking. A ticker checks once a second for those that are due.
 
 // Rust guideline compliant 2026-10-09
 
@@ -13,8 +14,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use harlo_engine::sandbox::Confined;
 use harlo_engine::tools::shell::{Ended, execute};
-use harlo_engine::{Effect, ascending_id, decide, now};
+use harlo_engine::{Effect, OUTSIDE_SANDBOX, ascending_id, decide, now};
 use jiff::tz::TimeZone;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -134,8 +136,11 @@ fn first_due(trigger: &Map<String, Value>) -> Result<(Value, i64), String> {
         }
         "cron" => next_cron(text("cron"), &tz, now())?,
         "event" => {
+            // (Whether or not a server is connected: none of them sends
+            // events the server fires automations on.)
             return Err(
-                "Event triggers need an MCP server that sends events; none is connected."
+                "Event triggers aren't available: the server doesn't fire automations on MCP \
+                 servers' events. Use at, every or cron."
                     .to_owned(),
             );
         }
@@ -468,10 +473,12 @@ impl Server {
             }
             Some("shell") => {
                 let command = action["command"].as_str().unwrap_or_default();
+                let session = automation["sessionID"].as_str();
+                let confined = self.confinement(session, &directory, command).await;
                 let ran = execute(
                     command,
                     Path::new(&directory),
-                    None,
+                    confined.as_ref(),
                     Some(RUN_LIMIT),
                     &CancellationToken::new(),
                 )
@@ -490,6 +497,31 @@ impl Server {
             Some("code") => self.run_code(automation, runs).await,
             _ => (false, "It has no action.".to_owned()),
         }
+    }
+
+    /// The sandbox scheduled `command` runs in, in `directory`: the one a
+    /// command of session `session` runs in. None where commands aren't
+    /// confined, or where that session's rules let this command leave the
+    /// sandbox without asking.
+    ///
+    /// An agent whose commands are confined can make an automation, so
+    /// what an automation runs is held to the same.
+    async fn confinement(
+        &self,
+        session: Option<&str>,
+        directory: &str,
+        command: &str,
+    ) -> Option<Confined> {
+        let skills = self.skills_for(directory).await;
+        let sandbox = self.sandbox(&skills)?;
+        let session = session.and_then(|id| self.session(id).ok());
+        if self
+            .unattended(session.as_ref(), OUTSIDE_SANDBOX, command)
+            .is_ok()
+        {
+            return None;
+        }
+        Some(sandbox.confine(Path::new(directory), command))
     }
 
     /// Runs `automation`'s Code Mode script; keeps the state it returns,

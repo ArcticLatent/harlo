@@ -146,7 +146,9 @@ impl Catalog for ServerCatalog {
                     "Makes an automation. trigger is {type:\"at\", at:\"in 10 minutes\"}, \
                      {type:\"every\", every:\"1 hour\"} or {type:\"cron\", cron:\"0 9 * * 1-5\"}, \
                      with an optional tz; action is {type:\"prompt\", prompt}, \
-                     {type:\"shell\", command} or {type:\"code\", code, args?}.",
+                     {type:\"shell\", command} or {type:\"code\", code, args?}. A code script \
+                     sees state (kept from its last return), runs, now and args, and returns \
+                     {state?, done?: true, send?: {prompt}}.",
                     "({name: string, trigger: object, action: object}): Automation",
                 ),
                 tool(

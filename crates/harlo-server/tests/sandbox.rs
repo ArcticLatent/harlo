@@ -14,7 +14,10 @@ mod support;
 use std::path::Path;
 use std::time::Duration;
 
-use harlo_client::{Client, Delivery, Effect, EventKind, Message, PermissionReply, Prompt, Rule};
+use harlo_client::{
+    AutomationTrigger, Client, Delivery, Effect, EventKind, Message, NewAction, NewAutomation,
+    PermissionReply, Prompt, Rule,
+};
 use support::{Sandbox, turn_requests, until};
 
 /// The folders the sandbox leaves open to every command.
@@ -306,4 +309,74 @@ async fn a_temporary_folder_takes_new_files_though_something_hidden_lies_in_it()
     assert!(result.contains("made-one"), "{result}");
     assert!(!result.contains("Permission denied"), "{result}");
     assert!(project.join("inside.txt").exists());
+}
+
+/// A command an automation runs is held to the sandbox like the
+/// session's own: an agent whose commands are confined can't schedule
+/// one that isn't.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scheduled_command_runs_in_the_sandbox_too() {
+    let Some(sandbox) = confined().await else {
+        return;
+    };
+    let (client, project, root) = (sandbox.client(), sandbox.project(), sandbox.dir.path());
+    let session = client
+        .create_session(project.to_str().expect("utf-8"))
+        .await
+        .expect("session");
+    client
+        .set_permissions(&session.id, &[Rule::any("*", Effect::Allow)])
+        .await
+        .expect("trusted");
+
+    let command = "echo in > scheduled.txt; echo out > ../scheduled-outside.txt; \
+                   cd ../config/harlo && cat harlo.json";
+    let printed = scheduled(&client, &session.id, command).await;
+    assert_eq!(
+        std::fs::read_to_string(project.join("scheduled.txt")).expect("scheduled.txt"),
+        "in\n"
+    );
+    assert!(!root.join("scheduled-outside.txt").exists(), "{printed}");
+    assert!(!printed.contains("fake-key"), "{printed}");
+    assert_eq!(printed.matches("Permission denied").count(), 2, "{printed}");
+
+    // Where the session's rules let a command leave the sandbox without
+    // asking, a scheduled one leaves it too.
+    let rules = [
+        Rule::any("*", Effect::Allow),
+        Rule::any("outside_sandbox", Effect::Allow),
+    ];
+    client
+        .set_permissions(&session.id, &rules)
+        .await
+        .expect("free to leave");
+    let printed = scheduled(&client, &session.id, "echo out > ../scheduled-outside.txt").await;
+    assert!(root.join("scheduled-outside.txt").exists(), "{printed}");
+}
+
+/// Schedules `command` for `session` a second from now and waits for it;
+/// what it printed.
+async fn scheduled(client: &Client, session: &str, command: &str) -> String {
+    let made = client
+        .create_automation(&NewAutomation {
+            name: "Soon".into(),
+            session_id: Some(session.to_owned()),
+            directory: None,
+            trigger: AutomationTrigger::At("in 1 second".into()),
+            action: NewAction::Shell(command.into()),
+        })
+        .await
+        .expect("an automation");
+    for _ in 0..200 {
+        let all = client.automations().await.expect("the list");
+        let printed = all
+            .into_iter()
+            .find(|a| a.id == made.id)
+            .and_then(|a| a.last_output);
+        if let Some(printed) = printed {
+            return printed;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the automation never ran");
 }

@@ -1060,6 +1060,43 @@ pub(crate) async fn script_call(
         .map_err(ScriptCall::Failed)
 }
 
+/// Decides whether a script may call tool `tool` of the catalog's
+/// `namespace` with `args`: by the rules, asking a person where they say
+/// to. `at` is the `execute` call the script runs for.
+///
+/// The call is decided under the name the tool has when it is offered to
+/// the model on its own, `<namespace>_<tool>`, so a rule on a tool holds
+/// whichever way it is called. Leave to run scripts isn't leave for
+/// every tool a script can reach.
+pub(crate) async fn script_outside(
+    turn: &mut Turn,
+    namespace: &str,
+    tool: &str,
+    args: &Value,
+    at: CallOf<'_>,
+    gate: &impl Gate,
+    stop: &CancellationToken,
+) -> Result<(), ScriptCall> {
+    let said = |state: &ToolState| match state {
+        ToolState::Error { error, .. } => error.message.clone(),
+        _ => "The call didn't run.".to_owned(),
+    };
+    let input = args.as_object().cloned().unwrap_or_default();
+    let plan = Plan::External {
+        name: format!("{namespace}_{tool}"),
+        namespace: namespace.to_owned(),
+        tool: tool.to_owned(),
+        input: args.clone(),
+    };
+    match admit(turn, plan, &input, at.message, at.call, gate, stop).await {
+        Ok(_) => Ok(()),
+        Err(Called::Halted(state)) => Err(ScriptCall::Halted(said(&state))),
+        Err(Called::Ran(state, _) | Called::Refused(state)) => {
+            Err(ScriptCall::Failed(said(&state)))
+        }
+    }
+}
+
 /// Runs Code Mode script `code` for the call `at`, with the turn's own
 /// tools among those it can call; `input` is the call's.
 async fn run_script(
@@ -1292,11 +1329,10 @@ async fn finish(
     if let Plan::Question { questions } = plan {
         return ask_questions(input, questions, message, call, gate, stop).await;
     }
-    // A script that can call the turn's tools, or a tool that can, may
-    // ask and may change the rules, as they do.
-    if let Plan::Execute { code } = &plan
-        && (turn.script_tools || turn.code.as_ref().is_some_and(|c| c.reaches_session()))
-    {
+    // A script's calls are decided by the rules one by one, the turn's
+    // own tools and those of a server or a plugin alike: they may ask,
+    // and may change the rules, as the model's own calls do.
+    if let Plan::Execute { code } = &plan {
         let at = CallOf { message, call };
         return run_script(turn, code, input, at, gate, stop).await;
     }

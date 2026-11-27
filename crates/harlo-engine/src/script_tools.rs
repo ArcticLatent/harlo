@@ -15,6 +15,12 @@
 //! reason stops the script and the turn, as it does for any call. The
 //! files a script changed are reported with its step.
 //!
+//! The same holds for the tools a script reaches outside the session: an
+//! MCP server's, a plugin's, the server's own. Each such call is decided
+//! under the name the tool has when the model is offered it on its own,
+//! `<namespace>_<tool>`, so a rule that refuses a tool or asks about it
+//! holds whether the model calls it or a script does.
+//!
 //! Two things differ, because a script reads its results where a model
 //! would: `read` gives a file's text as it is, without line numbers and
 //! not cut at the lines a model is shown, and searches list far more.
@@ -162,6 +168,27 @@ impl<'a, G: Gate> WithProject<'a, G> {
         (changed, self.halted.load(Ordering::Relaxed))
     }
 
+    /// Lets a script's call of the catalog's tool `tool` in `namespace`
+    /// through, or says why not: the turn's rules decide it as they would
+    /// the model's own call of that tool, and a person is asked where
+    /// they say to.
+    async fn admitted(&self, namespace: &str, tool: &str, args: &Value) -> Result<(), String> {
+        let mut turn = self.turn.lock().await;
+        let decided = crate::turn::script_outside(
+            &mut turn, namespace, tool, args, self.at, self.gate, self.stop,
+        )
+        .await;
+        match decided {
+            Ok(()) => Ok(()),
+            Err(ScriptCall::Failed(why)) => Err(why),
+            Err(ScriptCall::Halted(why)) => {
+                self.halted.store(true, Ordering::Relaxed);
+                self.stop.cancel();
+                Err(why)
+            }
+        }
+    }
+
     /// Runs tool `tool` of those in `offered` with `args`, as the model's
     /// own call of it would run.
     async fn own_call(
@@ -228,7 +255,10 @@ impl<G: Gate> Catalog for WithProject<'_, G> {
         if namespace == NAMESPACE {
             return Box::pin(self.own_call(self.listed.as_ref(), tool, args));
         }
-        self.inner.call_within(namespace, tool, args, self)
+        Box::pin(async move {
+            self.admitted(namespace, tool, &args).await?;
+            self.inner.call_within(namespace, tool, args, self).await
+        })
     }
 
     fn call_seen<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {

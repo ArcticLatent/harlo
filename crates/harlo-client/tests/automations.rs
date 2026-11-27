@@ -222,3 +222,33 @@ async fn a_shell_command_and_code_run_with_no_model() {
     // Neither asked the model anything.
     assert_eq!(sandbox.model_requests(), 0);
 }
+
+/// An automation can't wait for an MCP server's event; the refusal says
+/// so, and what can be asked for instead, without blaming a missing
+/// server.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_event_trigger_is_refused_with_what_is_possible() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(&sandbox.project_str())
+        .await
+        .expect("a session");
+    let refused = client
+        .create_automation(&NewAutomation {
+            name: "On an event".into(),
+            session_id: Some(session.id.clone()),
+            directory: None,
+            trigger: AutomationTrigger::Event {
+                server: "units".into(),
+                event: "conversion.done".into(),
+            },
+            action: NewAction::Prompt("Check it.".into()),
+        })
+        .await
+        .expect_err("no event triggers");
+    let said = refused.to_string();
+    assert!(said.contains("at, every or cron"), "{said}");
+    assert!(!said.contains("none is connected"), "{said}");
+    assert!(client.automations().await.expect("the list").is_empty());
+}
