@@ -139,6 +139,41 @@ pub struct Note {
     pub superseded_by: Option<String>,
 }
 
+/// What kind of thing a proposed note is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProposalKind {
+    /// The person told the agent to do something differently.
+    Correction,
+    /// Something settled about the project.
+    Decision,
+    /// Something that went wrong and will again.
+    Pitfall,
+}
+
+/// A note the server proposes to keep, waiting for the person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proposal {
+    /// Its ID.
+    pub id: String,
+    /// Who the note would be for.
+    pub scope: NoteScope,
+    /// What the note would say.
+    pub text: String,
+    /// What kind of thing it is.
+    pub kind: ProposalKind,
+    /// The session and the message it comes from.
+    pub source: NoteSource,
+    /// What that message says, cut short.
+    #[serde(default)]
+    pub excerpt: String,
+    /// When it was proposed, in Unix milliseconds.
+    pub created: i64,
+    /// The kept note it contradicts and would replace, if any.
+    #[serde(default)]
+    pub replaces: Option<String>,
+}
+
 /// Where a plugin stands on the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -427,6 +462,57 @@ impl Client {
     /// Fails when there's no such note.
     pub async fn forget_note(&self, id: &str) -> Result<(), Error> {
         Self::send(self.request(Method::DELETE, &format!("/harlo/notes/{id}")))
+            .await
+            .map(drop)
+    }
+
+    /// Whether the server proposes notes the agent missed.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or rejects the password.
+    pub async fn proposes_notes(&self) -> Result<bool, Error> {
+        let info = Self::json(self.request(Method::GET, "/api/info")).await?;
+        Ok(info["capabilities"]["proposals"].as_bool() == Some(true))
+    }
+
+    /// The notes proposed for the user and for project `project` that wait
+    /// for the person, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or doesn't propose notes.
+    pub async fn note_proposals(&self, project: Option<&str>) -> Result<Vec<Proposal>, Error> {
+        let mut request = self.request(Method::GET, "/harlo/proposals");
+        if let Some(project) = project {
+            request = request.query(&[("projectID", project)]);
+        }
+        let v = Self::json(request).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
+    }
+
+    /// Keeps proposal `id` as a note that says `text`.
+    ///
+    /// The note it would replace, if it names one, is replaced.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such proposal, it was already decided, or
+    /// the text is empty.
+    pub async fn accept_proposal(&self, id: &str, text: &str) -> Result<(), Error> {
+        let request = self
+            .request(Method::POST, &format!("/harlo/proposals/{id}/accept"))
+            .json(&serde_json::json!({ "text": text }));
+        Self::json(request).await.map(drop)
+    }
+
+    /// Turns proposal `id` down; it isn't proposed again.
+    ///
+    /// # Errors
+    ///
+    /// Fails when there's no such proposal or it was already decided.
+    pub async fn dismiss_proposal(&self, id: &str) -> Result<(), Error> {
+        Self::send(self.request(Method::DELETE, &format!("/harlo/proposals/{id}")))
             .await
             .map(drop)
     }

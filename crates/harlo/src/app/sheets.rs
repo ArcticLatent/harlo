@@ -880,6 +880,7 @@ impl App {
             Section::Tools => Task::batch([self.load_mcp(), self.load_setup()]),
             Section::Memory => {
                 self.sheets.memory.editing = None;
+                self.sheets.memory.reviewing = None;
                 self.sheets.memory.error = None;
                 self.load_memory()
             }

@@ -17,6 +17,8 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::proposals::Proposal;
+
 /// A failure to read or write the store.
 pub type Error = rusqlite::Error;
 
@@ -267,6 +269,8 @@ impl Store {
                  message TEXT, time INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS note (
                  id TEXT PRIMARY KEY, project TEXT, body TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS proposal (
+                 id TEXT PRIMARY KEY, project TEXT, body TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS project (id TEXT PRIMARY KEY, settings TEXT NOT NULL);
              CREATE VIRTUAL TABLE IF NOT EXISTS message_text
@@ -440,6 +444,52 @@ impl Store {
             > 0)
     }
 
+    /// Saves a proposed note, new or decided.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the write fails.
+    pub fn put_proposal(&self, proposal: &Proposal) -> Result<(), Error> {
+        let body = serde_json::to_string(proposal).map_err(json_error)?;
+        self.conn().execute(
+            "INSERT INTO proposal (id, project, body) VALUES (?1, ?2, ?3)
+             ON CONFLICT (id) DO UPDATE SET project = excluded.project, body = excluded.body",
+            params![proposal.id, proposal.project, body],
+        )?;
+        Ok(())
+    }
+
+    /// Proposed note `id`, if there is one.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn proposal(&self, id: &str) -> Result<Option<Proposal>, Error> {
+        self.conn()
+            .query_row("SELECT body FROM proposal WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .map(|b| serde_json::from_str(&b).map_err(json_error))
+            .transpose()
+    }
+
+    /// The notes proposed for the user and, with `project`, for that
+    /// project, oldest first; decided ones included.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the read fails.
+    pub fn proposals(&self, project: Option<&str>) -> Result<Vec<Proposal>, Error> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT body FROM proposal WHERE project IS NULL OR project = ?1 ORDER BY id",
+        )?;
+        stmt.query_map([project], |r| r.get::<_, String>(0))?
+            .map(|b| serde_json::from_str(&b?).map_err(json_error))
+            .collect()
+    }
+
     /// Setting `key`, if it was set.
     ///
     /// # Errors
@@ -588,8 +638,12 @@ impl Store {
         all.execute("DELETE FROM message WHERE session = ?1", [id])?;
         all.execute("DELETE FROM event WHERE aggregate = ?1", [id])?;
         all.execute("DELETE FROM session WHERE id = ?1", [id])?;
-        // Its goal and the goal's checkpoint go with it.
-        all.execute("DELETE FROM setting WHERE key = 'goal/' || ?1", [id])?;
+        // Its goal and the goal's checkpoint go with it, and where the
+        // look for notes to propose had come to.
+        all.execute(
+            "DELETE FROM setting WHERE key IN ('goal/' || ?1, 'proposals/' || ?1)",
+            [id],
+        )?;
         all.commit()?;
         Ok(())
     }

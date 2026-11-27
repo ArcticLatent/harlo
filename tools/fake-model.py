@@ -44,6 +44,10 @@ for a goal runs the script kept under "<goal>", when there is one; a
 round the reviewer sends it back for runs "<round>", and a goal taken up
 again runs "<resume>".
 
+A request to propose notes from a stretch of a session gets the JSON kept
+in scripts.json under "<notes>", or "[]". In it, {person} stands for the
+ID of the last message of the person's in the stretch.
+
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
 gets a filled-in summary in the server's template. Every request body is appended to the log, so a
@@ -78,6 +82,7 @@ HARLO_REVIEWER = "Review the session's goal now, as its reviewer rather than its
 
 # How the agent's first prompt for a goal starts.
 GOAL_START = "This session now has a goal."
+PROPOSE = "Propose notes from this stretch of a session."
 GOAL_ROUND = "The reviewer says the goal isn't met yet"
 GOAL_RESUME = "Pick the goal up again where it stopped."
 
@@ -169,6 +174,12 @@ def plan(messages):
     if script.startswith(TITLE_REQUEST) and "<message>" in script and script not in stored_scripts():
         first = script.split("<message>", 1)[1].split("</message>", 1)[0].strip()
         return [("say", first.splitlines()[0] if first else "New session")]
+    if script.startswith(PROPOSE):
+        stretch = script.partition("<transcript>")[2]
+        people = [line.split("(", 1)[1].split(")", 1)[0] for line in stretch.splitlines()
+                  if line.startswith("Person (msg_")]
+        answer = stored_scripts().get("<notes>", "[]")
+        return [("say", answer.replace("{person}", people[-1] if people else ""))]
     if script.startswith((REVIEWER, HARLO_REVIEWER)):
         return [("say", stored_scripts().get("<reviewer>", MET))]
     for preamble in (SUBAGENT_PREAMBLE, HARLO_SUBAGENT_PREAMBLE):

@@ -416,6 +416,7 @@ what it is for, how it is used, and what to read next.</code></pre>
 
 <h3 id="memory">Notes the agent keeps</h3>
 <p>The agent keeps the decisions you make as notes, each with the session it came from. A project’s notes reach every session of that project; your own reach all your sessions. <span class="ui">Settings → Memory</span> lists them, lets you edit or forget one, and turns the whole thing on or off.</p>
+<p>With notes on, Harlo also reads what a session did once its run ends, and suggests notes the agent didn’t keep: a correction you gave, a decision about the project, or something that went wrong and will again. Suggestions wait under <span class="ui">Suggested</span> in <span class="ui">Settings → Memory</span>, each with the session and the message it comes from, and the note it would replace if it contradicts one. Nothing suggested reaches a session until you keep it; you can change its words first, or dismiss it, and a dismissed suggestion doesn’t come back. Each look is one small request to a model.</p>
 
 <h3 id="websearch">Web search</h3>
 <p>The first time an agent wants to search the web, Harlo asks whether to allow it. <span class="ui">Settings → Tools</span> chooses the search service: Exa, Firecrawl, Parallel, Tavily or TinyFish. Each works without a key within its free limits, and a key of yours lifts them. With a Claude subscription connected, searches can go through it instead.</p>

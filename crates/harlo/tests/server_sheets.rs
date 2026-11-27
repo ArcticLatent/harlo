@@ -308,3 +308,146 @@ fn settings_git_reads_scratch_git_and_turns_snapshots_off_in_harlos_config() {
     ui.press("Use the default");
     assert_eq!(ui.app().preferences.commit_model, None);
 }
+
+/// How many requests to propose notes `sandbox`'s scripted model answered.
+fn note_looks(sandbox: &Sandbox) -> usize {
+    std::fs::read_to_string(sandbox.root().join("model.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains("Propose notes from this stretch of a session."))
+        .count()
+}
+
+/// Sends `text` to `session` on `sandbox`'s server, allows what its agent
+/// asks about, and waits until the session was read for notes `looks`
+/// times in all.
+async fn turn_until_looked(sandbox: &Sandbox, session: &str, text: &str, looks: usize) {
+    use harlo_core::server::{Delivery, PermissionReply, Prompt};
+
+    let client = sandbox.client();
+    client
+        .prompt(session, &Prompt::new(text, Delivery::Queue))
+        .await
+        .expect("prompt");
+    server::wait_for("the session to be read for notes", || async {
+        for asked in client.permissions(session).await.ok()? {
+            client
+                .reply_permission(session, &asked.id, PermissionReply::Once, None)
+                .await
+                .ok()?;
+        }
+        (note_looks(sandbox) >= looks).then_some(())
+    })
+    .await;
+}
+
+#[test]
+fn settings_memory_shows_proposed_notes_to_keep_changed_or_dismiss() {
+    let mut tasks = Tasks::new();
+    let sandbox = tasks.block_on(Sandbox::start());
+    let client = sandbox.client();
+    tasks.block_on(client.set_notes_on(true)).expect("notes on");
+    let session = tasks
+        .block_on(client.create_session(&sandbox.project_str()))
+        .expect("session");
+
+    // A note for all sessions, kept by the agent; then the person says
+    // otherwise, and the agent keeps nothing.
+    tasks.block_on(turn_until_looked(
+        &sandbox,
+        &session.id,
+        r#"tool remember {"text":"Answer at length.","scope":"user"} ;; say Kept."#,
+        1,
+    ));
+    let old = tasks.block_on(client.notes(None)).expect("notes");
+    assert_eq!(old.len(), 1, "{old:?}");
+    std::fs::write(
+        sandbox.root().join("scripts.json"),
+        serde_json::json!({
+            "Keep your answers short from now on.": r#"tool read {"path":"a.txt"} ;; say Short it is."#,
+            "<notes>": format!(
+                r#"[{{"text":"Keep answers short.","kind":"correction","scope":"user","message":"{{person}}","replaces":"{}"}},
+                    {{"text":"Reading a.txt needs no question first.","kind":"pitfall","scope":"user","message":"{{person}}"}}]"#,
+                old[0].id
+            ),
+        })
+        .to_string(),
+    )
+    .expect("the scripts");
+    tasks.block_on(turn_until_looked(
+        &sandbox,
+        &session.id,
+        "Keep your answers short from now on.",
+        2,
+    ));
+    tasks.block_on(server::wait_for("the proposals", || async {
+        (client.note_proposals(None).await.ok()?.len() == 2).then_some(())
+    }));
+
+    let ui = window(&sandbox);
+    ui.press("Settings");
+    ui.press("Memory");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| ui.shows("Suggested")),
+        "the proposals, once loaded"
+    );
+    // Each says what it is, where it comes from and what it would replace.
+    assert!(ui.shows("A correction you gave"));
+    assert!(ui.shows("Replaces a note"));
+    assert!(ui.shows("Something that went wrong"));
+    let title = session.title.clone().unwrap_or_default();
+    let shown = ui.app().sheets.memory.kept.clone();
+    let Load::Loaded(shown) = shown else {
+        panic!("the page isn't loaded");
+    };
+    let from = shown.proposals[0].source.title.clone().unwrap_or(title);
+    assert!(
+        ui.shows(&format!(
+            "Keep answers short.\nFrom “{from}” · for all your sessions · would replace “Answer at length.”"
+        )),
+        "the first proposal's line"
+    );
+
+    // Looked at: its words in a field, the message it comes from, the
+    // note it replaces. Kept with the words changed.
+    ui.press("Review: A correction you gave");
+    assert!(ui.shows("“Keep your answers short from now on.”"));
+    assert!(ui.shows("Keeping it replaces"));
+    assert!(ui.shows("“Answer at length.”"));
+    ui.fill("Note", "Keep answers short: a few lines.");
+    ui.press("Keep Note");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.memory.kept,
+            Load::Loaded(kept) if kept.proposals.len() == 1 && kept.notes.len() == 2
+        )),
+        "kept as a note"
+    );
+    let notes = tasks.block_on(client.notes(None)).expect("notes");
+    let new = notes
+        .iter()
+        .find(|n| n.text == "Keep answers short: a few lines.")
+        .expect("the new note");
+    assert_eq!(new.source.session, session.id);
+    assert_eq!(new.source.message, shown.proposals[0].source.message);
+    let replaced = notes.iter().find(|n| n.id == old[0].id).expect("the old");
+    assert_eq!(replaced.superseded_by.as_deref(), Some(new.id.as_str()));
+    assert!(ui.shows("Replaced"), "the old note says it was replaced");
+
+    // The other is dismissed, and the section goes.
+    ui.press("Review: Something that went wrong");
+    ui.press("Dismiss");
+    assert!(
+        tasks.until(&ui, WAIT, |ui| matches!(
+            &ui.app().sheets.memory.kept,
+            Load::Loaded(kept) if kept.proposals.is_empty()
+        )),
+        "dismissed"
+    );
+    assert!(!ui.shows("Suggested"));
+    assert_eq!(
+        tasks.block_on(client.notes(None)).expect("notes").len(),
+        2,
+        "a dismissed proposal is no note"
+    );
+}

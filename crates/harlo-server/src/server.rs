@@ -108,6 +108,8 @@ pub(crate) struct Live {
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
     /// Where random web searches stand.
     pub(crate) searches: crate::search::Searches,
+    /// The sessions being read for notes to propose.
+    pub(crate) proposing: std::collections::HashSet<String>,
     /// The parts of sessions' system prompts that are held still, by
     /// session.
     steady: HashMap<String, Steady>,
@@ -868,25 +870,11 @@ impl Server {
     /// Asks a model for a title from the session's first message, and uses
     /// it unless the session was renamed meanwhile.
     ///
-    /// The model is the config's small one when it names one, else the
-    /// session's own, without its variant: a title needs no long thought.
+    /// The model is [`small_model`]: a title needs no long thought.
     async fn name_session(self: Arc<Self>, session: Session, first: String, provisional: String) {
         self.fresh_sign_ins().await;
         let folder = self.folder(&session.location.directory);
-        let small = folder
-            .config
-            .small_model
-            .clone()
-            .filter(|m| folder.config.resolve(m).is_some());
-        let own = || {
-            let mut model = session
-                .model
-                .clone()
-                .or_else(|| folder.config.default_model())?;
-            model.variant = None;
-            Some(model)
-        };
-        let Some(model) = small.or_else(own) else {
+        let Some(model) = small_model(&folder, &session) else {
             return;
         };
         let Some((provider, _)) = folder.config.resolve(&model) else {
@@ -980,6 +968,9 @@ impl Server {
                 drop(live);
                 // A subagent's answer goes to the session that asked.
                 self.report_to_parent(&id, word);
+                if word == "succeeded" {
+                    self.propose_later(&id);
+                }
                 break;
             }
         }
@@ -1578,6 +1569,28 @@ impl Server {
             );
         }
     }
+}
+
+/// The model for a small job beside `session`'s work, such as naming it:
+/// the small one of `folder`'s configuration when it names one, else the
+/// session's own, without its variant.
+pub(crate) fn small_model(
+    folder: &crate::folder::Folder,
+    session: &Session,
+) -> Option<harlo_engine::ModelRef> {
+    let small = folder
+        .config
+        .small_model
+        .clone()
+        .filter(|m| folder.config.resolve(m).is_some());
+    small.or_else(|| {
+        let mut model = session
+            .model
+            .clone()
+            .or_else(|| folder.config.default_model())?;
+        model.variant = None;
+        Some(model)
+    })
 }
 
 /// What a step that stopped midway is told on the server's next start.

@@ -1,12 +1,13 @@
-//! Settings → Memory: the switch, and the notes the agent kept, each with
-//! where it came from; one at a time corrected or forgotten.
+//! Settings → Memory: the switch, the notes the server proposes, each to
+//! keep or dismiss, and the notes the agent kept, each with where it came
+//! from; one at a time corrected or forgotten.
 
 // Rust guideline compliant 2026-10-09
 
 use std::fmt::Write as _;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use harlo_core::server::{Note as KeptNote, NoteScope};
+use harlo_core::server::{Note as KeptNote, NoteScope, Proposal, ProposalKind};
 
 use super::{field, heading, int, note, pair, switch};
 use crate::app::{App, Field, Load, Setting};
@@ -44,6 +45,16 @@ pub(super) fn memory_rows(app: &App) -> Vec<SheetRow> {
     if let Some(why) = &memory.error {
         rows.push(pair("Couldn't change it", why, 2));
     }
+    if !kept.proposals.is_empty() {
+        rows.push(heading("Suggested"));
+        rows.push(note(
+            "From what was said in a session and the agent didn't keep. Nothing here reaches \
+             a session until you keep it.",
+        ));
+        for (index, proposal) in kept.proposals.iter().enumerate() {
+            proposal_rows(app, index, proposal, &kept.notes, &mut rows);
+        }
+    }
     let (project, user): (Vec<_>, Vec<_>) = kept
         .notes
         .iter()
@@ -54,6 +65,84 @@ pub(super) fn memory_rows(app: &App) -> Vec<SheetRow> {
     rows.push(heading("All your sessions"));
     note_rows(app, &user, "None yet.", &mut rows);
     rows
+}
+
+/// What a proposed note is called, by its kind.
+fn kind_name(kind: ProposalKind) -> &'static str {
+    match kind {
+        ProposalKind::Correction => "A correction you gave",
+        ProposalKind::Decision => "A decision",
+        ProposalKind::Pitfall => "Something that went wrong",
+    }
+}
+
+/// The rows of proposed note `proposal`, the one at `index`: one row with
+/// a Review button, or, while it is looked at, its words to keep, where
+/// it comes from, the note it would replace, and Dismiss.
+fn proposal_rows(
+    app: &App,
+    index: usize,
+    proposal: &Proposal,
+    notes: &[KeptNote],
+    rows: &mut Vec<SheetRow>,
+) {
+    let from = proposal
+        .source
+        .title
+        .as_deref()
+        .map_or_else(|| "From a session".to_owned(), |t| format!("From “{t}”"));
+    let replaced = proposal.replaces.as_deref().and_then(|old| {
+        notes
+            .iter()
+            .find(|n| n.id == old && n.superseded_by.is_none())
+            .map(|n| n.text.as_str())
+    });
+    let scope = match proposal.scope {
+        NoteScope::Project => "for this project",
+        NoteScope::User => "for all your sessions",
+    };
+    if app.sheets.memory.reviewing.as_deref() != Some(proposal.id.as_str()) {
+        let mut value = format!("{}\n{from} · {scope}", proposal.text);
+        if let Some(old) = replaced {
+            let _ = write!(value, " · would replace “{old}”");
+        }
+        rows.push(SheetRow {
+            kind: LINED,
+            name: kind_name(proposal.kind).into(),
+            hint: if replaced.is_some() {
+                "Replaces a note"
+            } else {
+                ""
+            }
+            .into(),
+            value: value.into(),
+            action: "Review".into(),
+            setting: window::REVIEW_PROPOSAL,
+            choice: int(index),
+            ..SheetRow::default()
+        });
+        return;
+    }
+    let mut text = field(Field::NoteText, "Note", &proposal.text, "What to remember");
+    text.action = "Keep".into();
+    text.saves = false;
+    rows.push(text);
+    let mut source = pair(&from, &format!("“{}”", proposal.excerpt), 3);
+    source.action = "Open".into();
+    source.setting = window::OPEN_PROPOSAL_SESSION;
+    rows.push(source);
+    if let Some(old) = replaced {
+        rows.push(pair("Keeping it replaces", &format!("“{old}”"), 4));
+    }
+    let mut dismiss = pair("Dismiss this suggestion", "It won't be suggested again", 3);
+    dismiss.action = "Dismiss".into();
+    dismiss.setting = window::DISMISS_PROPOSAL;
+    dismiss.risky = true;
+    rows.push(dismiss);
+    let mut cancel = pair("Decide later", "", 3);
+    cancel.action = "Cancel".into();
+    cancel.setting = window::CANCEL_NOTE;
+    rows.push(cancel);
 }
 
 /// `notes`, numbered by their place in the loaded list, or `empty`.

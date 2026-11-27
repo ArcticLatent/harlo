@@ -65,6 +65,9 @@ fn file_and_harlo_routes() -> Router<Arc<Server>> {
         .route("/harlo/memory", get(memory).put(set_memory))
         .route("/harlo/notes", get(notes))
         .route("/harlo/notes/{id}", patch(correct_note).delete(forget_note))
+        .route("/harlo/proposals", get(proposals))
+        .route("/harlo/proposals/{id}", delete(dismiss_proposal))
+        .route("/harlo/proposals/{id}/accept", post(accept_proposal))
         .route("/harlo/plugins", get(plugins).post(add_plugin))
         .route("/harlo/plugin-gallery", get(plugin_gallery))
         .route(
@@ -323,6 +326,7 @@ async fn info(headers: HeaderMap) -> Answer {
         "paths": { "tmp": std::env::temp_dir() },
         "capabilities": {
             "server": "harlo", "persistentPty": false, "clientTools": true, "phone": true, "memory": true,
+            "proposals": true,
         },
     }))
 }
@@ -1487,6 +1491,33 @@ async fn correct_note(
 
 async fn forget_note(State(server): Shared, Path(id): Path<String>) -> Answer {
     server.forget_note(&id)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn proposals(State(server): Shared, Query(q): Params) -> Answer {
+    let waiting = server.proposals(q.get("projectID").map(String::as_str))?;
+    ok(json!({ "data": waiting }))
+}
+
+/// What a proposal is kept as, when the person changed its words.
+#[derive(Debug, Default, serde::Deserialize)]
+struct Accepted {
+    #[serde(default)]
+    text: Option<String>,
+}
+
+async fn accept_proposal(
+    State(server): Shared,
+    Path(id): Path<String>,
+    body: Option<axum::Json<Accepted>>,
+) -> Answer {
+    let text = body.and_then(|axum::Json(accepted)| accepted.text);
+    let note = server.accept_proposal(&id, text.as_deref())?;
+    ok(json!({ "data": note }))
+}
+
+async fn dismiss_proposal(State(server): Shared, Path(id): Path<String>) -> Answer {
+    server.dismiss_proposal(&id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

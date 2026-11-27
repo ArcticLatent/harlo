@@ -796,6 +796,15 @@ pub const FORGET_NOTE: i32 = 84;
 /// Settings → Memory: stop correcting a note.
 pub const CANCEL_NOTE: i32 = 85;
 
+/// Settings → Memory: look at the proposed note numbered by its item.
+pub const REVIEW_PROPOSAL: i32 = 103;
+
+/// Settings → Memory: turn down the proposed note being looked at.
+pub const DISMISS_PROPOSAL: i32 = 104;
+
+/// Settings → Memory: open the session the proposed note came from.
+pub const OPEN_PROPOSAL_SESSION: i32 = 105;
+
 /// Settings → General: look for a new Harlo now.
 pub const CHECK_UPDATE: i32 = 88;
 
@@ -1033,6 +1042,11 @@ fn settings_action(app: &App, number: i32, item: i32) -> Option<Message> {
         ))),
         FORGET_NOTE => Some(Message::Memory(app::MemoryEvent::Forget)),
         CANCEL_NOTE => Some(Message::Memory(app::MemoryEvent::Cancel)),
+        REVIEW_PROPOSAL => Some(Message::Memory(app::MemoryEvent::Review(
+            usize::try_from(item).ok()?,
+        ))),
+        DISMISS_PROPOSAL => Some(Message::Memory(app::MemoryEvent::Dismiss)),
+        OPEN_PROPOSAL_SESSION => Some(Message::Memory(app::MemoryEvent::OpenSource)),
         OPEN_PLUGIN..=ADD_PUBLISHED_PLUGIN => plugin_action(number, item),
         _ => claude_action_of(number).map(|action| Message::Claude(app::ClaudeEvent::Act(action))),
     }

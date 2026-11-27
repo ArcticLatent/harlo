@@ -1,10 +1,13 @@
 //! Settings → Memory: the notes the agent keeps between sessions, on
 //! Harlo's own server. Turned on or off for the whole server; each note
 //! shown with where it came from, to correct or forget.
+//!
+//! Notes the server proposes, from what the agent missed, wait here too:
+//! each is kept, with its words changed or not, or dismissed.
 
 // Rust guideline compliant 2026-10-09
 
-use harlo_core::server::{Client, Note as KeptNote};
+use harlo_core::server::{Client, Note as KeptNote, Proposal};
 
 use super::sheets::Load;
 use super::{App, Message};
@@ -19,6 +22,8 @@ pub struct Kept {
     pub on: bool,
     /// The user's notes and the current project's, oldest first.
     pub notes: Vec<KeptNote>,
+    /// The notes the server proposes for them, waiting for the person.
+    pub proposals: Vec<Proposal>,
 }
 
 /// Settings → Memory's state.
@@ -28,6 +33,8 @@ pub struct Memory {
     pub kept: Load<Kept>,
     /// The note being corrected, by ID.
     pub editing: Option<String>,
+    /// The proposed note being looked at, by ID.
+    pub reviewing: Option<String>,
     /// Why the last change failed, if it did.
     pub error: Option<String>,
 }
@@ -41,10 +48,17 @@ pub enum MemoryEvent {
     Toggle,
     /// A note's Edit button: the note at this place.
     Edit(usize),
-    /// Correcting a note was cancelled.
+    /// A proposed note's Review button: the proposal at this place.
+    Review(usize),
+    /// Correcting a note, or looking at a proposed one, was cancelled.
     Cancel,
-    /// The corrected text, from the field.
+    /// The text from the field: the note's corrected words, or the words
+    /// the proposed note is kept with.
     Save(String),
+    /// The proposed note being looked at is turned down.
+    Dismiss,
+    /// Open the session the proposed note being looked at came from.
+    OpenSource,
     /// The note being corrected is to be forgotten.
     Forget,
     /// A change was made, or failed; the notes load again.
@@ -74,14 +88,34 @@ impl App {
                 if let Load::Loaded(kept) = &memory.kept {
                     memory.editing = kept.notes.get(index).map(|n| n.id.clone());
                 }
+                memory.reviewing = None;
+                memory.error = None;
+                Task::none()
+            }
+            MemoryEvent::Review(index) => {
+                if let Load::Loaded(kept) = &memory.kept {
+                    memory.reviewing = kept.proposals.get(index).map(|p| p.id.clone());
+                }
+                memory.editing = None;
                 memory.error = None;
                 Task::none()
             }
             MemoryEvent::Cancel => {
                 memory.editing = None;
+                memory.reviewing = None;
                 Task::none()
             }
             MemoryEvent::Save(text) => {
+                if let Some(id) = memory.reviewing.clone() {
+                    if text.trim().is_empty() {
+                        memory.error = Some("A note needs text; Dismiss turns it down.".to_owned());
+                        return Task::none();
+                    }
+                    memory.reviewing = None;
+                    return self.change(move |client| async move {
+                        client.accept_proposal(&id, &text).await
+                    });
+                }
                 let Some(id) = memory.editing.clone() else {
                     return Task::none();
                 };
@@ -91,6 +125,29 @@ impl App {
                 }
                 memory.editing = None;
                 self.change(move |client| async move { client.correct_note(&id, &text).await })
+            }
+            MemoryEvent::Dismiss => {
+                let Some(id) = memory.reviewing.take() else {
+                    return Task::none();
+                };
+                self.change(move |client| async move { client.dismiss_proposal(&id).await })
+            }
+            MemoryEvent::OpenSource => {
+                let source = match (&memory.kept, &memory.reviewing) {
+                    (Load::Loaded(kept), Some(id)) => kept
+                        .proposals
+                        .iter()
+                        .find(|p| p.id == *id)
+                        .map(|p| p.source.session.clone()),
+                    _ => None,
+                };
+                let Some(session) = source else {
+                    return Task::none();
+                };
+                Task::batch([
+                    Task::done(Message::Sheet(super::SheetEvent::Close)),
+                    Task::done(Message::OpenSession(session)),
+                ])
             }
             MemoryEvent::Forget => {
                 let Some(id) = memory.editing.take() else {
@@ -126,10 +183,20 @@ impl App {
                     .notes(project.as_deref())
                     .await
                     .map_err(|e| e.to_string())?;
+                // (An older server keeps notes and proposes none.)
+                let proposals = if client.proposes_notes().await.map_err(|e| e.to_string())? {
+                    client
+                        .note_proposals(project.as_deref())
+                        .await
+                        .map_err(|e| e.to_string())?
+                } else {
+                    Vec::new()
+                };
                 Ok(Kept {
                     supported: true,
                     on,
                     notes,
+                    proposals,
                 })
             },
             |result| Message::Memory(MemoryEvent::Loaded(result)),

@@ -28,6 +28,7 @@ mod oauth;
 mod phone;
 mod plugins;
 mod projects;
+mod proposals;
 mod pty;
 mod search;
 mod server;

@@ -546,3 +546,107 @@ async fn people_correct_and_forget_notes_and_off_means_none() {
     let system = system_prompt_for(&sandbox, "say Hello from D.");
     assert!(!system.contains("Cache in Postgres"), "{system}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_note_past_the_prompts_room_is_still_found_with_its_source_and_what_it_replaced() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let a_dir = sandbox.project();
+    let folder = a_dir.to_str().expect("utf-8");
+    call(
+        &sandbox,
+        reqwest::Method::PUT,
+        "/harlo/memory",
+        Some(json!({ "enabled": true })),
+    )
+    .await;
+
+    // A decision, then its reversal, kept in one session.
+    let a = client.create_session(folder).await.expect("A");
+    turn(
+        &client,
+        &a.id,
+        r#"tool remember {"text":"Deploys go through the staging box first."} ;; say Kept."#,
+    )
+    .await;
+    let old = notes(&sandbox, &a.project_id).await[0]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    let reverse = format!(
+        r#"tool remember {{"text":"Deploys go straight to production: the staging box was retired.","replaces":"{old}"}} ;; say Changed."#
+    );
+    turn(&client, &a.id, &reverse).await;
+    let kept = notes(&sandbox, &a.project_id).await;
+    let new = kept[1].clone();
+    let new_id = new["id"].as_str().expect("id").to_owned();
+
+    // Newer notes, more than the prompt has room for.
+    let b = client.create_session(folder).await.expect("B");
+    for n in 0..10 {
+        let filler = format!("Filler decision {n}: {}", "padding ".repeat(115));
+        turn(
+            &client,
+            &b.id,
+            &format!(r#"tool remember {{"text":"{filler}"}} ;; say Kept {n}."#),
+        )
+        .await;
+    }
+
+    // A new session's prompt has the newest notes and says some are left
+    // out; the reversal is one of them.
+    let c = client.create_session(folder).await.expect("C");
+    turn(
+        &client,
+        &c.id,
+        r#"tool search_sessions {"query":"deploys staging"} ;; say Found."#,
+    )
+    .await;
+    let system = system_prompt_for(&sandbox, "tool search_sessions");
+    assert!(system.contains("Filler decision 9"), "{system}");
+    assert!(
+        system.contains("older notes aren't shown here; search_sessions finds them."),
+        "{system}"
+    );
+    assert!(
+        !system.contains("straight to production") && !system.contains(&new_id),
+        "{system}"
+    );
+
+    // Searching finds it, with the session and message it came from, and
+    // the note it replaced, marked as replaced by it.
+    let found = tool_outputs(&sandbox, &c.id).await.join("\n");
+    let source = &new["source"];
+    assert_eq!(source["session"], a.id.as_str());
+    let (session, message) = (
+        source["session"].as_str().expect("session"),
+        source["message"].as_str().expect("message"),
+    );
+    assert!(
+        found.contains(&format!(
+            "- [{new_id}] Deploys go straight to production: the staging box was retired."
+        )),
+        "{found}"
+    );
+    assert!(
+        found.contains(&format!("({session}, message {message})")),
+        "{found}"
+    );
+    assert!(
+        found.contains(&format!(
+            "- [{old}] (replaced by {new_id}) Deploys go through the staging box first."
+        )),
+        "{found}"
+    );
+
+    // The message it names is the step that kept it, read with the
+    // person's words before it.
+    turn(
+        &client,
+        &c.id,
+        &format!(r#"tool search_sessions {{"message":"{message}"}} ;; say Read."#),
+    )
+    .await;
+    let read = tool_outputs(&sandbox, &c.id).await.join("\n");
+    assert!(read.contains("the staging box was retired"), "{read}");
+}
