@@ -429,11 +429,7 @@ pub(crate) async fn stream(
             Wire::Responses => crate::responses::take(&mut reply, &chunk, on)?,
             _ => {
                 if let Some(e) = chunk.get("error").filter(|e| !e.is_null()) {
-                    let said = e["message"]
-                        .as_str()
-                        .or_else(|| e.as_str())
-                        .unwrap_or("the request failed");
-                    return Err(reported(said));
+                    return Err(reported_in_chat(e));
                 }
                 reply.take(&chunk, on);
                 true
@@ -454,9 +450,49 @@ pub(crate) async fn stream(
     Ok(reply.finish(on))
 }
 
-/// An error the model's server reported in its stream.
-pub(crate) fn reported(said: &str) -> Error {
-    Error::provider(format!("The model's server reported an error: {said}"))
+/// The error `e` a chat completions stream carried in place of a chunk.
+fn reported_in_chat(e: &Value) -> Error {
+    let said = e["message"]
+        .as_str()
+        .or_else(|| e.as_str())
+        .unwrap_or("the request failed");
+    reported(e["type"].as_str().or_else(|| e["code"].as_str()), said)
+}
+
+/// What a model's server names, in the type or code of an error it
+/// reports in its stream, a failure on its own side that may pass: it is
+/// busy, limited, or broke. In lower case; a name that holds one counts.
+///
+/// These are the names the servers of `OpenAI` and Anthropic use
+/// (`server_error`, `rate_limit_exceeded`, `overloaded_error`,
+/// `api_error`, `timeout_error`) and what others built like them say.
+const PASSING: &[&str] = &[
+    "overloaded",
+    "server_error",
+    "api_error",
+    "internal",
+    "rate_limit",
+    "timeout",
+    "unavailable",
+];
+
+/// An error the model's server reported in its stream, of the type or
+/// code `kind` when it gave one, in its words `said`.
+///
+/// A server that is busy or failed on its side says so here as often as
+/// with an HTTP status, having already answered 200. Such an error may
+/// pass when the model is asked again; any other won't. A server that
+/// names no kind and says it is overloaded counts as busy.
+pub(crate) fn reported(kind: Option<&str>, said: &str) -> Error {
+    let message = format!("The model's server reported an error: {said}");
+    let kind = kind.unwrap_or_default().to_lowercase();
+    let passes = PASSING.iter().any(|name| kind.contains(name))
+        || said.to_lowercase().contains("overloaded");
+    if passes {
+        Error::passing(message)
+    } else {
+        Error::provider(message)
+    }
 }
 
 /// Why a server refused, for a person.
@@ -712,6 +748,37 @@ fn tokens(u: &Value) -> Tokens {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_in_the_stream_may_pass_only_when_the_server_failed_on_its_side() {
+        for kind in [
+            "overloaded_error",
+            "server_error",
+            "api_error",
+            "rate_limit_exceeded",
+            "timeout_error",
+            "service_unavailable",
+            "Internal_Server_Error",
+        ] {
+            assert!(reported(Some(kind), "failed").is_retryable(), "{kind}");
+        }
+        // Named by no kind, but said in words.
+        let busy = "Our servers are currently overloaded. Please try again later.";
+        assert!(reported(None, busy).is_retryable());
+        for kind in [
+            "invalid_request_error",
+            "authentication_error",
+            "context_length_exceeded",
+            "insufficient_quota",
+        ] {
+            assert!(!reported(Some(kind), "failed").is_retryable(), "{kind}");
+        }
+        assert!(!reported(None, "the request failed").is_retryable());
+        assert_eq!(
+            reported(Some("server_error"), "It broke.").to_string(),
+            "The model's server reported an error: It broke."
+        );
+    }
 
     /// A model's server on this computer that counts the connections
     /// opened to it. It answers each request with a short reply, and sends

@@ -76,6 +76,15 @@ impl Error {
         }
     }
 
+    /// The model's server said, in its stream, that it failed on its own
+    /// side: asking again may work.
+    pub(crate) fn passing(message: impl Into<String>) -> Self {
+        Self {
+            retryable: true,
+            ..Self::new(Kind::Provider, message)
+        }
+    }
+
     /// The model's server refused with `status`; a timeout, a conflict, a
     /// rate limit or a server error may pass when asked again.
     pub(crate) fn refused(status: u16, message: impl Into<String>, wait: Option<Duration>) -> Self {

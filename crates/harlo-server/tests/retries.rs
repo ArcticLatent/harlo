@@ -66,3 +66,61 @@ async fn a_refused_request_fails_without_a_retry() {
     assert!(!retried, "a bad request isn't asked again");
     assert_eq!(support::turn_requests(sandbox.dir.path()).len(), 1);
 }
+
+/// A server that answers 200 and then says in its stream that it is
+/// overloaded is busy all the same: the model is asked again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_that_reports_being_overloaded_in_its_stream_is_asked_again() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(sandbox.project().to_str().expect("utf-8"))
+        .await
+        .expect("session");
+    let mut events = client.events().await.expect("events");
+    let script = "flaky 1 stream overloaded_error Our servers are busy | say recovered.";
+    client
+        .prompt(&session.id, &Prompt::new(script, Delivery::Steer))
+        .await
+        .expect("prompt");
+    let (attempt, error) = until(&mut events, |kind| match kind {
+        EventKind::RetryScheduled { attempt, error, .. } => Some((attempt, error)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(attempt, 2);
+    assert!(error.contains("Our servers are busy"), "{error}");
+    let outcome = until(&mut events, |kind| match kind {
+        EventKind::Done { outcome, .. } => Some(outcome),
+        _ => None,
+    })
+    .await;
+    assert_eq!(outcome, "succeeded");
+    let requests = support::turn_requests(sandbox.dir.path());
+    assert_eq!(requests.len(), 2, "the first try and the retry");
+}
+
+/// An error in the stream that asking again won't change fails at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_refused_in_its_stream_fails_without_a_retry() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let session = client
+        .create_session(sandbox.project().to_str().expect("utf-8"))
+        .await
+        .expect("session");
+    let mut events = client.events().await.expect("events");
+    let script = "fail stream invalid_request_error That model takes no pictures";
+    client
+        .prompt(&session.id, &Prompt::new(script, Delivery::Steer))
+        .await
+        .expect("prompt");
+    let outcome = until(&mut events, |kind| match kind {
+        EventKind::Done { outcome, .. } => Some(outcome),
+        _ => None,
+    })
+    .await;
+    assert_eq!(outcome, "failed");
+    let requests = support::turn_requests(sandbox.dir.path());
+    assert_eq!(requests.len(), 1, "asked once");
+}

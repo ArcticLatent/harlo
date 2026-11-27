@@ -24,7 +24,9 @@ by " | " and run in order:
     tool <name> <json>    a tool call (ends the step with tool_calls)
     long <n>              n blocks of Markdown: prose, a code block, a list
     pace <ms>             delay between streamed chunks from here on
-    fail <code> <text>    an HTTP error with that status and message instead
+    fail <code> <text>    an HTTP error with that status and message instead;
+                          with `stream <kind>` for the code, an error of that
+                          kind reported inside a stream that began with 200
     flaky <n> <code> <text>  that error for the step's first n requests, then
                           the rest of the step
 
@@ -344,6 +346,10 @@ class Handler(BaseHTTPRequestHandler):
             parts = [(w, r) for w, r in parts if w != "flaky"]
         if failed is not None:
             code, _, message = failed.partition(" ")
+            if code == "stream":
+                kind, _, message = message.partition(" ")
+                self.stream_error(wire, kind, message or "failed")
+                return
             self.send_json(int(code), {"error": {"message": message or "failed",
                                                  "type": "invalid_request_error"}})
             return
@@ -355,6 +361,19 @@ class Handler(BaseHTTPRequestHandler):
             self.stream(parts)
         else:
             self.plain(parts)
+
+    def stream_error(self, wire, kind, message):
+        """An error reported inside the stream, as each wire's servers word it."""
+        self.open_stream()
+        try:
+            if wire == "messages":
+                self.event({"type": "error", "error": {"type": kind, "message": message}})
+            elif wire == "responses":
+                self.event({"type": "response.failed", "response": {"error": {"code": kind, "message": message}}})
+            else:
+                self.send({"error": {"type": kind, "message": message}})
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def plain(self, parts):
         text = "".join(rest for word, rest in parts if word == "say")

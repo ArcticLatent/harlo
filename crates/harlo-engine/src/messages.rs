@@ -297,7 +297,7 @@ pub(crate) fn take(
             let said = event["error"]["message"]
                 .as_str()
                 .unwrap_or("the request failed");
-            return Err(chat::reported(said));
+            return Err(chat::reported(event["error"]["type"].as_str(), said));
         }
         _ => {}
     }
@@ -313,6 +313,20 @@ pub(crate) mod tests {
         provider: "anthropic",
         model: "claude",
     };
+
+    #[test]
+    fn an_overloaded_server_may_pass_and_a_refusal_does_not() {
+        let mut reply = Assembler::default();
+        let mut on = |_| {};
+        let busy = json!({ "type": "error",
+            "error": { "type": "overloaded_error", "message": "Overloaded" } });
+        let error = take(&mut reply, &busy, &mut on).expect_err("an error");
+        assert!(error.is_retryable(), "{error}");
+        let wrong = json!({ "type": "error",
+            "error": { "type": "invalid_request_error", "message": "No." } });
+        let error = take(&mut reply, &wrong, &mut on).expect_err("an error");
+        assert!(!error.is_retryable(), "{error}");
+    }
 
     #[test]
     fn a_streamed_reply_keeps_its_signed_thinking_text_and_call() {

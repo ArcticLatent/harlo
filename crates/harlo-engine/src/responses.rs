@@ -327,17 +327,21 @@ pub(crate) fn take(
             return Ok(false);
         }
         Some("response.failed") => {
-            let said = event["response"]["error"]["message"]
-                .as_str()
-                .unwrap_or("the request failed");
-            return Err(chat::reported(said));
+            let error = &event["response"]["error"];
+            let said = error["message"].as_str().unwrap_or("the request failed");
+            let kind = error["code"].as_str().or_else(|| error["type"].as_str());
+            return Err(chat::reported(kind, said));
         }
         Some("error") => {
             let said = event["message"]
                 .as_str()
                 .or_else(|| event["error"]["message"].as_str())
                 .unwrap_or("the request failed");
-            return Err(chat::reported(said));
+            let kind = event["code"]
+                .as_str()
+                .or_else(|| event["error"]["code"].as_str())
+                .or_else(|| event["error"]["type"].as_str());
+            return Err(chat::reported(kind, said));
         }
         _ => {}
     }
@@ -354,6 +358,24 @@ mod tests {
         provider: "openai",
         model: "gpt",
     };
+
+    #[test]
+    fn a_failure_the_server_reports_is_classed_by_its_code() {
+        let mut reply = Assembler::default();
+        let mut on = |_| {};
+        let ended = |event: Value, reply: &mut Assembler, on: &mut (dyn FnMut(Piece) + Send)| {
+            take(reply, &event, on).expect_err("an error")
+        };
+        let busy = json!({ "type": "response.failed", "response": { "error": {
+            "code": "server_error", "message": "Our servers are currently overloaded." } } });
+        assert!(ended(busy, &mut reply, &mut on).is_retryable());
+        let limited =
+            json!({ "type": "error", "code": "rate_limit_exceeded", "message": "Slow down." });
+        assert!(ended(limited, &mut reply, &mut on).is_retryable());
+        let wrong = json!({ "type": "response.failed", "response": { "error": {
+            "code": "invalid_prompt", "message": "No." } } });
+        assert!(!ended(wrong, &mut reply, &mut on).is_retryable());
+    }
 
     #[test]
     fn a_streamed_reply_keeps_reasoning_text_and_calls() {
