@@ -252,10 +252,15 @@ impl<G: Gate> Catalog for WithProject<'_, G> {
     }
 
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a> {
-        if namespace == NAMESPACE {
-            return Box::pin(self.own_call(self.listed.as_ref(), tool, args));
-        }
+        Box::pin(async move { Ok(self.call_shown(namespace, tool, args).await?.0) })
+    }
+
+    fn call_shown<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {
         Box::pin(async move {
+            if namespace == NAMESPACE {
+                let value = self.own_call(self.listed.as_ref(), tool, args).await?;
+                return Ok((value, Vec::new()));
+            }
             self.admitted(namespace, tool, &args).await?;
             self.inner.call_within(namespace, tool, args, self).await
         })

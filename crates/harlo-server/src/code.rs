@@ -109,21 +109,24 @@ impl ServerCatalog {
     }
 
     /// Runs `tool` of `namespace`, which may call the session's own tools
-    /// through `tools`.
+    /// through `tools`, and returns its answer with the pictures it came
+    /// with.
     async fn called(
         &self,
         namespace: &str,
         tool: &str,
         args: Value,
         tools: Option<&dyn harlo_engine::codemode::SessionTools>,
-    ) -> Result<Value, String> {
+    ) -> Result<(Value, Vec<harlo_engine::attachment::File>), String> {
         match namespace {
-            "automation" => self.automation(tool, args),
+            "automation" => Ok((self.automation(tool, args)?, Vec::new())),
             other => {
                 let session = self.session.as_deref();
-                match crate::mcp::call(&self.links, other, tool, args.clone(), session).await {
+                let seen =
+                    crate::mcp::call_seen(&self.links, other, tool, args.clone(), session).await;
+                match seen {
                     Some(answer) => answer,
-                    None => self.plugin(other, tool, args, tools).await,
+                    None => Ok((self.plugin(other, tool, args, tools).await?, Vec::new())),
                 }
             }
         }
@@ -184,7 +187,7 @@ impl Catalog for ServerCatalog {
     }
 
     fn call<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Answer<'a> {
-        Box::pin(self.called(namespace, tool, args, None))
+        Box::pin(async move { Ok(self.called(namespace, tool, args, None).await?.0) })
     }
 
     fn reaches_session(&self) -> bool {
@@ -200,7 +203,7 @@ impl Catalog for ServerCatalog {
         tool: &'a str,
         args: Value,
         session: &'a dyn harlo_engine::codemode::SessionTools,
-    ) -> Answer<'a> {
+    ) -> harlo_engine::codemode::Seen<'a> {
         Box::pin(self.called(namespace, tool, args, Some(session)))
     }
 
@@ -210,21 +213,7 @@ impl Catalog for ServerCatalog {
         tool: &'a str,
         args: Value,
     ) -> harlo_engine::codemode::Seen<'a> {
-        Box::pin(async move {
-            match namespace {
-                "automation" => Ok((self.automation(tool, args)?, Vec::new())),
-                other => {
-                    let session = self.session.as_deref();
-                    let seen =
-                        crate::mcp::call_seen(&self.links, other, tool, args.clone(), session)
-                            .await;
-                    match seen {
-                        Some(answer) => answer,
-                        None => Ok((self.plugin(other, tool, args, None).await?, Vec::new())),
-                    }
-                }
-            }
-        })
+        Box::pin(self.called(namespace, tool, args, None))
     }
 
     fn progress(&self, message: &str, call: &str, calls: &[Call]) {

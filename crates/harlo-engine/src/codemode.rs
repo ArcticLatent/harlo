@@ -5,7 +5,9 @@
 //! The script runs in `QuickJS` on a thread of its own, with a memory cap and
 //! a time limit. Each tool call goes back to the async side, where the
 //! [`Catalog`] runs it; the script waits for the answer. What it returns is
-//! the result, followed by what it logged.
+//! the result, followed by what it logged. Pictures its calls answered with
+//! can't pass through the script, which holds values only; the last few go
+//! to the model beside the result.
 
 // Rust guideline compliant 2026-10-09
 
@@ -23,6 +25,10 @@ use tokio_util::sync::CancellationToken;
 
 /// The most a script's result and logs may hold, in bytes.
 pub const OUTPUT_CAP: usize = 32 * 1024;
+
+/// The most pictures a script's result brings the model, the last its
+/// calls answered with: each costs about as much as a page of text.
+pub const PICTURES: usize = 4;
 
 /// The most memory a script may use.
 const MEMORY: usize = 64 * 1024 * 1024;
@@ -128,21 +134,28 @@ pub trait Catalog: Send + Sync + std::fmt::Debug {
     }
 
     /// Runs `tool` of `namespace` with `args` for a script of a session,
-    /// whose own tools the tool may call through `session`.
+    /// whose own tools the tool may call through `session`, and returns the
+    /// pictures it answered with too.
     fn call_within<'a>(
         &'a self,
         namespace: &'a str,
         tool: &'a str,
         args: Value,
         _session: &'a dyn SessionTools,
-    ) -> Answer<'a> {
-        self.call(namespace, tool, args)
+    ) -> Seen<'a> {
+        self.call_seen(namespace, tool, args)
     }
 
     /// Runs `tool` of `namespace` with `args` for a call the model made on
-    /// its own, and returns the pictures it answered with too. A script's
-    /// calls get values only.
+    /// its own, and returns the pictures it answered with too.
     fn call_seen<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {
+        Box::pin(async move { Ok((self.call(namespace, tool, args).await?, Vec::new())) })
+    }
+
+    /// Runs `tool` of `namespace` with `args` for a script, and returns the
+    /// pictures it answered with too: the script gets the value, the model
+    /// the pictures.
+    fn call_shown<'a>(&'a self, namespace: &'a str, tool: &'a str, args: Value) -> Seen<'a> {
         Box::pin(async move { Ok((self.call(namespace, tool, args).await?, Vec::new())) })
     }
 
@@ -179,11 +192,18 @@ pub struct Ran {
     pub logs: Vec<String>,
     /// The tool calls it made.
     pub calls: Vec<Call>,
+    /// The pictures its calls answered with, for the model to look at: the
+    /// last [`PICTURES`] of them.
+    pub pictures: Vec<crate::attachment::File>,
+    /// How many earlier pictures were left out.
+    pub unshown: usize,
 }
 
 impl Ran {
     /// The result and logs as text for the model, cut to [`OUTPUT_CAP`];
     /// and whether some was cut.
+    ///
+    /// It says so when pictures were left out.
     #[must_use]
     pub fn text(&self) -> (String, bool) {
         let mut text = match &self.value {
@@ -194,16 +214,43 @@ impl Ran {
         if !self.logs.is_empty() {
             let _ = write!(text, "\n\nLogs:\n{}", self.logs.join("\n"));
         }
-        if text.len() <= OUTPUT_CAP {
-            return (text, false);
+        let cut = text.len() > OUTPUT_CAP;
+        if cut {
+            let mut end = OUTPUT_CAP;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            text.push_str("\n… (cut at 32 KB)");
         }
-        let mut end = OUTPUT_CAP;
-        while !text.is_char_boundary(end) {
-            end -= 1;
+        if self.unshown > 0 {
+            let _ = write!(
+                text,
+                "\n\n(The script's calls answered with {} pictures; the last {} are shown.)",
+                self.unshown + self.pictures.len(),
+                self.pictures.len()
+            );
         }
-        text.truncate(end);
-        text.push_str("\n… (cut at 32 KB)");
-        (text, true)
+        (text, cut)
+    }
+
+    /// A script that ended with `value` after `calls`, which answered
+    /// with `pictures`, oldest first.
+    fn ended(
+        value: Result<Option<Value>, String>,
+        logs: Vec<String>,
+        calls: Vec<Call>,
+        mut pictures: Vec<crate::attachment::File>,
+    ) -> Self {
+        let unshown = pictures.len().saturating_sub(PICTURES);
+        pictures.drain(..unshown);
+        Self {
+            value,
+            logs,
+            calls,
+            pictures,
+            unshown,
+        }
     }
 }
 
@@ -497,6 +544,7 @@ pub async fn run(
     );
     std::thread::spawn(move || script_thread(&code, &input, namespaces, limit, &flag, &out));
     let mut calls: Vec<Call> = Vec::new();
+    let mut pictures = Vec::new();
     loop {
         let got = tokio::select! {
             got = from_script.recv() => got,
@@ -516,8 +564,12 @@ pub async fn run(
                     Err("The run was stopped.".to_owned())
                 } else {
                     catalog
-                        .call(&request.namespace, &request.tool, request.args)
+                        .call_shown(&request.namespace, &request.tool, request.args)
                         .await
+                        .map(|(value, seen)| {
+                            pictures.extend(seen);
+                            value
+                        })
                 };
                 if let Some(last) = calls.last_mut() {
                     let status = if answer.is_ok() { "completed" } else { "error" };
@@ -526,13 +578,12 @@ pub async fn run(
                 progress(&calls);
                 let _ = request.reply.send(answer);
             }
-            Some(FromScript::Ended(value, logs)) => return Ran { value, logs, calls },
+            Some(FromScript::Ended(value, logs)) => {
+                return Ran::ended(value, logs, calls, pictures);
+            }
             None => {
-                return Ran {
-                    value: Err("The script's thread ended unexpectedly.".to_owned()),
-                    logs: Vec::new(),
-                    calls,
-                };
+                let why = "The script's thread ended unexpectedly.".to_owned();
+                return Ran::ended(Err(why), Vec::new(), calls, pictures);
             }
         }
     }
@@ -656,6 +707,75 @@ mod tests {
         );
     }
 
+    /// A catalog whose one tool answers with a number and a picture of it.
+    #[derive(Debug)]
+    struct Camera;
+
+    impl Catalog for Camera {
+        fn namespaces(&self) -> Vec<Namespace> {
+            vec![Namespace {
+                name: "camera".to_owned(),
+                description: "Takes pictures.".to_owned(),
+                tools: vec![ToolInfo {
+                    name: "snap".to_owned(),
+                    description: "Takes picture n.".to_owned(),
+                    signature: "({n: number}): number".to_owned(),
+                }],
+            }]
+        }
+
+        fn call<'a>(&'a self, _namespace: &'a str, _tool: &'a str, args: Value) -> Answer<'a> {
+            Box::pin(async move { Ok(args["n"].clone()) })
+        }
+
+        fn call_shown<'a>(&'a self, _namespace: &'a str, _tool: &'a str, args: Value) -> Seen<'a> {
+            Box::pin(async move {
+                let picture = crate::attachment::File {
+                    data: format!("picture-{}", args["n"]),
+                    mime: "image/png".to_owned(),
+                    source: json!({ "type": "inline" }),
+                    name: None,
+                    mention: None,
+                };
+                Ok((args["n"].clone(), vec![picture]))
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_scripts_calls_bring_their_last_pictures() {
+        let snap = |code: &'static str| async move {
+            run(
+                &Camera,
+                code,
+                &json!({}),
+                Duration::from_secs(5),
+                &CancellationToken::new(),
+                &|_| {},
+            )
+            .await
+        };
+        // The script gets the values; the pictures go beside its result.
+        let ran =
+            snap("return [await tools.camera.snap({n: 1}), await tools.camera.snap({n: 2})]").await;
+        assert_eq!(ran.value, Ok(Some(json!([1, 2]))));
+        let shown: Vec<&str> = ran.pictures.iter().map(|p| p.data.as_str()).collect();
+        assert_eq!(shown, ["picture-1", "picture-2"]);
+        assert_eq!(ran.text(), ("[1,2]".to_owned(), false));
+
+        // More than the model is shown: the last ones, and the text says so.
+        let ran =
+            snap("for (let n = 1; n <= 6; n++) await tools.camera.snap({n}); return 'six'").await;
+        let shown: Vec<&str> = ran.pictures.iter().map(|p| p.data.as_str()).collect();
+        assert_eq!(shown, ["picture-3", "picture-4", "picture-5", "picture-6"]);
+        assert_eq!(ran.unshown, 2);
+        let (text, _) = ran.text();
+        assert!(
+            text.ends_with("(The script's calls answered with 6 pictures; the last 4 are shown.)"),
+            "{text}"
+        );
+    }
+
     /// A catalog whose one tool takes a while to answer.
     #[derive(Debug)]
     struct Slow(Duration);
@@ -732,12 +852,7 @@ mod tests {
             ran.value,
             Ok(Some(json!({ "runs": 2, "state": null, "same": true })))
         );
-        let (text, cut) = Ran {
-            value: Ok(None),
-            logs: vec!["x".into()],
-            calls: Vec::new(),
-        }
-        .text();
+        let (text, cut) = Ran::ended(Ok(None), vec!["x".into()], Vec::new(), Vec::new()).text();
         assert_eq!(
             (text.as_str(), cut),
             ("Done, with no result.\n\nLogs:\nx", false)

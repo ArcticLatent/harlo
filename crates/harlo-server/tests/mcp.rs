@@ -459,6 +459,50 @@ async fn resources_that_are_pictures_templates_or_long() {
     panic!("the picture wasn't sent: {}", last_request(&sandbox));
 }
 
+/// A picture a script's call answered with reaches the model beside the
+/// script's result; of many, the last few do, and the result says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scripts_pictures_reach_the_model() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let project = sandbox.project();
+    let folder = project.to_str().expect("utf-8").to_owned();
+    let notes = sandbox.dir.path().join("notes.py");
+    std::fs::write(&notes, NOTES).expect("notes.py");
+    let config = serde_json::json!({ "mcp": { "servers": {
+        "notes": { "type": "local", "command": ["python3", "-I", notes] },
+    } } });
+    std::fs::write(project.join("harlo.json"), config.to_string()).expect("config");
+    support::allow_project_settings(&client, &folder).await;
+    stands(&sandbox, &folder, "notes", |s| *s == McpStatus::Connected).await;
+    let pictures = |sandbox: &Sandbox| last_request(sandbox).matches("aGVsbG8=").count();
+
+    let session = client.create_session(&folder).await.expect("session");
+    let code = serde_json::json!({
+        "code": "return await tools.notes.read_resource({uri: 'notes://pic'})" });
+    run_until(
+        &sandbox,
+        &session.id,
+        &format!("tool execute {code} ;; say done"),
+        "(image image/png)",
+    )
+    .await;
+    assert_eq!(pictures(&sandbox), 1, "{}", last_request(&sandbox));
+
+    let session = client.create_session(&folder).await.expect("session");
+    let code = serde_json::json!({
+        "code": "for (let n = 0; n < 6; n++) await tools.notes.read_resource({uri: 'notes://pic'}); \
+                 return 'read'" });
+    run_until(
+        &sandbox,
+        &session.id,
+        &format!("tool execute {code} ;; say done"),
+        "(The script's calls answered with 6 pictures; the last 4 are shown.)",
+    )
+    .await;
+    assert_eq!(pictures(&sandbox), 4, "{}", last_request(&sandbox));
+}
+
 /// A stdio MCP server with one tool, `echo`, that stops when told `die`.
 const FRAIL: &str = r#"import json, sys
 for line in sys.stdin:

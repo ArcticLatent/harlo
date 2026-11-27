@@ -228,11 +228,6 @@ impl Link {
         state.templates = templates;
     }
 
-    /// Calls tool `tool` with `args`, for session `session`.
-    async fn call(&self, tool: &str, args: Value, session: Option<&str>) -> Result<Value, String> {
-        answer(&self.result(tool, args, session).await?)
-    }
-
     /// Calls tool `tool` with `args`, for session `session`; returns the
     /// server's result as it sent it.
     async fn result(
@@ -540,18 +535,6 @@ pub(crate) async fn call_seen(
         Err(e) => return Some(Err(e)),
     };
     Some(answer(&result).map(|value| (value, pictures(&result))))
-}
-
-/// Calls tool `tool` of server `namespace` among `links`.
-pub(crate) async fn call(
-    links: &[Arc<Link>],
-    namespace: &str,
-    tool: &str,
-    args: Value,
-    session: Option<&str>,
-) -> Option<Result<Value, String>> {
-    let link = links.iter().find(|l| l.name == namespace)?;
-    Some(link.call(tool, args, session).await)
 }
 
 /// Follows a server's notices that its lists changed.

@@ -1149,7 +1149,7 @@ async fn execute(
             .cloned()
             .unwrap_or_default(),
         changed: Vec::new(),
-        pictures: Vec::new(),
+        pictures: ran.pictures,
     })
 }
 
