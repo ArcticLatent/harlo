@@ -475,11 +475,24 @@ impl Presenter {
             return;
         };
         state.set_picker(picker.index());
-        sync(
-            &self.menu,
+        // The finder's rows show which letters of a name were typed.
+        let rows: Vec<(model::Item, Vec<usize>)> = if picker == Picker::Finder {
+            crate::app::finder_rows(app)
+                .into_iter()
+                .map(|row| (row.item, row.marked))
+                .collect()
+        } else {
             model::items(app, picker)
                 .into_iter()
-                .map(|item| MenuItem {
+                .map(|item| (item, Vec::new()))
+                .collect()
+        };
+        sync(
+            &self.menu,
+            rows.into_iter()
+                .map(|(item, marked)| MenuItem {
+                    marks: marked_label(&item.label, &marked, t),
+                    marked: !marked.is_empty(),
                     label: item.label.into(),
                     glyph: item.glyph.map(glyph).unwrap_or_default(),
                     description: SharedString::new(),
@@ -517,6 +530,9 @@ impl Presenter {
             Picker::Variant => "How much reasoning the model uses before it answers.".to_owned(),
             Picker::DeleteSession => "Its subagents' sessions are deleted with it.".to_owned(),
             Picker::SessionMenu => "These change the session on the server.".to_owned(),
+            Picker::Finder if app.picker_filter.trim().is_empty() => {
+                "Type a few letters of a name. Start with > to leave sessions out.".to_owned()
+            }
             Picker::InterfaceFont | Picker::CodeFont if app.system_fonts.is_none() => {
                 "Looking for this computer's fonts…".to_owned()
             }
@@ -526,6 +542,7 @@ impl Presenter {
             // Each mode says what it means on its own row.
             Picker::InterfaceFont
             | Picker::CodeFont
+            | Picker::Finder
             | Picker::Shield
             | Picker::Folder
             | Picker::Model
@@ -535,6 +552,17 @@ impl Presenter {
         };
         state.set_menu_note(note.into());
     }
+}
+
+/// `label` as styled text with the characters at the places `marked` in
+/// the accent colour; empty when none are marked.
+fn marked_label(label: &str, marked: &[usize], t: &Tokens) -> slint::StyledText {
+    if marked.is_empty() {
+        return slint::StyledText::default();
+    }
+    let markup = crate::markdown::marked(t, label, marked, t.surface_interactive_base);
+    slint::StyledText::from_markdown(&markup)
+        .unwrap_or_else(|_| slint::StyledText::from_plain_text(label))
 }
 
 /// Makes `model` hold `rows`, changing only the rows that differ.

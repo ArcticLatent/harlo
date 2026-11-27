@@ -616,6 +616,34 @@ pub fn colored(t: &Tokens, color: Rgba, text: &str) -> String {
     format!("{}{text}</font>", font(t, color))
 }
 
+/// One line of `text` as markup the window draws, with the characters at
+/// the places `marked` (counted in characters, ascending) in `color`, made
+/// readable.
+///
+/// It's how a search shows which letters of a name it fell on. A line
+/// break in `text` shows as a space.
+#[must_use]
+pub fn marked(t: &Tokens, text: &str, marked: &[usize], color: Rgba) -> String {
+    let open = font(t, color);
+    let mut out = String::with_capacity(text.len() + marked.len() * (open.len() + 7));
+    let mut leading = true;
+    let mut inside = false;
+    let mut buffer = [0; 4];
+    for (place, character) in text.chars().enumerate() {
+        let is_marked = marked.binary_search(&place).is_ok();
+        if is_marked != inside {
+            out.push_str(if is_marked { &open } else { "</font>" });
+            inside = is_marked;
+        }
+        let character = if character == '\n' { ' ' } else { character };
+        escape_into(&mut out, character.encode_utf8(&mut buffer), &mut leading);
+    }
+    if inside {
+        out.push_str("</font>");
+    }
+    out
+}
+
 /// The opening colour tag for `color`, made readable.
 fn font(t: &Tokens, color: Rgba) -> String {
     format!(
@@ -645,6 +673,25 @@ pub fn escaped(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marked_letters_are_coloured_and_the_rest_shows_as_written() {
+        let t = crate::theme::default_tokens();
+        let markup = marked(
+            &t,
+            "Settings: *Appearance*",
+            &[0, 2, 11, 12, 13],
+            t.accent_base,
+        );
+        assert_eq!(markup.matches("<font color=").count(), 3, "{markup}");
+        assert_eq!(markup.matches("</font>").count(), 3);
+        // The stars are text, not emphasis.
+        assert!(markup.contains("\\*"), "{markup}");
+        let styled = slint::StyledText::from_markdown(&markup).expect("valid markup");
+        assert_ne!(styled, slint::StyledText::default());
+        // Nothing marked is the text alone.
+        assert!(!marked(&t, "plain", &[], t.accent_base).contains("<font"));
+    }
 
     #[test]
     fn answers_split_into_blocks() {

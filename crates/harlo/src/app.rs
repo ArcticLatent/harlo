@@ -36,6 +36,7 @@ mod computers;
 mod context;
 mod experimental;
 mod files;
+mod finder;
 mod git_settings;
 mod goals;
 mod hosting;
@@ -77,6 +78,7 @@ pub use context::{
 };
 pub use experimental::{ExperimentEvent, Experiments};
 pub use files::{Body as FileBody, Files, FilesEvent, OpenFile, Outside, TextFile};
+pub use finder::{Go, Row as FinderRow, rows as finder_rows};
 pub use git_settings::{GitEvent, GitSettings};
 pub use goals::{GoalAction, GoalEvent};
 pub use hosting::{HostingEvent, HostingState, SigningIn};
@@ -414,6 +416,8 @@ pub enum Message {
     PickModel(ModelChoice),
     /// Open a picker's menu, or close it if it's open.
     TogglePicker(Picker),
+    /// Go where a row of the finder leads.
+    Go(Go),
     /// Close the open picker's menu.
     ClosePicker,
     /// The text in the open menu's filter changed.
@@ -961,13 +965,20 @@ impl App {
         self.see_shown();
         let shown = self.follow_document();
         let refocus = match filtering {
-            Some(picker) if self.picker.is_none() => Task::effect(Effect::Focus(
-                if picker == model::Picker::Model && self.sheets.open.is_none() {
+            Some(picker) if self.picker.is_none() => {
+                // The finder leaves on a session or the start screen, which
+                // both have a message box, unless a page or a file shows.
+                let composing = match picker {
+                    Picker::Model => true,
+                    Picker::Finder => self.fs.shown.is_none(),
+                    _ => false,
+                };
+                Task::effect(Effect::Focus(if composing && self.sheets.open.is_none() {
                     crate::ids::COMPOSER_TEXT
                 } else {
                     crate::ids::WINDOW
-                },
-            )),
+                }))
+            }
             _ => Task::none(),
         };
         let task = Task::batch([
@@ -1120,6 +1131,7 @@ impl App {
             | Message::UndoSettled { .. }) => return self.undo_action(message),
             Message::ToggleLocations => self.picking_location = !self.picking_location,
             Message::PickLocation(location) => return self.pick_location(location),
+            Message::Go(go) => return self.go(go),
             message @ (Message::OpenSession(_)
             | Message::NoticeOpened(_)
             | Message::CloseTab(_)
@@ -2098,7 +2110,8 @@ impl App {
     fn reveal_highlight(&mut self) -> Task<Message> {
         let step = model::MENU_ROW + model::ROW_GAP;
         let index = u16::try_from(self.picker_index).unwrap_or(u16::MAX);
-        let rows = u16::try_from(model::MENU_ROWS).unwrap_or(u16::MAX);
+        let rows = self.picker.map_or(model::MENU_ROWS, Picker::rows);
+        let rows = u16::try_from(rows).unwrap_or(u16::MAX);
         let top = f32::from(index) * step;
         let shown = f32::from(rows) * step;
         if top < self.picker_scroll {
@@ -2479,7 +2492,7 @@ impl App {
 }
 
 /// Maps a key press to a window-wide shortcut: a new session, closing or
-/// cycling tabs, and Settings.
+/// cycling tabs, Settings and the finder.
 #[must_use]
 pub fn shortcut(press: &KeyPress) -> Option<Message> {
     if !press.command {
@@ -2490,6 +2503,7 @@ pub fn shortcut(press: &KeyPress) -> Option<Message> {
         Key::Character('w') => Some(Message::CloseActiveTab),
         Key::Character('q') => Some(Message::Quit),
         Key::Character(',') => Some(Message::Sheet(SheetEvent::Toggle(Sheet::Settings))),
+        Key::Character('k') if !press.shift => Some(Message::TogglePicker(Picker::Finder)),
         Key::Tab => Some(Message::CycleTab { back: press.shift }),
         Key::PageDown => Some(Message::CycleTab { back: false }),
         Key::PageUp => Some(Message::CycleTab { back: true }),

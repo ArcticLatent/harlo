@@ -23,6 +23,10 @@ use crate::app::{
 /// Rows a menu shows before it scrolls.
 pub const MENU_ROWS: usize = 8;
 
+/// Rows the finder shows before it scrolls: it's the one menu that is
+/// read rather than picked from, so it shows a little more.
+pub const FINDER_ROWS: usize = 10;
+
 /// The height of one menu row.
 pub const MENU_ROW: f32 = 32.0;
 
@@ -86,6 +90,8 @@ pub enum Picker {
     SessionMenu,
     /// Whether to delete the open session for good.
     DeleteSession,
+    /// The finder: sessions, Settings' pages and what Harlo does, by name.
+    Finder,
 }
 
 impl Picker {
@@ -110,14 +116,30 @@ impl Picker {
             Self::Sound(kind) => 14 + kind_number(kind),
             Self::Microphone => MICROPHONE,
             Self::SessionMenu => SESSION_MENU,
-            Self::DeleteSession => SESSION_MENU + 1,
+            Self::DeleteSession => DELETE_SESSION,
+            Self::Finder => FINDER,
         }
     }
 
-    /// Whether its menu has a filter field: models, providers and fonts.
+    /// Whether its menu has a filter field: models, providers, fonts and
+    /// the finder.
     #[must_use]
     pub fn filters(self) -> bool {
-        self.lists_models() || matches!(self, Self::Provider | Self::InterfaceFont | Self::CodeFont)
+        self.lists_models()
+            || matches!(
+                self,
+                Self::Provider | Self::InterfaceFont | Self::CodeFont | Self::Finder
+            )
+    }
+
+    /// How many rows its menu shows before it scrolls.
+    #[must_use]
+    pub fn rows(self) -> usize {
+        if self == Self::Finder {
+            FINDER_ROWS
+        } else {
+            MENU_ROWS
+        }
     }
 
     /// Whether the menu lists models.
@@ -150,6 +172,7 @@ impl Picker {
             MICROPHONE => Self::Microphone,
             SESSION_MENU => Self::SessionMenu,
             DELETE_SESSION => Self::DeleteSession,
+            FINDER => Self::Finder,
             14.. => Self::Sound(*Kind::ALL.get(usize::try_from(index - 14).ok()?)?),
             _ => return None,
         })
@@ -259,6 +282,8 @@ const MICROPHONE: i32 = 99;
 const SESSION_MENU: i32 = 100;
 /// The delete confirmation's number in the UI.
 const DELETE_SESSION: i32 = SESSION_MENU + 1;
+/// The finder's number in the UI; it shows over everything.
+const FINDER: i32 = SESSION_MENU + 2;
 
 /// What can be done to the open session.
 fn session_menu_items(app: &App) -> Vec<Item> {
@@ -412,6 +437,10 @@ pub fn items(app: &App, picker: Picker) -> Vec<Item> {
         Picker::ScheduleFolder | Picker::ScheduleSession => schedule_items(app, picker),
         Picker::Provider => provider_items(app),
         Picker::SessionMenu => session_menu_items(app),
+        Picker::Finder => crate::app::finder_rows(app)
+            .into_iter()
+            .map(|row| row.item)
+            .collect(),
         Picker::DeleteSession => delete_items(),
         Picker::VoiceLanguage => language_items(app),
         Picker::Microphone => microphone_items(app),

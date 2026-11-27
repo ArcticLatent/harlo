@@ -2583,6 +2583,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "fontdb",
+ "frizbee",
  "futures-util",
  "harlo-client",
  "harlo-update-signing",

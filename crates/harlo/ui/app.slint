@@ -240,13 +240,16 @@ export component AppWindow inherits Window {
         }
 
         if State.picking-location: Locations { }
-        if State.picker >= 0 && (State.picker < Pickers.first-in-settings
+        if State.picker >= 0 && State.picker != Pickers.finder
+            && (State.picker < Pickers.first-in-settings
             || State.picker >= Pickers.session-menu): PickerMenu { }
         // Over the whole window; the rail buttons still switch pages.
         if State.sheet > 0: SheetLayer { }
         // Opened from Settings, so over it.
         if State.picker >= Pickers.first-in-settings
             && State.picker < Pickers.session-menu: PickerMenu { }
+        // The finder opens from anywhere, so over everything.
+        if State.picker == Pickers.finder: PickerMenu { }
         // A rail button's name, over everything.
         if Tips.text != "": RailTip { room: root.width; }
     }

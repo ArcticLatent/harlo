@@ -13,6 +13,7 @@ pub mod config;
 pub mod diff;
 pub mod download;
 pub mod files;
+pub mod finder;
 pub mod fonts;
 pub mod git;
 pub mod hosting;

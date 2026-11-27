@@ -119,6 +119,9 @@ export struct MenuItem {
     dot: color,
     has-dot: bool,
     selected: bool,
+    /// The label with the letters a search fell on coloured, when `marked`.
+    marks: styled-text,
+    marked: bool,
 }
 
 /// What a timeline row is.

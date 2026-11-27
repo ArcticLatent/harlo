@@ -51,6 +51,10 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+W", "Close the tab"),
             ("Ctrl+,", "Open or close Settings"),
             (
+                "Ctrl+K",
+                "Find a session, a page of Settings or something to do",
+            ),
+            (
                 "Ctrl+Q",
                 "Quit Harlo, even while it keeps running in the tray",
             ),

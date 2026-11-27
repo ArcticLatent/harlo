@@ -12,6 +12,8 @@ publish.workspace = true
 # The hosts in ~/.ssh/config, offered in Settings → Server.
 ssh2-config = { workspace = true }
 harlo-client = { workspace = true }
+# The finder's fuzzy ranking: the matcher the server ranks file names with.
+frizbee = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt", "sync", "time", "process", "macros", "io-util", "fs", "net"] }
 serde = { workspace = true, features = ["std", "derive"] }
