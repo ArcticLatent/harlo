@@ -102,11 +102,27 @@ fn a_new_release_is_offered_once_and_installed() {
     update(&ui, UpdateEvent::Installed(Ok(())));
     assert!(ui.shows(&format!("Harlo {NEXT} is installed")));
     assert!(ui.shows("Restart Harlo to use it."));
+    let _ = ui.driver.take_tasks();
     ui.press("Restart");
     assert_eq!(pressed(&ui), Some(UpdateEvent::Restart));
+    // Starting the new Harlo is left to a task, which this window doesn't
+    // run: pressing the button here starts no program.
+    assert_eq!(ui.driver.take_tasks().len(), 1);
     // While it waits to restart, a timed look doesn't start over.
     update(&ui, UpdateEvent::Check { asked: false });
     assert!(matches!(ui.app().updates.phase, UpdatePhase::Installed(_)));
+}
+
+#[test]
+fn a_harlo_that_cant_be_started_again_says_why() {
+    let ui = packaged();
+    update(&ui, UpdateEvent::Installed(Ok(())));
+    update(
+        &ui,
+        UpdateEvent::Relaunching(Err("No such file or directory".into())),
+    );
+    assert!(matches!(ui.app().updates.phase, UpdatePhase::Failed(_)));
+    assert!(ui.shows("Couldn't start the new Harlo: No such file or directory"));
 }
 
 #[test]

@@ -114,6 +114,9 @@ pub enum UpdateEvent {
     Installed(Result<(), InstallError>),
     /// Quit and start the installed Harlo.
     Restart,
+    /// The installed Harlo is set to start once this one has quit, or why
+    /// it couldn't be.
+    Relaunching(Result<(), String>),
     /// Stop the server on this computer and start the new one.
     RestartServer,
     /// The server restarted, or why not.
@@ -167,17 +170,23 @@ impl App {
                 };
                 Task::none()
             }
-            UpdateEvent::Restart => {
-                if let Some(program) = updates::this_program()
-                    && let Err(e) = updates::relaunch_after_exit(&program)
-                {
-                    self.updates.phase = Phase::Failed(InstallError {
-                        message: format!("Couldn't start the new Harlo: {e}"),
-                        manual: None,
-                    });
-                    return Task::none();
-                }
-                Task::effect(Effect::Quit)
+            // Starting a program is a task's work, like every other thing
+            // Harlo does outside itself: a window driven without its tasks
+            // starts none.
+            UpdateEvent::Restart => match updates::this_program() {
+                Some(program) => Task::perform(
+                    async move { updates::relaunch_after_exit(&program).map_err(|e| e.to_string()) },
+                    |result| Message::Update(UpdateEvent::Relaunching(result)),
+                ),
+                None => Task::effect(Effect::Quit),
+            },
+            UpdateEvent::Relaunching(Ok(())) => Task::effect(Effect::Quit),
+            UpdateEvent::Relaunching(Err(why)) => {
+                self.updates.phase = Phase::Failed(InstallError {
+                    message: format!("Couldn't start the new Harlo: {why}"),
+                    manual: None,
+                });
+                Task::none()
             }
             UpdateEvent::RestartServer => {
                 self.updates.server = ServerRestart::Restarting;
