@@ -139,6 +139,58 @@ pub struct Note {
     pub superseded_by: Option<String>,
 }
 
+/// What a provider tells of an account's use.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ProviderUsage {
+    /// The provider's ID, as models name it.
+    #[serde(rename = "providerID")]
+    pub provider: String,
+    /// The plan the account is on, when the server knows it.
+    #[serde(default)]
+    pub plan: Option<String>,
+    /// Its limits, each with how much is used.
+    #[serde(default)]
+    pub limits: Vec<UsageLimit>,
+    /// What was spent or is left, when the provider tells an amount.
+    #[serde(default)]
+    pub amount: Option<UsageAmount>,
+    /// The page where the provider shows the use itself.
+    #[serde(default)]
+    pub manage: Option<String>,
+    /// Whether its last request was refused over a limit.
+    #[serde(default)]
+    pub reached: bool,
+    /// Why it couldn't be read, when it couldn't.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// One of a provider's limits.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct UsageLimit {
+    /// What it limits, such as `Key limit`.
+    pub label: String,
+    /// How much of it is used, from 0 to 100.
+    pub percent: f64,
+    /// When it resets, in seconds since the Unix epoch.
+    #[serde(rename = "resetsAt", default)]
+    pub resets_at: Option<i64>,
+    /// How often it resets, such as `weekly`.
+    #[serde(default)]
+    pub period: Option<String>,
+}
+
+/// An amount of money a provider tells of.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct UsageAmount {
+    /// What it counts, such as `Balance`.
+    pub label: String,
+    /// The amount.
+    pub value: f64,
+    /// Its currency's code, such as `USD`.
+    pub currency: String,
+}
+
 /// What kind of thing a proposed note is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -426,6 +478,18 @@ impl Client {
             .request(Method::PUT, "/harlo/memory")
             .json(&serde_json::json!({ "enabled": on }));
         Self::json(request).await.map(drop)
+    }
+
+    /// What the signed-in providers tell of their use: limits, amounts
+    /// and whether one refused its last request over a limit.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server can't be reached or reads no use (a server
+    /// from before it did).
+    pub async fn provider_usage(&self) -> Result<Vec<ProviderUsage>, Error> {
+        let v = Self::json(self.request(Method::GET, "/harlo/usage")).await?;
+        Ok(serde_json::from_value(v["data"].clone())?)
     }
 
     /// The user's notes and project `project`'s, oldest first, replaced

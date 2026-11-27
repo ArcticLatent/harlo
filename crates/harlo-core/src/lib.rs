@@ -21,6 +21,7 @@ pub mod layout;
 pub mod local_models;
 pub mod makers;
 pub mod mcp_catalog;
+pub mod meter;
 pub mod model_menu;
 pub mod notes;
 pub mod notifications;

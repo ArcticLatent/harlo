@@ -118,6 +118,11 @@ pub struct Preferences {
     pub phone_paused: bool,
     /// The user's picture on the rail, by name, such as `classic`.
     pub avatar: String,
+    /// The provider the usage meter shows whatever is used, by the
+    /// server's ID; empty to follow the provider used last.
+    pub meter_pin: String,
+    /// The provider a session used last, by the server's ID.
+    pub meter_last: String,
     /// Whether Harlo looks for a new version of itself, when it was
     /// installed from a package or an AppImage.
     pub check_updates: bool,
@@ -162,6 +167,8 @@ impl Default for Preferences {
             phone_relay: false,
             phone_paused: false,
             avatar: "classic".to_owned(),
+            meter_pin: String::new(),
+            meter_last: String::new(),
             check_updates: true,
             update_announced: String::new(),
         }

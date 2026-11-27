@@ -727,6 +727,32 @@ export struct DayBar {
     share: float,
 }
 
+/// A provider in the usage meter's menu.
+export struct MeterRow {
+    /// The server's ID of the provider, which picking it pins.
+    id: string,
+    /// Its name, with its plan when it has one.
+    name: string,
+    /// Its logo, by its number from 1; 0 none.
+    maker: int,
+    tone: color,
+    /// Its use in a few characters, such as "23%".
+    hint: string,
+    /// Whether it's pinned to the meter.
+    pinned: bool,
+}
+
+/// One limit of the provider the usage meter shows.
+export struct MeterLine {
+    label: string,
+    /// How full it is and when it resets.
+    value: string,
+    /// How full it is, from 0 to 1.
+    fraction: float,
+    /// How urgent: 0 plenty left, 1 getting close, 2 nearly or fully used.
+    level: int,
+}
+
 export global State {
     // The shell.
     in property <bool> sidebar-shown: true;
@@ -785,6 +811,31 @@ export global State {
     in property <bool> phone-paired;
     /// Whether notifications to phones are held back.
     in property <bool> phone-paused;
+    /// Which of them is Providers, which the usage meter's menu opens.
+    in property <int> providers-section;
+    /// The rail's usage meter: whether there's a provider to show, its
+    /// logo, how much of its ring is filled (none without `meter-ringed`),
+    /// how urgent that is (0 to 2), and the few characters under it.
+    in property <bool> meter-shown;
+    in property <int> meter-maker;
+    in property <color> meter-tone;
+    in property <bool> meter-ringed;
+    in property <float> meter-fraction;
+    in property <int> meter-level;
+    in property <string> meter-label;
+    /// The provider shown, a sentence on its use, and each of its limits.
+    in property <string> meter-name;
+    in property <string> meter-tip;
+    in property <[MeterLine]> meter-lines;
+    /// What it tells beside limits, or why it shows none.
+    in property <string> meter-note;
+    /// The page where the provider shows its use itself, if it has one.
+    in property <string> meter-manage;
+    /// The providers the meter can show, whether it follows the one used
+    /// last, and that one's name.
+    in property <[MeterRow]> meter-rows;
+    in property <bool> meter-follows;
+    in property <string> meter-last;
     /// The dark and the light themes Settings → Appearance lists, or those
     /// a search found.
     in property <[ThemeCard]> dark-theme-cards;
@@ -964,6 +1015,9 @@ export global Logic {
     callback toggle-phone-pause();
     /// Use the avatar at this place in the picker as the user's picture.
     callback pick-avatar(int);
+    /// Pins a provider to the usage meter, by its ID; "" follows the one
+    /// used last.
+    callback pin-meter(string);
     /// Show the picture with this key in the viewer.
     callback view-picture(string);
     /// Close the viewer, or the pictures' grid.

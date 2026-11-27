@@ -2,8 +2,8 @@
 
 import { Theme, Size, Motion } from "theme.slint";
 import { Icons } from "icons.slint";
-import { State, Logic, Tips } from "data.slint";
-import { Icon, Press, VLine } from "widgets.slint";
+import { State, Logic, Tips, MeterRow } from "data.slint";
+import { Icon, Press, VLine, HLine, Ring, Makers } from "widgets.slint";
 
 /// The avatars to pick from, in the order of `AVATARS` in Rust.
 export global Avatars {
@@ -146,6 +146,83 @@ component RailButton inherits Press {
             background: Theme.on-warning;
         }
     }
+    @children
+}
+
+/// A maker's logo in its tone, or a plain chip where Harlo has none.
+component MakerLogo inherits Rectangle {
+    /// The logo's number, from 1, or 0.
+    in property <int> maker;
+    in property <color> tone;
+    in property <length> side: 14px;
+    width: root.side;
+    height: root.side;
+    if root.maker == 0 || root.maker > Makers.logos.length: Icon {
+        text: Icons.cpu;
+        font-size: root.side;
+        color: Theme.icon-quiet;
+    }
+    if root.maker > 0 && root.maker <= Makers.logos.length: Image {
+        width: root.side;
+        height: root.side;
+        source: Makers.logos[root.maker - 1];
+        colorize: root.tone;
+    }
+}
+
+/// The colour of a limit's use: the accent with plenty left, amber
+/// getting close, red nearly or fully used.
+global Levels {
+    pure public function tint(level: int) -> color {
+        level >= 2 ? Theme.icon-critical-base : level == 1 ? Theme.icon-warning-base : Theme.accent-ink
+    }
+}
+
+/// A row of the usage meter's menu: a name, a few quiet characters after
+/// it, and a check when it's the choice.
+component MeterItem inherits Press {
+    in property <string> name;
+    in property <string> hint;
+    in property <bool> marked;
+    /// A logo before the name, by its number from 1; -1 for none.
+    in property <int> maker: -1;
+    in property <color> tone;
+    height: Size.menu-row;
+    label: root.name;
+    about: root.hint;
+    accessible-checked: root.marked;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if root.maker >= 0: VerticalLayout {
+            alignment: center;
+            MakerLogo {
+                maker: root.maker;
+                tone: root.tone;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.name;
+            vertical-alignment: center;
+            overflow: elide;
+            font-size: Size.text;
+            color: Theme.text-strong;
+        }
+        Text {
+            text: root.hint;
+            vertical-alignment: center;
+            font-size: Size.small;
+            color: Theme.text-weak;
+        }
+        Icon {
+            width: 14px;
+            text: root.marked ? Icons.check : "";
+            font-size: 13px;
+            color: Theme.accent-ink;
+        }
+    }
 }
 
 /// The left rail: the sidebar toggle, then the phone link, shortcuts,
@@ -177,6 +254,162 @@ export component LeftRail inherits Rectangle {
             }
 
             Rectangle { vertical-stretch: 1; }
+
+            // How much of a provider's limits is used: the one pinned from
+            // its menu, else the one used last. A ring where the provider
+            // tells of a limit, its logo alone where it tells of none.
+            if State.meter-shown: HorizontalLayout {
+                alignment: center;
+                meter := RailButton {
+                    width: Size.rail-button + 8px;
+                    height: 52px;
+                    label: "Usage";
+                    about: State.meter-tip;
+                    tip: State.meter-tip;
+                    clicked => { usage.show(); }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                if State.meter-ringed: Ring {
+                                    fraction: State.meter-fraction;
+                                    tint: Levels.tint(State.meter-level);
+                                }
+                                MakerLogo {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    side: State.meter-ringed ? 13px : 18px;
+                                    maker: State.meter-maker;
+                                    tone: State.meter-tone;
+                                }
+                            }
+                        }
+                        Text {
+                            text: State.meter-label;
+                            horizontal-alignment: center;
+                            font-size: 10px;
+                            color: State.meter-level >= 2 ? Theme.icon-critical-base : Theme.text-weak;
+                        }
+                    }
+
+                    // Hangs right of the rail, level with the meter, and stays
+                    // inside the window.
+                    usage := PopupWindow {
+                        x: root.absolute-position.x + Size.rail + 6px - meter.absolute-position.x;
+                        y: clamp(meter.absolute-position.y, root.absolute-position.y + 8px,
+                            root.absolute-position.y + root.height - self.height - 8px)
+                            - meter.absolute-position.y;
+                        width: 280px;
+                        height: rows.preferred-height;
+                        close-policy: close-on-click-outside;
+
+                        Rectangle {
+                            background: Theme.card;
+                            border-radius: Size.menu-radius;
+                            border-width: 1px;
+                            border-color: Theme.menu-edge;
+                            drop-shadow-color: #00000073;
+                            drop-shadow-offset-y: 10px;
+                            drop-shadow-blur: 28px;
+                        }
+                        rows := VerticalLayout {
+                            padding: 6px;
+                            spacing: 2px;
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 8px;
+                                padding-bottom: 10px;
+                                spacing: 9px;
+                                Text {
+                                    text: State.meter-name;
+                                    font-size: Size.text;
+                                    font-weight: 600;
+                                    color: Theme.text-strong;
+                                    overflow: elide;
+                                }
+                                for line in State.meter-lines: VerticalLayout {
+                                    spacing: 5px;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Text {
+                                            text: line.label;
+                                            font-size: Size.small;
+                                            color: Theme.text-base;
+                                        }
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: line.value;
+                                            horizontal-alignment: right;
+                                            overflow: elide;
+                                            font-size: Size.small;
+                                            color: line.level >= 2 ? Theme.icon-critical-base : Theme.text-weak;
+                                        }
+                                    }
+                                    Rectangle {
+                                        height: 3px;
+                                        border-radius: 1.5px;
+                                        background: Theme.border-weak-base;
+                                        if line.fraction > 0: Rectangle {
+                                            x: 0;
+                                            width: max(parent.height, parent.width * min(1, line.fraction));
+                                            border-radius: parent.border-radius;
+                                            background: Levels.tint(line.level);
+                                        }
+                                    }
+                                }
+                                if State.meter-note != "": Text {
+                                    text: State.meter-note;
+                                    wrap: word-wrap;
+                                    font-size: Size.small;
+                                    color: Theme.text-weak;
+                                }
+                            }
+                            HLine { }
+                            MeterItem {
+                                name: "Last used";
+                                hint: State.meter-last;
+                                marked: State.meter-follows;
+                                clicked => {
+                                    Logic.pin-meter("");
+                                    usage.close();
+                                }
+                            }
+                            if State.meter-rows.length > 0: HLine { }
+                            for row in State.meter-rows: MeterItem {
+                                name: row.name;
+                                hint: row.hint;
+                                marked: row.pinned;
+                                maker: row.maker;
+                                tone: row.tone;
+                                clicked => {
+                                    Logic.pin-meter(row.id);
+                                    usage.close();
+                                }
+                            }
+                            HLine { }
+                            if State.meter-manage != "": MeterItem {
+                                name: "Manage usage…";
+                                clicked => {
+                                    Logic.link(State.meter-manage);
+                                    usage.close();
+                                }
+                            }
+                            MeterItem {
+                                name: "All limits…";
+                                clicked => {
+                                    Logic.open-section(State.providers-section);
+                                    usage.close();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             HorizontalLayout {
                 alignment: center;

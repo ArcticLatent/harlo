@@ -44,6 +44,7 @@ mod line_comments;
 mod local_models;
 mod mcp;
 mod memory;
+mod meter;
 mod notes;
 mod notices;
 mod phone;
@@ -84,6 +85,7 @@ pub use line_comments::{Commenting, LineComment, LineRef, comments_message};
 pub use local_models::{EngineState, Getting, LocalEvent, LocalModels, ServerState};
 pub use mcp::{McpEvent, McpServers, McpView};
 pub use memory::{Kept, Memory, MemoryEvent};
+pub use meter::{Meter, MeterEvent};
 pub use notes::{Note, NoteKey, Notes, NotesEvent};
 pub use notices::Notice;
 pub use phone::{Host as PhoneHost, Paired, PhoneEvent, PhoneState, Shown};
@@ -325,6 +327,8 @@ pub enum Message {
     Sheet(SheetEvent),
     /// Something happened to the Claude subscription.
     Claude(ClaudeEvent),
+    /// Something happened to the usage meter.
+    Meter(MeterEvent),
     /// Something happened to dictation.
     Voice(VoiceEvent),
     /// Something happened to local models.
@@ -739,6 +743,8 @@ pub struct App {
     pub preferences: Preferences,
     /// How the Claude subscription stands.
     pub claude: Claude,
+    /// What the rail's usage meter knows of the other providers.
+    pub meter: Meter,
     /// The layout as last saved.
     saved: Layout,
     /// Tabs saved for the other locations.
@@ -857,6 +863,7 @@ impl App {
             restore: None,
             preferences: Preferences::default(),
             claude: Claude::default(),
+            meter: Meter::default(),
             following: None,
             voice: Voice::default(),
             local: LocalModels::default(),
@@ -1006,6 +1013,7 @@ impl App {
     fn feature_event(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Claude(event) => self.claude_event(event),
+            Message::Meter(event) => self.meter_event(event),
             Message::Voice(event) => self.voice_event(event),
             Message::Local(event) => self.local_event(event),
             Message::Phone(event) => self.phone_event(event),
@@ -1044,6 +1052,7 @@ impl App {
             Message::SessionMenu(action) => return self.session_menu(action),
             Message::Goal(event) => return self.goal_event(event),
             message @ (Message::Claude(_)
+            | Message::Meter(_)
             | Message::Voice(_)
             | Message::Local(_)
             | Message::Phone(_)
@@ -1382,12 +1391,14 @@ impl App {
                     reloads.push(self.load_setup());
                 }
                 reloads.push(ask_host);
+                reloads.push(self.read_meter());
                 return Task::batch(reloads);
             }
             Update::Event(event) => {
                 let fetches = self.workspace.apply(&event.kind, event.time);
                 let notice = self.notice(&event.kind);
                 self.track_unread(&event.kind, event.time);
+                let meter = self.meter_follow(&event.kind, event.time);
                 if let EventKind::SessionDeleted { session_id }
                 | EventKind::SessionArchived { session_id } = &event.kind
                 {
@@ -1425,7 +1436,7 @@ impl App {
                         }
                     }
                 }
-                return Task::batch([self.fetch(fetches), reload, notice, files, resources]);
+                return Task::batch([self.fetch(fetches), reload, notice, files, resources, meter]);
             }
             Update::Lost { reason, retry_in } => {
                 self.status = Status::Lost { reason, retry_in };

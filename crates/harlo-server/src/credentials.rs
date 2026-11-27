@@ -514,6 +514,7 @@ impl Server {
 
     /// Tells clients the integrations and providers changed.
     pub(crate) fn integrations_changed(&self) {
+        self.usage_changed();
         self.emit("integration.updated", json!({}), None, None);
         self.emit("provider.updated", json!({}), None, None);
     }

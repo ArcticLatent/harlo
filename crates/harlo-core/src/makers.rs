@@ -71,3 +71,28 @@ pub fn logo_number(id: &str) -> usize {
         .and_then(|name| LOGOS.iter().position(|logo| *logo == name))
         .map_or(0, |at| at + 1)
 }
+
+/// What people call the provider with the server's ID `id`, or `None`
+/// when Harlo carries no logo for it and so knows no name either.
+#[must_use]
+pub fn name(id: &str) -> Option<&'static str> {
+    Some(match logo(id)? {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "zai-coding-plan" => "Z.ai",
+        "claude-code" => "Claude",
+        "google" => "Google",
+        "xai" => "xAI",
+        "deepseek" => "DeepSeek",
+        "mistral" => "Mistral",
+        "minimax-coding-plan" => "MiniMax",
+        "kimi-for-coding" => "Kimi",
+        "groq" => "Groq",
+        "cerebras" => "Cerebras",
+        "together" => "Together",
+        "fireworks" => "Fireworks",
+        "openrouter" => "OpenRouter",
+        "opencode" => "OpenCode",
+        _ => return None,
+    })
+}

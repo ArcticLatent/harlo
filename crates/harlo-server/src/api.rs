@@ -78,6 +78,7 @@ fn file_and_harlo_routes() -> Router<Arc<Server>> {
         .route("/harlo/plugins/{name}/settings", put(fill_plugin))
         .route("/harlo/plugins/{name}/update", post(update_plugin))
         .route("/harlo/plugins/{name}/install", post(install_plugin))
+        .route("/harlo/usage", get(usage))
         .route("/harlo/phone", get(phone_state).put(want_phone))
         .route("/harlo/phone/pair", post(pair_phone))
         .route("/harlo/phone/device/{id}", delete(remove_phone))
@@ -1077,6 +1078,11 @@ async fn host_tools(
     Ok(upgrade
         .on_upgrade(move |socket| server.host_mcp(name, socket))
         .into_response())
+}
+
+/// What the signed-in providers tell of their use.
+async fn usage(State(server): Shared) -> Answer {
+    ok(json!({ "data": server.usage().await }))
 }
 
 /// The web search services agents can use.

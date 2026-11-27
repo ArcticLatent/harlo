@@ -152,6 +152,7 @@ impl Sheets {
         };
         state.set_shortcuts_section(place(Section::Shortcuts));
         state.set_phone_section(place(Section::Phone));
+        state.set_providers_section(place(Section::Providers));
         sheets
     }
 
@@ -353,7 +354,9 @@ fn section_rows(app: &App, section: Section) -> Vec<SheetRow> {
             if app.sheets.providers.shown.is_some() {
                 return providers::sign_in_rows(app);
             }
-            providers::provider_rows(app, claude_rows(app))
+            let mut after = server_usage_rows(app);
+            after.extend(claude_rows(app));
+            providers::provider_rows(app, after)
         }
         Section::Models => menu_model_rows(app),
         Section::Extensions => {
@@ -902,6 +905,56 @@ fn usage_rows(app: &App) -> Vec<SheetRow> {
                 .collect()
         }
     }
+}
+
+/// What the server's providers tell of their use, a row for each limit
+/// and amount; nothing when none of them tells anything.
+///
+/// The rail's meter shows one provider's; here they all are.
+fn server_usage_rows(app: &App) -> Vec<SheetRow> {
+    use harlo_core::meter::Level;
+
+    let readings = app.server_readings();
+    if readings.is_empty() {
+        return Vec::new();
+    }
+    let now = epoch_seconds(app.now);
+    let mut rows = vec![
+        heading("Usage"),
+        note("What each provider tells an app of its limits, read again as turns end."),
+    ];
+    for reading in &readings {
+        let title = reading.title();
+        for window in &reading.windows {
+            let mut value = format!("{}% used", window.percent.round());
+            if let Some(at) = window.resets_at.filter(|at| *at > now) {
+                value.push_str(" · resets ");
+                value.push_str(&resets_in(at - now));
+            }
+            let tone = match window.level() {
+                Level::Calm => 0,
+                Level::Warning => 4,
+                Level::Critical => 2,
+            };
+            rows.push(pair(&format!("{title} · {}", window.label), &value, tone));
+        }
+        if let Some((label, amount)) = &reading.amount {
+            rows.push(pair(&format!("{title} · {label}"), amount, 0));
+        }
+        if reading.reached {
+            rows.push(pair(&title, "Refused its last request over a limit", 2));
+        } else if let Some(why) = &reading.error {
+            rows.push(pair(&title, &format!("Couldn't read it: {why}"), 2));
+        } else if reading.windows.is_empty() && reading.amount.is_none() {
+            let value = if reading.manage.is_some() {
+                "Its limits show on its own page only"
+            } else {
+                "It tells apps nothing of its limits"
+            };
+            rows.push(pair(&title, value, 3));
+        }
+    }
+    rows
 }
 
 /// What a limit is for, in words.

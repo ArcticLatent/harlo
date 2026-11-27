@@ -113,6 +113,8 @@ pub(crate) struct Live {
     pub(crate) proposing: HashMap<String, bool>,
     /// How often notes were turned on or off since the server started.
     pub(crate) memory_changes: u64,
+    /// What is known of the providers' use.
+    pub(crate) usage: crate::usage::Usage,
     /// The parts of sessions' system prompts that are held still, by
     /// session.
     steady: HashMap<String, Steady>,
@@ -1227,13 +1229,20 @@ impl Server {
                 .await;
         }
         let mut chosen = chosen;
+        let provider = chosen.provider.id.clone();
         self.clear_cold(session, &mut chosen);
         let turn = self.turn_for(session, chosen).await;
         let hooks = Hooks::new(self, &session.id, &session.location.directory);
         match harlo_engine::run(turn, &hooks, &hooks, stop).await {
-            Outcome::Succeeded => ("succeeded", None),
+            Outcome::Succeeded => {
+                self.note_limit(&provider, None);
+                ("succeeded", None)
+            }
             Outcome::Interrupted => ("interrupted", None),
-            Outcome::Failed(e) => ("failed", Some(e.to_string())),
+            Outcome::Failed(e) => {
+                self.note_limit(&provider, Some(&e));
+                ("failed", Some(e.to_string()))
+            }
         }
     }
 

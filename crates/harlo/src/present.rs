@@ -11,6 +11,7 @@
 mod changes;
 mod files;
 mod marks;
+mod meter;
 mod notes;
 mod panels;
 mod pictures;
@@ -70,6 +71,7 @@ pub struct Presenter {
     changes: changes::Lists,
     files: files::Files,
     notes: notes::Notes,
+    meter: meter::Meter,
     terminal: terminal::Terminal,
     sheets: sheets::Sheets,
     /// Project icons, decoded once.
@@ -117,6 +119,7 @@ impl Presenter {
             changes: changes::Lists::new(&state),
             files: files::Files::new(&state),
             notes: notes::Notes::default(),
+            meter: meter::Meter::new(&state),
             terminal: terminal::Terminal::new(&state),
             sheets: sheets::Sheets::new(&state, Rc::clone(&marks)),
             marks,
@@ -174,6 +177,7 @@ impl Presenter {
         self.center(app, &state);
         Self::composer(app, &state, t);
         self.composer_menu(app, &state);
+        self.meter.show(app, &state, t);
         self.pickers(app, &state, t);
         self.session(app, &state);
         // After the timeline, which may start the thumbnails' list afresh.

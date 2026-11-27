@@ -290,6 +290,7 @@ fn scratch_env(cmd: &mut Command, root: &Path, password: &str) {
         // Key checks go to an address nothing answers at, never a real
         // provider; a test that checks keys sets its own stand-in.
         .env("HARLO_KEY_CHECK_BASE", "http://127.0.0.1:9")
+        .env("HARLO_USAGE_BASE", "http://127.0.0.1:9")
         // So is the list of published plugins, never GitHub.
         .env("HARLO_PLUGIN_GALLERY_BASE", "http://127.0.0.1:9")
         // So is the phone relay, unless a test sets its own.

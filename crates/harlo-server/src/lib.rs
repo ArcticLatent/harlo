@@ -41,6 +41,7 @@ mod subagents;
 mod transfer;
 mod trust;
 mod undo;
+mod usage;
 mod watch;
 
 use std::path::PathBuf;

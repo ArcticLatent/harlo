@@ -159,7 +159,7 @@ impl App {
                 }
                 self.claude.usage = Load::Idle;
             }
-            Event::Read => return self.check_claude_code(),
+            Event::Read => return Task::batch([self.check_claude_code(), self.read_meter()]),
             Event::Usage(Ok(found)) => {
                 let alerts = found.as_deref().map_or_else(Vec::new, |limits| {
                     self.claude.watch.read(limits, epoch_seconds(self.now))
@@ -248,7 +248,7 @@ impl App {
     }
 
     /// Asks Claude Code how much of the plan's limits is used.
-    fn read_usage(&mut self) -> Task<Message> {
+    pub(super) fn read_usage(&mut self) -> Task<Message> {
         if !matches!(self.claude.usage, Load::Loaded(_)) {
             self.claude.usage = Load::Loading;
         }

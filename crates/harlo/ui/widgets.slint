@@ -161,6 +161,93 @@ export component Press inherits Rectangle {
     @children
 }
 
+/// The model makers' logos, in `harlo_core::makers::LOGOS`' order; each
+/// one colour, to be drawn in a tone.
+export global Makers {
+    out property <[image]> logos: [
+        @image-url("images/providers/anthropic.svg"),
+        @image-url("images/providers/openai.svg"),
+        @image-url("images/providers/zai-coding-plan.svg"),
+        @image-url("images/providers/claude-code.svg"),
+        @image-url("images/providers/google.svg"),
+        @image-url("images/providers/xai.svg"),
+        @image-url("images/providers/deepseek.svg"),
+        @image-url("images/providers/mistral.svg"),
+        @image-url("images/providers/minimax-coding-plan.svg"),
+        @image-url("images/providers/kimi-for-coding.svg"),
+        @image-url("images/providers/groq.svg"),
+        @image-url("images/providers/cerebras.svg"),
+        @image-url("images/providers/together.svg"),
+        @image-url("images/providers/fireworks.svg"),
+        @image-url("images/providers/openrouter.svg"),
+        @image-url("images/providers/opencode.svg"),
+    ];
+}
+
+/// A ring filled clockwise from its top, `fraction` of the way round, over
+/// a faint track. It turns to a new fraction and tint rather than jumping.
+export component Ring inherits Rectangle {
+    /// How much is filled, from 0 to 1.
+    in property <float> fraction;
+    in property <color> tint: Theme.accent-ink;
+    in property <color> track: Theme.border-weak-base;
+    in property <length> thickness: 2.5px;
+    // The arc's end never meets its start: a closed arc draws nothing.
+    property <float> shown: clamp(root.fraction, 0, 0.999);
+    property <color> ink: root.tint;
+    // In the path's own units, 100 across, with the stroke inside it.
+    property <float> radius: 50 - 50 * (root.thickness / root.width);
+    animate shown {
+        duration: Motion.slide * 2;
+        easing: ease-out;
+    }
+    animate ink { duration: Motion.slide * 2; }
+
+    Path {
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: root.track;
+        stroke-width: root.thickness;
+        MoveTo {
+            x: 50;
+            y: 50 - root.radius;
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: 50;
+            y: 50 + root.radius;
+            sweep: true;
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: 50;
+            y: 50 - root.radius;
+            sweep: true;
+        }
+    }
+    if root.shown > 0.004: Path {
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: root.ink;
+        stroke-width: root.thickness;
+        stroke-line-cap: round;
+        MoveTo {
+            x: 50;
+            y: 50 - root.radius;
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: 50 + root.radius * sin(root.shown * 360deg);
+            y: 50 - root.radius * cos(root.shown * 360deg);
+            sweep: true;
+            large-arc: root.shown > 0.5;
+        }
+    }
+}
+
 /// A square button holding one icon.
 export component IconButton inherits Press {
     in property <string> glyph;

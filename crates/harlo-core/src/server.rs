@@ -34,9 +34,9 @@ pub use harlo_client::{
     ModelUsage, NewAction, NewAutomation, Note, NoteScope, NoteSource, OAuthAttempt,
     PROJECT_COLORS, PermissionReply, PhoneDevice, PhoneRelay, PhoneState as ServerPhone,
     PhoneWanted, Picture, Plugin, PluginSetting, PluginState, ProjectChange, Prompt, Proposal,
-    ProposalKind, Provider, Pty, PtyInput, PtyOutput, PublishedPlugin, Rule, SavedApproval,
-    ScriptCall, SessionContext, ShellRun, ShellStatus, SignInMethod, Skill, Stats, Tokens,
-    WebSearch, message_id,
+    ProposalKind, Provider, ProviderUsage, Pty, PtyInput, PtyOutput, PublishedPlugin, Rule,
+    SavedApproval, ScriptCall, SessionContext, ShellRun, ShellStatus, SignInMethod, Skill, Stats,
+    Tokens, UsageAmount, UsageLimit, WebSearch, message_id,
 };
 
 /// The longest wait between reconnection attempts.

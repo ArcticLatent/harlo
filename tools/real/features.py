@@ -52,6 +52,8 @@ Each case has a project and a session of its own:
                 and sent with a message that mentions one
     mcpretry    an MCP server that couldn't be reached is connected by the next turn half a minute on
     searchover  the search service the config names is limited, and the search goes to another
+    usage       after a turn on the plan, the server tells the usage meter the plan is signed in, where its
+                limits show, and that no limit was reached
     ssh         the server is followed over SSH (a private sshd on a loopback port), and a session is run
                 through the tunnel (the ignored Rust test real_ssh)
 
@@ -1787,6 +1789,21 @@ def searchover(c):
                 sum(1 for subject in subjects if subject.lower() in said(new).lower()) >= 6, said(new)[:300])
 
 
+def usage(c):
+    c.turn("Explain in one line what the mean function in stats.py returns for [2, 4].")
+    read = c.run.call("GET", "/harlo/usage")["data"]
+    provider = c.run.model.split("/")[0]
+    mine = next((entry for entry in read if entry.get("providerID") == provider), None)
+    c.check("the plan's provider is among the readings", mine is not None, json.dumps(read)[:300])
+    if mine is None:
+        return
+    c.check("it is told as a plan, with the page that shows its limits",
+            bool(mine.get("plan")) and str(mine.get("manage", "")).startswith("https://"), json.dumps(mine))
+    c.check("no limit was reached by a turn that was answered", mine.get("reached") is False, json.dumps(mine))
+    c.check("it claims no limit the provider doesn't tell", mine.get("limits") == [], json.dumps(mine))
+    c.say(f"usage: {json.dumps(mine)}")
+
+
 CASES = {"approvals": approvals, "question": question, "subagent": subagent, "compaction": compaction,
          "plan": plan, "stop": stop, "steer": steer, "undo": undo, "recall": recall, "skill": skill, "mcp": mcp,
          "webfetch": webfetch, "image": image, "aside": aside, "title": title, "schedule": schedule,
@@ -1795,7 +1812,7 @@ CASES = {"approvals": approvals, "question": question, "subagent": subagent, "co
          "schedulescript": schedulescript, "scheduleoutside": scheduleoutside, "eventtrigger": eventtrigger, "fork": fork, "always": always,
          "model": model, "custom": custom, "switches": switches, "bang": bang, "queue": queue,
          "everywhere": everywhere, "commit": commit, "mcpremote": mcpremote, "ssh": ssh, "mcpretry": mcpretry,
-         "searchover": searchover}
+         "searchover": searchover, "usage": usage}
 
 
 def main():

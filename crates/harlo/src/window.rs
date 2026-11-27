@@ -1244,6 +1244,9 @@ fn connect(window: &AppWindow, controller: &Rc<Controller>) {
     send!(on_toggle_phone_pause, || Message::Phone(
         crate::app::PhoneEvent::TogglePause
     ));
+    send!(on_pin_meter, |provider| Message::Meter(
+        crate::app::MeterEvent::Pin(provider.to_string())
+    ));
     send!(on_pick_avatar, |index| Message::PickAvatar(
         usize::try_from(index).unwrap_or(0)
     ));

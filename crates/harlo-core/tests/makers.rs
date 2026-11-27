@@ -33,8 +33,8 @@ fn providers_show_their_makers_logo() {
 #[test]
 fn every_logo_is_in_the_window_and_in_the_phone_app() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let sidebar = std::fs::read_to_string(root.join("crates/harlo/ui/sidebar.slint"))
-        .expect("the sidebar's source");
+    let widgets = std::fs::read_to_string(root.join("crates/harlo/ui/widgets.slint"))
+        .expect("the widgets' source");
     // The window numbers them in `LOGOS`' order.
     let mut from = 0;
     for name in LOGOS {
@@ -43,11 +43,21 @@ fn every_logo_is_in_the_window_and_in_the_phone_app() {
             root.join("crates/harlo/ui").join(&file).is_file(),
             "{file} is missing"
         );
-        let at = sidebar[from..]
+        let at = widgets[from..]
             .find(&file)
-            .unwrap_or_else(|| panic!("the sidebar lists {file} out of order, or not at all"));
+            .unwrap_or_else(|| panic!("the window lists {file} out of order, or not at all"));
         from += at + file.len();
         let asset = format!("ios/Harlo/Shared/Shared.xcassets/Maker-{name}.imageset");
         assert!(root.join(&asset).is_dir(), "{asset} is missing");
     }
+}
+
+#[test]
+fn every_logo_has_a_name_people_know_it_by() {
+    for id in LOGOS {
+        assert!(harlo_core::makers::name(id).is_some(), "{id} has no name");
+    }
+    assert_eq!(harlo_core::makers::name("claude-agent"), Some("Claude"));
+    assert_eq!(harlo_core::makers::name("opencode-go"), Some("OpenCode"));
+    assert_eq!(harlo_core::makers::name("ollama"), None);
 }

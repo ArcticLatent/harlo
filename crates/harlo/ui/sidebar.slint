@@ -5,7 +5,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme, Size, Fonts } from "theme.slint";
 import { Icons } from "icons.slint";
 import { State, Logic, SidebarRow, RowKind } from "data.slint";
-import { Icon, Press, Dot, Breathing, Spinner, Field, VLine, ProjectMark, QuietBar } from "widgets.slint";
+import { Icon, Press, Dot, Breathing, Spinner, Field, VLine, ProjectMark, QuietBar, Makers } from "widgets.slint";
 
 /// Space between the sidebar's edge and its content.
 global Inset {
@@ -26,25 +26,6 @@ component Maker inherits Rectangle {
     in property <bool> unread;
     /// What is behind the tile, which rings the badge.
     in property <color> behind;
-    /// The logos, in `LOGOS`' order.
-    property <[image]> logos: [
-        @image-url("images/providers/anthropic.svg"),
-        @image-url("images/providers/openai.svg"),
-        @image-url("images/providers/zai-coding-plan.svg"),
-        @image-url("images/providers/claude-code.svg"),
-        @image-url("images/providers/google.svg"),
-        @image-url("images/providers/xai.svg"),
-        @image-url("images/providers/deepseek.svg"),
-        @image-url("images/providers/mistral.svg"),
-        @image-url("images/providers/minimax-coding-plan.svg"),
-        @image-url("images/providers/kimi-for-coding.svg"),
-        @image-url("images/providers/groq.svg"),
-        @image-url("images/providers/cerebras.svg"),
-        @image-url("images/providers/together.svg"),
-        @image-url("images/providers/fireworks.svg"),
-        @image-url("images/providers/openrouter.svg"),
-        @image-url("images/providers/opencode.svg"),
-    ];
     width: 18px;
     height: 26px;
 
@@ -53,10 +34,10 @@ component Maker inherits Rectangle {
         font-size: 15px;
         color: Theme.icon-quiet;
     }
-    if root.maker > 0 && root.maker <= root.logos.length: Image {
+    if root.maker > 0 && root.maker <= Makers.logos.length: Image {
         width: 15px;
         height: 15px;
-        source: root.logos[root.maker - 1];
+        source: Makers.logos[root.maker - 1];
         colorize: root.tone;
     }
     // On the logo's lower right corner, mostly beside it, and ringed so
