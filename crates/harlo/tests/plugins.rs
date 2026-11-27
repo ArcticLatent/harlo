@@ -176,16 +176,20 @@ fn a_plugin_is_added_allowed_turned_off_and_removed() {
         }),
         "nothing newer to fetch"
     );
+    // A step is over once the page says so: the list can show its
+    // outcome sooner, read by a reload the step before it started, and a
+    // press while a step is under way does nothing.
+    let stands = |ui: &Ui, wanted: PluginState| {
+        !ui.app().sheets.plugins.busy && state(ui, "helper") == Some(wanted)
+    };
     ui.press("Turn off");
     assert!(
-        tasks.until(&ui, WAIT, |ui| state(ui, "helper")
-            == Some(PluginState::Off)),
+        tasks.until(&ui, WAIT, |ui| stands(ui, PluginState::Off)),
         "turned off"
     );
     ui.press("Turn on");
     assert!(
-        tasks.until(&ui, WAIT, |ui| state(ui, "helper")
-            == Some(PluginState::Active)),
+        tasks.until(&ui, WAIT, |ui| stands(ui, PluginState::Active)),
         "turned on again"
     );
 
