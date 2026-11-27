@@ -98,6 +98,27 @@ pub struct Agent {
     pub hidden: bool,
 }
 
+impl Agent {
+    /// What the model is told when a session switches away from this agent.
+    ///
+    /// An agent with instructions of its own and nothing set to say gets a
+    /// plain word that they ended: its replies stay in the conversation,
+    /// and a model goes on doing what it sees itself having done.
+    #[must_use]
+    pub fn leaving(&self) -> Option<String> {
+        self.left.clone().or_else(|| {
+            self.system.as_ref().map(|_| {
+                format!(
+                    "<system-update>\nYou are no longer acting as the {} agent. Its instructions, \
+                     and the way you followed them earlier in this conversation, no longer \
+                     apply.\n</system-update>",
+                    self.name
+                )
+            })
+        })
+    }
+}
+
 /// The agent a session runs as when none was chosen.
 pub const DEFAULT: &str = "build";
 

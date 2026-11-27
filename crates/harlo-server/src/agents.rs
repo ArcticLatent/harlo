@@ -61,7 +61,7 @@ impl Server {
         if before.id == next.id {
             return Ok(());
         }
-        let notices: Vec<String> = [before.left.clone(), next.entered.clone()]
+        let notices: Vec<String> = [before.leaving(), next.entered.clone()]
             .into_iter()
             .flatten()
             .collect();

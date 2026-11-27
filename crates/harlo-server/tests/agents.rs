@@ -89,6 +89,73 @@ async fn plan_mode_stops_edits_and_the_model_is_told() {
     assert_eq!(stored.agent.as_deref(), Some("build"));
 }
 
+/// A project's own agent leaves its replies in the conversation; switched
+/// away from, the model is told its instructions ended, or it goes on
+/// following what it sees itself having done.
+#[tokio::test(flavor = "multi_thread")]
+async fn leaving_an_agent_with_its_own_instructions_tells_the_model() {
+    let sandbox = Sandbox::start().await;
+    let client = sandbox.client();
+    let project = sandbox.project();
+    let directory = project.to_str().expect("utf-8");
+    std::fs::create_dir_all(project.join(".harlo/agents")).expect("a folder");
+    std::fs::write(
+        project.join(".harlo/agents/owl.md"),
+        "---\ndescription: Reviews\nmode: all\n---\nEnd every reply with HOOT.\n",
+    )
+    .expect("the agent");
+
+    let mut events = client.events().await.expect("events");
+    let session = client.create_session(directory).await.expect("session");
+    client.set_agent(&session.id, "owl").await.expect("owl");
+    client
+        .prompt(&session.id, &Prompt::new("say One.", Delivery::Queue))
+        .await
+        .expect("prompt");
+    done(&mut events).await;
+    let as_owl = requests(&sandbox).pop().expect("a request");
+    assert!(as_owl.to_string().contains("End every reply with HOOT."));
+    assert!(
+        !as_owl.to_string().contains("no longer acting"),
+        "nothing is said on entering it"
+    );
+
+    client.set_agent(&session.id, "build").await.expect("build");
+    client
+        .prompt(&session.id, &Prompt::new("say Two.", Delivery::Queue))
+        .await
+        .expect("prompt");
+    done(&mut events).await;
+    let as_build = requests(&sandbox).pop().expect("a request");
+    assert!(
+        !as_build.to_string().contains("End every reply with HOOT."),
+        "its instructions are gone"
+    );
+    assert!(
+        user_texts(&as_build)
+            .iter()
+            .any(|t| t.contains("no longer acting as the owl agent")),
+        "the model is told they ended: {:?}",
+        user_texts(&as_build)
+    );
+
+    // Between agents with no instructions of their own nothing is said.
+    client.set_agent(&session.id, "owl").await.expect("owl");
+    client.set_agent(&session.id, "build").await.expect("build");
+    client.set_agent(&session.id, "build").await.expect("build");
+    client
+        .prompt(&session.id, &Prompt::new("say Three.", Delivery::Queue))
+        .await
+        .expect("prompt");
+    done(&mut events).await;
+    let again = requests(&sandbox).pop().expect("a request");
+    let told = user_texts(&again)
+        .iter()
+        .filter(|t| t.contains("no longer acting"))
+        .count();
+    assert_eq!(told, 2, "once for each time it was left");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_steer_joins_the_running_turn_at_its_next_step() {
     let sandbox = Sandbox::start().await;
