@@ -10,9 +10,18 @@
 //! any other, replacing the note it contradicts when it names one.
 //!
 //! A session is read once per stretch: where the last look ended is kept
-//! with it. A message that already led to proposals leads to no more, and
+//! with it, and moves on only when the model's answer was a list, empty
+//! or not. A message that already led to proposals leads to no more, and
 //! neither does a text already proposed or kept, so a dismissed proposal
 //! doesn't come back.
+//!
+//! Only what was said while notes were on is read. Turning notes off, or
+//! off and on again, also drops what a look already under way finds. A
+//! session that goes idle again during a look is read once more after it.
+//!
+//! A goal the person set with `/goal` counts as their request; what the
+//! server writes for the goal afterward (the reviewer's send-backs, a
+//! resume) is shown as that and never taken for the person's words.
 
 // Rust guideline compliant 2026-10-09
 
@@ -27,7 +36,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::server::{Refusal, Server, lock};
-use crate::store::Session;
+use crate::store::{Decided, Session};
 
 /// The most notes one look proposes.
 const MOST: usize = 3;
@@ -153,7 +162,23 @@ fn lines(message: &Message) -> Option<String> {
                 .map_or_else(|| run.status.clone(), |code| format!("exit {code}"))
         ),
         Message::Assistant(_) => cut(&crate::store::searched(message), AGENT_CHARS),
-        Message::Synthetic { .. } | Message::Idle { .. } | Message::Compaction(_) => String::new(),
+        Message::Synthetic {
+            text, description, ..
+        } => match goal_prompt(message) {
+            // What the person typed: the goal's first prompt is shown to
+            // people as "Goal: <objective>".
+            Some(GoalPrompt::Set) => description
+                .as_deref()
+                .and_then(|shown| shown.strip_prefix("Goal: "))
+                .map(|objective| format!("/goal {}", cut(objective, PERSON_CHARS)))
+                .unwrap_or_default(),
+            // Its first paragraph: the objective follows, said before.
+            Some(GoalPrompt::FollowUp) => {
+                cut(text.split("\n\n").next().unwrap_or_default(), FAILURE_CHARS)
+            }
+            None => String::new(),
+        },
+        Message::Idle { .. } | Message::Compaction(_) => String::new(),
     };
     if let Message::Assistant(step) = message {
         for part in &step.content {
@@ -188,32 +213,83 @@ fn lines(message: &Message) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
+/// A prompt the server wrote for a goal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoalPrompt {
+    /// The first one: the person set the goal with `/goal`.
+    Set,
+    /// A later one: the reviewer sent the agent back, or the goal was
+    /// taken up again. Nothing the person said.
+    FollowUp,
+}
+
+/// Which prompt of a goal `message` is, when the server wrote it for one.
+///
+/// A goal's later prompts say which round they start; its first doesn't.
+fn goal_prompt(message: &Message) -> Option<GoalPrompt> {
+    let Message::Synthetic {
+        metadata: Some(data),
+        ..
+    } = message
+    else {
+        return None;
+    };
+    (data["source"] == "goal").then(|| {
+        if data["round"].is_null() {
+            GoalPrompt::Set
+        } else {
+            GoalPrompt::FollowUp
+        }
+    })
+}
+
+/// Whether `message` is something the person asked for or said: a
+/// message of theirs, or a goal they set.
+fn from_person(message: &Message) -> bool {
+    matches!(message, Message::User { .. }) || goal_prompt(message) == Some(GoalPrompt::Set)
+}
+
 /// Who wrote `message`, as a transcript names them.
 fn who(message: &Message) -> &'static str {
     match message {
-        Message::User { .. } => "Person",
+        _ if from_person(message) => "Person",
+        Message::Synthetic { .. } => "Goal follow-up",
         Message::Shell(_) => "Command",
         _ => "Agent",
     }
 }
 
 /// `messages` as a stretch.
+///
+/// A proposal can name any message shown except a goal's follow-up,
+/// which nobody said.
 fn stretch(messages: &[Message]) -> Stretch {
     let mut out = Stretch::default();
     for message in messages {
-        match message {
-            Message::User { .. } => out.persons += 1,
-            Message::Assistant(_) => out.steps += 1,
-            _ => {}
+        if from_person(message) {
+            out.persons += 1;
+        } else if matches!(message, Message::Assistant(_)) {
+            out.steps += 1;
         }
         if let Some(text) = lines(message) {
             let id = message.id().to_owned();
-            out.excerpts.insert(id.clone(), cut(&text, EXCERPT_CHARS));
+            if goal_prompt(message) != Some(GoalPrompt::FollowUp) {
+                out.excerpts.insert(id.clone(), cut(&text, EXCERPT_CHARS));
+            }
             out.said
                 .push((id.clone(), format!("{} ({id}):\n{text}\n", who(message))));
         }
     }
     out
+}
+
+/// The list a model answered with, whatever stands around it; none when
+/// the answer isn't one: cut short, or not JSON at all.
+///
+/// An empty list is an answer: the stretch held nothing to propose.
+fn listed(answer: &str) -> Option<Vec<Value>> {
+    let (from, to) = answer.find('[').zip(answer.rfind(']'))?;
+    serde_json::from_str(answer.get(from..=to)?).ok()
 }
 
 impl Stretch {
@@ -244,26 +320,20 @@ impl Stretch {
     }
 }
 
-/// The proposals in a model's `answer` that may be shown to the person,
-/// as ones of `session`.
+/// The proposals a model `listed` that may be shown to the person, as
+/// ones of `session`.
 ///
 /// One is left out when the message it names isn't in the stretch
 /// (`excerpts`), when that message led to proposals in an earlier look, or
 /// when its text is one already proposed (`earlier`, whatever came of it)
 /// or still kept (`notes`). A note it says it replaces must still hold.
 fn admitted(
-    answer: &str,
+    listed: &[Value],
     session: &Session,
     excerpts: &HashMap<String, String>,
     notes: &[Note],
     earlier: &[Proposal],
 ) -> Vec<Proposal> {
-    let listed = answer
-        .find('[')
-        .zip(answer.rfind(']'))
-        .and_then(|(from, to)| answer.get(from..=to))
-        .and_then(|list| serde_json::from_str::<Vec<Value>>(list).ok())
-        .unwrap_or_default();
     let holding: Vec<&Note> = notes.iter().filter(|n| n.superseded_by.is_none()).collect();
     let mut taken: Vec<String> = earlier
         .iter()
@@ -326,90 +396,102 @@ impl Server {
         Ok(all)
     }
 
-    /// Proposal `id`, while it waits for the person.
-    fn pending(&self, id: &str) -> Result<Proposal, Refusal> {
-        let found = self
-            .store
-            .proposal(id)?
-            .ok_or_else(|| Refusal::NotFound(format!("No proposal {id}.")))?;
-        if found.state == State::Pending {
-            Ok(found)
-        } else {
-            Err(Refusal::Bad(
-                "That proposal was already decided.".to_owned(),
-            ))
-        }
-    }
-
     /// Keeps proposal `id` as a note saying `text`, or what it proposed.
     ///
     /// The note names the proposal's session and message as its source.
     /// The note the proposal would replace, when it still holds, is
     /// replaced by it, as when the agent keeps a note that replaces one.
+    /// All of it is one change in the store: of two decisions on one
+    /// proposal, one is refused.
     pub(crate) fn accept_proposal(&self, id: &str, text: Option<&str>) -> Result<Note, Refusal> {
-        let mut proposal = self.pending(id)?;
-        let text = text.unwrap_or(&proposal.text).trim();
-        if text.is_empty() {
+        if text.is_some_and(|text| text.trim().is_empty()) {
             return Err(Refusal::Bad("A note needs text.".to_owned()));
         }
-        let note = Note {
-            id: ascending_id("not"),
-            scope: proposal.scope,
-            project: proposal.project.clone(),
-            text: text.to_owned(),
-            source: proposal.source.clone(),
-            created: now(),
-            superseded_by: None,
-        };
-        self.store.put_note(&note)?;
-        let replaced = match &proposal.replaces {
-            Some(old) => self.store.note(old)?,
-            None => None,
-        };
-        if let Some(mut old) = replaced.filter(|old| old.superseded_by.is_none()) {
-            old.superseded_by = Some(note.id.clone());
-            self.store.put_note(&old)?;
+        let decided = self
+            .store
+            .keep_proposal(id, text, &ascending_id("not"), now())?;
+        match decided {
+            Decided::Kept(note) => {
+                self.refresh_prompts();
+                Ok(*note)
+            }
+            other => Err(refused(id, &other)),
         }
-        proposal.text.clone_from(&note.text);
-        proposal.state = State::Accepted;
-        proposal.note = Some(note.id.clone());
-        self.store.put_proposal(&proposal)?;
-        self.refresh_prompts();
-        Ok(note)
     }
 
-    /// Turns proposal `id` down. It is kept, so it isn't proposed again.
+    /// Turns proposal `id` down, while it waits for the person. It is
+    /// kept, so it isn't proposed again.
     pub(crate) fn dismiss_proposal(&self, id: &str) -> Result<(), Refusal> {
-        let mut proposal = self.pending(id)?;
-        proposal.state = State::Dismissed;
-        self.store.put_proposal(&proposal)?;
-        Ok(())
+        match self.store.dismiss_proposal(id)? {
+            Decided::Dismissed => Ok(()),
+            other => Err(refused(id, &other)),
+        }
     }
 
     /// Looks, in the background, for notes worth proposing in what
     /// session `id` did since it was last looked at. Nothing happens with
     /// notes off.
+    ///
+    /// While the session is being read, this only notes that it went
+    /// idle again: it is then read once more when that look ends, so a
+    /// turn that ends during a look isn't left waiting for the next one.
     pub(crate) fn propose_later(self: &Arc<Self>, id: &str) {
-        if !self.memory_on() || !lock(&self.live).proposing.insert(id.to_owned()) {
+        if !self.memory_on() {
+            return;
+        }
+        let reading = {
+            let mut live = lock(&self.live);
+            let reading = live.proposing.get_mut(id).map(|again| *again = true);
+            if reading.is_none() {
+                live.proposing.insert(id.to_owned(), false);
+            }
+            reading.is_some()
+        };
+        if reading {
             return;
         }
         let (server, id) = (Arc::clone(self), id.to_owned());
         tokio::spawn(async move {
-            if let Err(why) = server.propose(&id).await {
-                tracing::warn!(name: "notes.propose.failed", error = %why, "couldn't look for notes to propose");
+            loop {
+                if let Err(why) = server.propose(&id).await {
+                    tracing::warn!(name: "notes.propose.failed", error = %why, "couldn't look for notes to propose");
+                }
+                let again = {
+                    let mut live = lock(&server.live);
+                    let again = live.proposing.get(&id).copied().unwrap_or_default();
+                    if again {
+                        live.proposing.insert(id.clone(), false);
+                    } else {
+                        live.proposing.remove(&id);
+                    }
+                    again
+                };
+                if !again {
+                    break;
+                }
             }
-            lock(&server.live).proposing.remove(&id);
         });
     }
 
     /// Reads session `id`'s new stretch and stores what a model proposes
     /// from it; returns how many proposals that made.
     ///
+    /// The stretch begins after the last look, and never before notes
+    /// were last turned on: what was said with notes off isn't read, nor
+    /// shown as what came before. When notes are switched while the model
+    /// answers, what it found is dropped.
+    ///
     /// # Errors
     ///
-    /// When the session can't be read or the model can't be asked. The
-    /// stretch is then looked at again with the next one.
+    /// When the session can't be read, the model can't be asked, or its
+    /// answer isn't a list (cut short, or not JSON). The stretch is then
+    /// looked at again with the next one.
     async fn propose(self: &Arc<Self>, id: &str) -> Result<usize, String> {
+        // (Notes may have been turned off since this was asked for.)
+        let switched = lock(&self.live).memory_changes;
+        if !self.memory_on() {
+            return Ok(0);
+        }
         // (A session deleted meanwhile has nothing left to read, and a
         // subagent's holds no words of the person's.)
         let Some(session) = self.store.session(id).map_err(|e| e.to_string())? else {
@@ -419,12 +501,15 @@ impl Server {
             return Ok(0);
         }
         let mark = format!("proposals/{id}");
-        let past = self.store.setting(&mark).map_err(|e| e.to_string())?;
+        let looked = self.store.setting(&mark).map_err(|e| e.to_string())?;
+        let on_from = self.memory_from();
         let all = self.store.messages(id).map_err(|e| e.to_string())?;
-        let from = past
-            .as_deref()
-            .map_or(0, |past| all.partition_point(|m| m.id() <= past));
-        let (old, new) = all.split_at(from);
+        let after =
+            |past: Option<&str>| past.map_or(0, |past| all.partition_point(|m| m.id() <= past));
+        // (IDs sort by when they were made, so the later mark is the greater.)
+        let from = after(looked.as_deref()).max(after(on_from.as_deref()));
+        let old = all.get(after(on_from.as_deref())..from).unwrap_or_default();
+        let new = all.get(from..).unwrap_or_default();
         let Some(newest) = new.last().map(|m| m.id().to_owned()) else {
             return Ok(0);
         };
@@ -462,12 +547,22 @@ impl Server {
         )
         .await
         .map_err(|e| e.to_string())?;
+        // (The mark stays where it was: the stretch is read again.)
+        let listed = listed(&answer)
+            .ok_or_else(|| "the model's answer wasn't a list of proposals".to_owned())?;
 
         let earlier = self
             .store
             .proposals(Some(&session.project_id))
             .map_err(|e| e.to_string())?;
-        let found = admitted(&answer, &session, &read.excerpts, &notes, &earlier);
+        let found = admitted(&listed, &session, &read.excerpts, &notes, &earlier);
+        // Stored only if notes are on as they were when the look began.
+        // The switch changes under this lock, so it can't change between
+        // the check and the writes.
+        let live = lock(&self.live);
+        if live.memory_changes != switched || !self.memory_on() {
+            return Ok(0);
+        }
         for proposal in &found {
             self.store
                 .put_proposal(proposal)
@@ -476,7 +571,16 @@ impl Server {
         self.store
             .put_setting(&mark, &newest)
             .map_err(|e| e.to_string())?;
+        drop(live);
         Ok(found.len())
+    }
+}
+
+/// Why deciding proposal `id` was refused, given what the store `found`.
+fn refused(id: &str, found: &Decided) -> Refusal {
+    match found {
+        Decided::Missing => Refusal::NotFound(format!("No proposal {id}.")),
+        _ => Refusal::Bad("That proposal was already decided.".to_owned()),
     }
 }
 
@@ -548,6 +652,150 @@ mod tests {
         assert!(text.contains("(msg_39)") && !text.contains("(msg_00)"));
     }
 
+    /// A prompt the server wrote for a goal: its first, or the one that
+    /// starts `round`.
+    fn goal(id: &str, text: &str, shown: Option<&str>, round: Option<u64>) -> Message {
+        let mut metadata = json!({ "source": "goal", "goalID": "goal_1" });
+        if let Some(round) = round {
+            metadata["round"] = json!(round);
+        }
+        Message::Synthetic {
+            id: id.to_owned(),
+            time: Created { created: 0 },
+            text: text.to_owned(),
+            description: shown.map(str::to_owned),
+            metadata: Some(metadata),
+        }
+    }
+
+    fn step(id: &str, text: &str) -> Message {
+        Message::Assistant(Box::new(harlo_engine::Assistant {
+            id: id.to_owned(),
+            time: harlo_engine::StepTime::default(),
+            agent: "build".to_owned(),
+            model: harlo_engine::ModelRef {
+                provider: "fake".to_owned(),
+                model: "fake-coder".to_owned(),
+                variant: None,
+            },
+            content: vec![Part::Text {
+                text: text.to_owned(),
+            }],
+            finish: None,
+            raw_finish: None,
+            cost: 0.0,
+            tokens: harlo_engine::Tokens::default(),
+            error: None,
+            snapshot: None,
+        }))
+    }
+
+    #[test]
+    fn a_goal_the_person_set_is_their_request_and_its_follow_ups_are_not() {
+        let set = goal(
+            "msg_1",
+            "This session now has a goal. Keep working.\n\n<objective>\nShip it\n</objective>",
+            Some("Goal: Ship it, and always run the linter first."),
+            None,
+        );
+        let sent_back = goal(
+            "msg_4",
+            "The reviewer says the goal isn't met yet: b.txt is missing.\nNext: Write b.txt.\n\n\
+             Keep going.\n\n<objective>\nShip it\n</objective>",
+            None,
+            Some(1),
+        );
+        let resumed = goal(
+            "msg_6",
+            "Pick the goal up again where it stopped.\n\n<objective>\nShip it\n</objective>\n",
+            None,
+            Some(2),
+        );
+        // A session driven by the goal alone: the goal is the request.
+        let alone = [
+            set.clone(),
+            step("msg_2", "Linting."),
+            step("msg_3", "Shipped."),
+        ];
+        let read = stretch(&alone);
+        assert_eq!((read.persons, read.steps), (1, 2));
+        assert!(read.substantive(), "a goal and the work for it");
+        assert_eq!(
+            read.excerpts["msg_1"],
+            "/goal Ship it, and always run the linter first."
+        );
+        assert!(
+            read.text().starts_with(
+                "Person (msg_1):\n/goal Ship it, and always run the linter first.\nAgent (msg_2):"
+            ),
+            "{}",
+            read.text()
+        );
+
+        // What the server wrote for the goal afterward is shown as that:
+        // it isn't the person speaking, and no proposal can name it.
+        let later = [
+            sent_back,
+            step("msg_5", "b.txt is written."),
+            resumed,
+            step("msg_7", "Done."),
+        ];
+        let read = stretch(&later);
+        assert_eq!((read.persons, read.steps), (0, 2));
+        assert!(!read.substantive(), "nobody said anything");
+        let text = read.text();
+        assert!(
+            text.contains(
+                "Goal follow-up (msg_4):\nThe reviewer says the goal isn't met yet: b.txt is missing.\nNext: Write b.txt.\nAgent (msg_5):"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Goal follow-up (msg_6):\nPick the goal up again where it stopped.\n"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Person") && !text.contains("<objective>"),
+            "{text}"
+        );
+        assert!(!read.excerpts.contains_key("msg_4") && !read.excerpts.contains_key("msg_6"));
+        let named = json!([{ "text": "Write b.txt first.", "message": "msg_4" }]);
+        let named = named.as_array().expect("a list");
+        assert!(admitted(named, &session(), &read.excerpts, &[], &[]).is_empty());
+
+        // A prompt the server wrote for something else says nothing.
+        let other = Message::Synthetic {
+            id: "msg_8".to_owned(),
+            time: Created { created: 0 },
+            text: "A subagent answered.".to_owned(),
+            description: None,
+            metadata: Some(json!({ "source": "subagent" })),
+        };
+        assert!(stretch(&[other]).said.is_empty());
+    }
+
+    #[test]
+    fn an_empty_list_is_an_answer_and_a_broken_one_is_not() {
+        assert_eq!(listed("[]"), Some(Vec::new()));
+        assert_eq!(
+            listed("Nothing durable here.\n```json\n[]\n```"),
+            Some(Vec::new())
+        );
+        let one = listed(r#"Here: [{"text":"Use SQLite.","message":"msg_2"}] Done."#);
+        assert_eq!(one.map(|list| list.len()), Some(1));
+        // Cut short, not a list, or no JSON at all: nothing was answered.
+        for broken in [
+            r#"[{"text":"Use SQLite.","message":"msg_"#,
+            r#"[{"text":"Use SQLite."}, {"text":"Cut"#,
+            r#"{"text":"Use SQLite.","message":"msg_2"}"#,
+            "[not json]",
+            "I found nothing worth keeping.",
+            "",
+        ] {
+            assert_eq!(listed(broken), None, "{broken}");
+        }
+    }
+
     #[test]
     fn a_proposal_names_its_message_and_only_a_holding_note_to_replace() {
         let excerpts = HashMap::from([("msg_2".to_owned(), "No, use SQLite.".to_owned())]);
@@ -562,7 +810,13 @@ mod tests {
             {"text":"Prefers short answers.","kind":"pitfall","scope":"user","message":"msg_2","replaces":"not_0"},
             {"kind":"decision","message":"msg_2"}
         ] done"#;
-        let found = admitted(answer, &session(), &excerpts, &notes, &[]);
+        let found = admitted(
+            &listed(answer).expect("a list"),
+            &session(),
+            &excerpts,
+            &notes,
+            &[],
+        );
         assert_eq!(found.len(), 2, "{found:#?}");
         let first = &found[0];
         assert_eq!(first.text, "Cache in SQLite: one file.");
@@ -578,7 +832,6 @@ mod tests {
         assert_eq!(found[1].scope, Scope::User);
         assert_eq!(found[1].project, None);
         assert_eq!(found[1].replaces, None);
-        assert!(admitted("no list here", &session(), &excerpts, &notes, &[]).is_empty());
     }
 
     #[test]
@@ -589,21 +842,64 @@ mod tests {
         ]);
         let answer =
             r#"[{"text":"Cache in SQLite: one file.","kind":"correction","message":"msg_2"}]"#;
-        let mut first = admitted(answer, &session(), &excerpts, &[], &[]);
+        let mut first = admitted(
+            &listed(answer).expect("a list"),
+            &session(),
+            &excerpts,
+            &[],
+            &[],
+        );
         assert_eq!(first.len(), 1);
         first[0].state = State::Dismissed;
         // The same answer again, as when the session is looked at again.
-        assert!(admitted(answer, &session(), &excerpts, &[], &first).is_empty());
+        assert!(
+            admitted(
+                &listed(answer).expect("a list"),
+                &session(),
+                &excerpts,
+                &[],
+                &first
+            )
+            .is_empty()
+        );
         // Other words about the same message.
         let reworded =
             r#"[{"text":"Use SQLite for the cache.","kind":"decision","message":"msg_2"}]"#;
-        assert!(admitted(reworded, &session(), &excerpts, &[], &first).is_empty());
+        assert!(
+            admitted(
+                &listed(reworded).expect("a list"),
+                &session(),
+                &excerpts,
+                &[],
+                &first
+            )
+            .is_empty()
+        );
         // The same words from a later message.
         let later =
             r#"[{"text":"cache in SQLite, one file","kind":"correction","message":"msg_5"}]"#;
-        assert!(admitted(later, &session(), &excerpts, &[], &first).is_empty());
+        assert!(
+            admitted(
+                &listed(later).expect("a list"),
+                &session(),
+                &excerpts,
+                &[],
+                &first
+            )
+            .is_empty()
+        );
         // Something else from a later message is proposed.
         let other = r#"[{"text":"Tests run with nextest.","kind":"decision","message":"msg_5"}]"#;
-        assert_eq!(admitted(other, &session(), &excerpts, &[], &first).len(), 1);
+        assert_eq!(
+            admitted(
+                &listed(other).expect("a list"),
+                &session(),
+                &excerpts,
+                &[],
+                &first
+            )
+            .len(),
+            1
+        );
     }
 }

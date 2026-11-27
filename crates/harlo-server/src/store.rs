@@ -17,7 +17,7 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::proposals::Proposal;
+use crate::proposals::{Proposal, State};
 
 /// A failure to read or write the store.
 pub type Error = rusqlite::Error;
@@ -169,6 +169,19 @@ pub struct Store {
     conn: Mutex<Connection>,
     /// The connection reads go through; a store in memory has only the one.
     reads: Option<Mutex<Connection>>,
+}
+
+/// What came of deciding a proposed note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decided {
+    /// There is no such proposal.
+    Missing,
+    /// It was accepted or dismissed before; nothing changed.
+    Already,
+    /// It is now this note.
+    Kept(Box<Note>),
+    /// It is now dismissed.
+    Dismissed,
 }
 
 /// How long a connection waits for the other to let go of the file.
@@ -488,6 +501,120 @@ impl Store {
         stmt.query_map([project], |r| r.get::<_, String>(0))?
             .map(|b| serde_json::from_str(&b?).map_err(json_error))
             .collect()
+    }
+
+    /// The proposed note `id` as `all` reads it, with whether it still
+    /// waits for the person.
+    fn undecided(all: &Transaction<'_>, id: &str) -> Result<Result<Proposal, Decided>, Error> {
+        let body: Option<String> = all
+            .query_row("SELECT body FROM proposal WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let Some(body) = body else {
+            return Ok(Err(Decided::Missing));
+        };
+        let proposal: Proposal = serde_json::from_str(&body).map_err(json_error)?;
+        Ok(if proposal.state == State::Pending {
+            Ok(proposal)
+        } else {
+            Err(Decided::Already)
+        })
+    }
+
+    /// Stores `proposal`, decided, as part of `all`.
+    fn decide(all: &Transaction<'_>, proposal: &Proposal) -> Result<(), Error> {
+        let body = serde_json::to_string(proposal).map_err(json_error)?;
+        all.execute(
+            "UPDATE proposal SET body = ?2 WHERE id = ?1",
+            params![proposal.id, body],
+        )?;
+        Ok(())
+    }
+
+    /// Keeps proposed note `id` as the note `note_id`, made at `at`, that
+    /// says `text`, or what was proposed.
+    ///
+    /// All of it happens or none: the proposal is seen to wait for the
+    /// person, the note is stored with the proposal's source, the note it
+    /// would replace (while that one still holds) is marked replaced by
+    /// it, and the proposal is marked accepted. Of two decisions made at
+    /// once, the second finds the proposal [`Decided::Already`].
+    ///
+    /// # Errors
+    ///
+    /// Fails when a read or a write fails; nothing is changed then.
+    pub fn keep_proposal(
+        &self,
+        id: &str,
+        text: Option<&str>,
+        note_id: &str,
+        at: i64,
+    ) -> Result<Decided, Error> {
+        let conn = self.conn();
+        let all = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)?;
+        let mut proposal = match Self::undecided(&all, id)? {
+            Ok(proposal) => proposal,
+            Err(decided) => return Ok(decided),
+        };
+        let note = Note {
+            id: note_id.to_owned(),
+            scope: proposal.scope,
+            project: proposal.project.clone(),
+            text: text.unwrap_or(&proposal.text).trim().to_owned(),
+            source: proposal.source.clone(),
+            created: at,
+            superseded_by: None,
+        };
+        all.execute(
+            "INSERT INTO note (id, project, body) VALUES (?1, ?2, ?3)",
+            params![
+                note.id,
+                note.project,
+                serde_json::to_string(&note).map_err(json_error)?
+            ],
+        )?;
+        let replaced: Option<String> = match &proposal.replaces {
+            Some(old) => all
+                .query_row("SELECT body FROM note WHERE id = ?1", [old], |r| r.get(0))
+                .optional()?,
+            None => None,
+        };
+        if let Some(body) = replaced {
+            let mut old: Note = serde_json::from_str(&body).map_err(json_error)?;
+            if old.superseded_by.is_none() {
+                old.superseded_by = Some(note.id.clone());
+                all.execute(
+                    "UPDATE note SET body = ?2 WHERE id = ?1",
+                    params![old.id, serde_json::to_string(&old).map_err(json_error)?],
+                )?;
+            }
+        }
+        proposal.text.clone_from(&note.text);
+        proposal.state = State::Accepted;
+        proposal.note = Some(note.id.clone());
+        Self::decide(&all, &proposal)?;
+        all.commit()?;
+        Ok(Decided::Kept(Box::new(note)))
+    }
+
+    /// Turns proposed note `id` down, when it still waits for the person;
+    /// it is kept, so it isn't proposed again.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a read or a write fails; nothing is changed then.
+    pub fn dismiss_proposal(&self, id: &str) -> Result<Decided, Error> {
+        let conn = self.conn();
+        let all = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate)?;
+        let mut proposal = match Self::undecided(&all, id)? {
+            Ok(proposal) => proposal,
+            Err(decided) => return Ok(decided),
+        };
+        proposal.state = State::Dismissed;
+        Self::decide(&all, &proposal)?;
+        all.commit()?;
+        Ok(Decided::Dismissed)
     }
 
     /// Setting `key`, if it was set.
@@ -1279,5 +1406,114 @@ mod tests {
         let after = store.events_after(first).expect("after");
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].body["type"], "b");
+    }
+
+    /// A pending proposal `id` that would replace note `replaces`.
+    fn proposed(id: &str, replaces: &str) -> Proposal {
+        Proposal {
+            id: id.to_owned(),
+            scope: harlo_engine::memory::Scope::Project,
+            project: Some("p".to_owned()),
+            text: "Cache in SQLite.".to_owned(),
+            kind: crate::proposals::Kind::Correction,
+            source: harlo_engine::memory::Source {
+                session: "ses_1".to_owned(),
+                message: "msg_1".to_owned(),
+                title: None,
+            },
+            excerpt: "No, SQLite.".to_owned(),
+            created: 1,
+            replaces: Some(replaces.to_owned()),
+            state: State::Pending,
+            note: None,
+        }
+    }
+
+    /// Runs `first` and `second` at the same moment on two threads.
+    fn at_once(
+        first: impl FnOnce() -> Decided + Send,
+        second: impl FnOnce() -> Decided + Send,
+    ) -> [Decided; 2] {
+        let start = std::sync::Barrier::new(2);
+        std::thread::scope(|threads| {
+            let a = threads.spawn(|| {
+                start.wait();
+                first()
+            });
+            let b = threads.spawn(|| {
+                start.wait();
+                second()
+            });
+            [a.join().expect("first"), b.join().expect("second")]
+        })
+    }
+
+    #[test]
+    fn of_two_decisions_on_a_proposal_at_once_one_wins() {
+        let dir = tempfile::tempdir().expect("scratch");
+        let store = Store::open(&dir.path().join("store.db")).expect("store");
+        let old = Note {
+            id: "not_old".to_owned(),
+            scope: harlo_engine::memory::Scope::Project,
+            project: Some("p".to_owned()),
+            text: "Cache in Redis.".to_owned(),
+            source: harlo_engine::memory::Source {
+                session: "ses_0".to_owned(),
+                message: "msg_0".to_owned(),
+                title: None,
+            },
+            created: 0,
+            superseded_by: None,
+        };
+        for round in 0..40 {
+            store.put_note(&old).expect("the old note");
+            let id = format!("prp_{round}");
+            store.put_proposal(&proposed(&id, "not_old")).expect("put");
+            let before = store.notes(Some("p")).expect("notes").len();
+            let keep = |note: String| {
+                let (store, id) = (&store, id.as_str());
+                move || store.keep_proposal(id, None, &note, 5).expect("keep")
+            };
+            // Even rounds: kept twice. Odd rounds: kept and dismissed.
+            let both = if round % 2 == 0 {
+                at_once(keep(format!("not_a{round}")), keep(format!("not_b{round}")))
+            } else {
+                at_once(keep(format!("not_a{round}")), || {
+                    store.dismiss_proposal(&id).expect("dismiss")
+                })
+            };
+            let lost = both.iter().filter(|d| **d == Decided::Already).count();
+            assert_eq!(lost, 1, "one decision finds it decided: {both:?}");
+            let kept: Vec<&Note> = both
+                .iter()
+                .filter_map(|d| match d {
+                    Decided::Kept(note) => Some(&**note),
+                    _ => None,
+                })
+                .collect();
+            let notes = store.notes(Some("p")).expect("notes");
+            assert_eq!(notes.len(), before + kept.len(), "{both:?}");
+            let stored = store.proposal(&id).expect("read").expect("the proposal");
+            let replaced = notes.iter().find(|n| n.id == "not_old").expect("old");
+            if let Some(note) = kept.first() {
+                assert_eq!(kept.len(), 1, "at most one new note: {both:?}");
+                assert_eq!(stored.state, State::Accepted);
+                assert_eq!(stored.note.as_deref(), Some(note.id.as_str()));
+                assert_eq!(replaced.superseded_by.as_deref(), Some(note.id.as_str()));
+                assert_eq!(note.source.message, "msg_1");
+            } else {
+                assert!(both.contains(&Decided::Dismissed), "{both:?}");
+                assert_eq!(stored.state, State::Dismissed);
+                assert_eq!(
+                    replaced.superseded_by, None,
+                    "dismissed, it replaces nothing"
+                );
+            }
+        }
+        assert_eq!(
+            store.keep_proposal("prp_none", None, "not_x", 5),
+            Ok(Decided::Missing)
+        );
+        assert_eq!(store.dismiss_proposal("prp_none"), Ok(Decided::Missing));
     }
 }

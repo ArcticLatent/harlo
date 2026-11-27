@@ -44,10 +44,28 @@ pub fn just_before(next: &str) -> Option<String> {
     Some(with_value(prefix, value))
 }
 
-fn make(prefix: &str, descending: bool) -> String {
-    let millis = SystemTime::now()
+/// A mark that sorts before every ascending ID with `prefix` made from
+/// this millisecond on, by this process or another.
+///
+/// An ID of [`ascending_id`] can't be such a mark: one that another
+/// process makes in the same millisecond may sort before it.
+#[must_use]
+pub fn from_now(prefix: &str) -> String {
+    // (The counter of an ID starts at one, so none of this millisecond
+    // has a time-and-counter part this small.)
+    let value = now_millis().wrapping_mul(0x1000) & 0xffff_ffff_ffff;
+    format!("{prefix}_{value:0TIME_DIGITS$x}")
+}
+
+/// The time, in milliseconds since 1970.
+fn now_millis() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+fn make(prefix: &str, descending: bool) -> String {
+    let millis = now_millis();
     let counter = {
         let mut last = LAST
             .lock()
@@ -95,5 +113,18 @@ mod tests {
         let before = just_before(&b).expect("before");
         assert!(before < b && before.len() == b.len(), "{before} before {b}");
         assert_eq!(just_before("msg_000000000000abc"), None);
+    }
+
+    #[test]
+    fn a_mark_sorts_before_what_is_made_from_then_on_and_after_what_was() {
+        let earlier = ascending_id("msg");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let mark = from_now("msg");
+        let later = ascending_id("msg");
+        assert!(earlier < mark && mark < later, "{earlier} {mark} {later}");
+        // Whatever another process draws in the same millisecond, with
+        // its own counter at one: the mark is its ID's beginning.
+        let same_time = format!("{}1{}", &mark[..mark.len() - 1], "0".repeat(14));
+        assert!(mark < same_time, "{mark} {same_time}");
     }
 }

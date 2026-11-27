@@ -25,6 +25,8 @@ use crate::stats::day;
 
 /// The setting that turns notes on.
 const SETTING: &str = "memory";
+/// The setting that says from which message on notes are on.
+const ON_FROM: &str = "memory/from";
 /// The most messages a search lists.
 const HITS: usize = 20;
 /// The most sessions a search lists by title: the newest that match.
@@ -80,11 +82,40 @@ impl Server {
     }
 
     /// Turns notes on or off.
+    ///
+    /// Turned on, it is noted from which message on notes are on (see
+    /// [`Self::memory_from`]). A change is counted, so work begun before
+    /// it can tell (see [`Self::memory_changes`]).
     pub(crate) fn set_memory(&self, on: bool) -> Result<(), Refusal> {
-        self.store
-            .put_setting(SETTING, if on { "on" } else { "off" })?;
+        {
+            // (Held while it changes: what reads the switch with the count
+            // under this lock sees both or neither.)
+            let mut live = crate::server::lock(&self.live);
+            let was = self.memory_on();
+            if on && !was {
+                self.store
+                    .put_setting(ON_FROM, &harlo_engine::from_now("msg"))?;
+            }
+            self.store
+                .put_setting(SETTING, if on { "on" } else { "off" })?;
+            if on != was {
+                live.memory_changes += 1;
+            }
+        }
         self.refresh_prompts();
         Ok(())
+    }
+
+    /// The mark that sorts before the ID of every message written since
+    /// notes were last turned on; none when they never were turned on
+    /// here.
+    ///
+    /// What was said before it was said with notes off, or before a time
+    /// they were off, and is never read for notes to propose. The mark is
+    /// good to the millisecond: a message written in the very one notes
+    /// were turned on in counts as written after.
+    pub(crate) fn memory_from(&self) -> Option<String> {
+        self.store.setting(ON_FROM).ok().flatten()
     }
 
     /// The user's notes and `project`'s, replaced ones included.

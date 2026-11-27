@@ -51,7 +51,7 @@ pub use config::{
     project_config_files, read_config_document,
 };
 pub use error::Error;
-pub use id::{ascending_id, descending_id, just_before};
+pub use id::{ascending_id, descending_id, from_now, just_before};
 pub use message::{
     Assistant, Cache, Created, ErrorInfo, Message, Part, ShellOutput, ShellRun, ShellTime,
     Snapshot, StepTime, Tokens, ToolState, ToolTime,

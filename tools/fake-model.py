@@ -39,14 +39,20 @@ part of an answer). The transcript then shows the prompt a person would
 type.
 
 A goal's reviewer (/goal) gets the verdict kept in scripts.json under
-"<reviewer>", or one that finds the goal met. The agent's first prompt
+"<reviewer>", or one that finds the goal met; a list there gives one
+verdict after another, its last entry from then on. The agent's first prompt
 for a goal runs the script kept under "<goal>", when there is one; a
 round the reviewer sends it back for runs "<round>", and a goal taken up
 again runs "<resume>".
 
 A request to propose notes from a stretch of a session gets the JSON kept
 in scripts.json under "<notes>", or "[]". In it, {person} stands for the
-ID of the last message of the person's in the stretch.
+ID of the last message of the person's in the stretch, and {follow_up}
+for that of the last goal follow-up in it. A list under
+"<notes>" answers one request after another, its last entry from then on.
+"<notes_wait>" holds how many milliseconds pass before such a request is
+answered: one number for all, or a list for one request after another
+(none for the requests past its end).
 
 When the steps run out, the reply is "done.". A message without a
 script gets "ok.". A request to summarize the conversation (compaction)
@@ -176,12 +182,27 @@ def plan(messages):
         return [("say", first.splitlines()[0] if first else "New session")]
     if script.startswith(PROPOSE):
         stretch = script.partition("<transcript>")[2]
-        people = [line.split("(", 1)[1].split(")", 1)[0] for line in stretch.splitlines()
-                  if line.startswith("Person (msg_")]
+        def named(who):
+            ids = [line.split("(", 1)[1].split(")", 1)[0] for line in stretch.splitlines()
+                   if line.startswith(who + " (msg_")]
+            return ids[-1] if ids else ""
+        asked = NOTES["asked"]
+        NOTES["asked"] += 1
         answer = stored_scripts().get("<notes>", "[]")
-        return [("say", answer.replace("{person}", people[-1] if people else ""))]
+        if isinstance(answer, list):
+            answer = answer[min(asked, len(answer) - 1)] if answer else "[]"
+        wait = stored_scripts().get("<notes_wait>", 0)
+        if isinstance(wait, list):
+            wait = wait[asked] if asked < len(wait) else 0
+        answer = answer.replace("{person}", named("Person"))
+        return [("wait", str(wait)), ("say", answer.replace("{follow_up}", named("Goal follow-up")))]
     if script.startswith((REVIEWER, HARLO_REVIEWER)):
-        return [("say", stored_scripts().get("<reviewer>", MET))]
+        verdict = stored_scripts().get("<reviewer>", MET)
+        if isinstance(verdict, list):
+            asked = NOTES["reviewed"]
+            NOTES["reviewed"] += 1
+            verdict = verdict[min(asked, len(verdict) - 1)] if verdict else MET
+        return [("say", verdict)]
     for preamble in (SUBAGENT_PREAMBLE, HARLO_SUBAGENT_PREAMBLE):
         if script.startswith(preamble):
             script = script[len(preamble) :].strip()
@@ -271,6 +292,9 @@ def pieces(text, size=24):
 
 # How many requests each flaky step has had, by its request's last message.
 FLAKY = {}
+# How many requests to propose notes were answered, and how many verdicts
+# of a goal's reviewer were given from a list.
+NOTES = {"asked": 0, "reviewed": 0}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -304,6 +328,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         messages = body.get("messages", []) if wire == "chat/completions" else as_chat(body, path)
         parts = plan(messages)
+        # (An answer that is held back: the request is already logged.)
+        held = sum(int(rest) for word, rest in parts if word == "wait")
+        if held:
+            time.sleep(held / 1000)
+        parts = [part for part in parts if part[0] != "wait"]
         failed = next((rest for word, rest in parts if word == "fail"), None)
         flaky = next((rest for word, rest in parts if word == "flaky"), None)
         if flaky is not None:

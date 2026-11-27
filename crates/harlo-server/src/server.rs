@@ -108,8 +108,11 @@ pub(crate) struct Live {
     pub(crate) ptys: HashMap<String, Arc<crate::pty::Terminal>>,
     /// Where random web searches stand.
     pub(crate) searches: crate::search::Searches,
-    /// The sessions being read for notes to propose.
-    pub(crate) proposing: std::collections::HashSet<String>,
+    /// The sessions being read for notes to propose, each with whether
+    /// it went idle again meanwhile and is to be read once more.
+    pub(crate) proposing: HashMap<String, bool>,
+    /// How often notes were turned on or off since the server started.
+    pub(crate) memory_changes: u64,
     /// The parts of sessions' system prompts that are held still, by
     /// session.
     steady: HashMap<String, Steady>,
